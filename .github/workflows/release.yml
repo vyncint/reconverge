@@ -81,6 +81,10 @@ jobs:
             }
             flags=""
           fi
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          echo "publishing version $version"
+
           for crate in \
             reconverge-artifacts \
             reconverge-core \
@@ -91,11 +95,17 @@ jobs:
             cargo-reconverge
           do
             echo "::group::$crate"
-            if [ "$DRY_RUN" = "true" ]; then
-              cargo publish $flags -p "$crate" || {
+            # Publishing is resumable: crates.io rate-limits new crates, so a
+            # first release can stop partway through. Anything already on the
+            # index at this version is skipped rather than re-uploaded.
+            if curl -sfI -H "User-Agent: reconverge-release" \
+                 "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
+              echo "$crate $version is already published — skipping"
+            elif [ "$DRY_RUN" = "true" ]; then
+              cargo publish --dry-run -p "$crate" || {
                 echo "::warning::$crate could not be verified yet — its \
-                  dependencies are not on the index until an earlier crate \
-                  in this list is actually published"
+                  dependencies reach the index only once an earlier crate in \
+                  this list is actually published"
               }
             else
               cargo publish -p "$crate"
