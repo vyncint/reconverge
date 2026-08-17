@@ -10,6 +10,20 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.1] — 2026-08-17
+
+Packaging only; no behavior changes.
+
+- The explain pages and the learn-mode lessons now live inside the crates
+  that embed them (`cargo-reconverge/explain/`, `reconverge-tui/lessons/`)
+  rather than in `docs/`. `include_str!` cannot reach outside a package
+  directory, so the published crates would not have compiled without this.
+  `docs/explain/` and `docs/learn/` remain as indexes.
+- The recorded replays the lessons step through are copies of
+  `fixtures/witness/`, with a test that fails if the two drift apart.
+- Workspace crates carry version requirements on their path dependencies,
+  and publishing is enabled.
+
 ## [0.1.0] — 2026-08-17
 
 First public release. The analysis, the four terminal views, and the CI
@@ -57,4 +71,5 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.1]: https://github.com/vyncint/reconverge/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vyncint/reconverge/releases/tag/v0.1.0

@@ -1,11 +1,8 @@
 //! `--explain RCxxx`: print the explain page for a diagnostic code.
 //!
-//! Pages live in `docs/explain/` and are embedded at build time, so
-//! `--explain` works offline, exactly as shipped.
-//!
-//! TODO(phase-r): `include_str!` reaches outside the package directory,
-//! which `cargo package` cannot ship; before publishing, mirror the pages
-//! into OUT_DIR from a build script or move the canonical copies in-crate.
+//! The pages live in this crate's `explain/` directory and are embedded at
+//! build time, so `--explain` works offline, exactly as shipped — and so
+//! they travel with the crate when it is published.
 
 struct Page {
     code: &'static str,
@@ -15,23 +12,23 @@ struct Page {
 const PAGES: &[Page] = &[
     Page {
         code: "RC001",
-        text: include_str!("../../../docs/explain/RC001.md"),
+        text: include_str!("../explain/RC001.md"),
     },
     Page {
         code: "RC002",
-        text: include_str!("../../../docs/explain/RC002.md"),
+        text: include_str!("../explain/RC002.md"),
     },
     Page {
         code: "RC003",
-        text: include_str!("../../../docs/explain/RC003.md"),
+        text: include_str!("../explain/RC003.md"),
     },
     Page {
         code: "RC004",
-        text: include_str!("../../../docs/explain/RC004.md"),
+        text: include_str!("../explain/RC004.md"),
     },
     Page {
         code: "RC005",
-        text: include_str!("../../../docs/explain/RC005.md"),
+        text: include_str!("../explain/RC005.md"),
     },
 ];
 

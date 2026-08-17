@@ -11,12 +11,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/vyncint/reconverge"
-# Every crate stays unpublished until Phase R (human-confirmed).
-publish = false
+# Published to crates.io; releases are cut by hand, never on push.
+publish = true
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

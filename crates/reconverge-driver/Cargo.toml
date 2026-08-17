@@ -8,8 +8,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-reconverge-core = { path = "../reconverge-core" }
-reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide" }
-reconverge-witness = { path = "../reconverge-witness" }
-reconverge-artifacts = { path = "../reconverge-artifacts" }
+reconverge-core = { path = "../reconverge-core", version = "0.1.1" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.1.1" }
+reconverge-witness = { path = "../reconverge-witness", version = "0.1.1" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.1" }
 serde_json = { workspace = true }

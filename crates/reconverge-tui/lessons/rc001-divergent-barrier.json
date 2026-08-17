@@ -1,0 +1,136 @@
+{
+  "schema": "witness.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "kernel": "divergent_barrier",
+  "finding": {
+    "code": "RC001",
+    "span": {
+      "file": "src/lib.rs",
+      "line_start": 22,
+      "column_start": 9,
+      "line_end": 22,
+      "column_end": 31
+    }
+  },
+  "launch": {
+    "grid": [1, 1, 1],
+    "block": [32, 1, 1],
+    "warp": 0
+  },
+  "lanes": 32,
+  "initial_lane_states": [
+    "active", "active", "active", "active", "active", "active", "active", "active",
+    "active", "active", "active", "active", "active", "active", "active", "active",
+    "active", "active", "active", "active", "active", "active", "active", "active",
+    "active", "active", "active", "active", "active", "active", "active", "active"
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "statement": "_4 = cuda_device::__internal::index_1d(&_3)",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 20,
+        "column_start": 13,
+        "line_end": 20,
+        "column_end": 30
+      },
+      "lane_changes": []
+    },
+    {
+      "index": 1,
+      "statement": "_6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 21,
+        "column_start": 8,
+        "line_end": 21,
+        "column_end": 24
+      },
+      "lane_changes": []
+    },
+    {
+      "index": 2,
+      "statement": "switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 21,
+        "column_start": 5,
+        "line_end": 23,
+        "column_end": 5
+      },
+      "lane_changes": []
+    },
+    {
+      "index": 3,
+      "statement": "_8 = cuda_device::sync_threads()",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 22,
+        "column_start": 9,
+        "line_end": 22,
+        "column_end": 31
+      },
+      "lane_changes": [
+        { "lane": 0, "state": "waiting" },
+        { "lane": 2, "state": "waiting" },
+        { "lane": 4, "state": "waiting" },
+        { "lane": 6, "state": "waiting" },
+        { "lane": 8, "state": "waiting" },
+        { "lane": 10, "state": "waiting" },
+        { "lane": 12, "state": "waiting" },
+        { "lane": 14, "state": "waiting" },
+        { "lane": 16, "state": "waiting" },
+        { "lane": 18, "state": "waiting" },
+        { "lane": 20, "state": "waiting" },
+        { "lane": 22, "state": "waiting" },
+        { "lane": 24, "state": "waiting" },
+        { "lane": 26, "state": "waiting" },
+        { "lane": 28, "state": "waiting" },
+        { "lane": 30, "state": "waiting" }
+      ],
+      "barrier": {
+        "arrived": 16,
+        "expected": 32
+      }
+    },
+    {
+      "index": 4,
+      "statement": "return — the odd lanes leave the kernel without ever reaching the barrier",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 27,
+        "column_start": 1,
+        "line_end": 27,
+        "column_end": 2
+      },
+      "lane_changes": [
+        { "lane": 1, "state": "exited" },
+        { "lane": 3, "state": "exited" },
+        { "lane": 5, "state": "exited" },
+        { "lane": 7, "state": "exited" },
+        { "lane": 9, "state": "exited" },
+        { "lane": 11, "state": "exited" },
+        { "lane": 13, "state": "exited" },
+        { "lane": 15, "state": "exited" },
+        { "lane": 17, "state": "exited" },
+        { "lane": 19, "state": "exited" },
+        { "lane": 21, "state": "exited" },
+        { "lane": 23, "state": "exited" },
+        { "lane": 25, "state": "exited" },
+        { "lane": 27, "state": "exited" },
+        { "lane": 29, "state": "exited" },
+        { "lane": 31, "state": "exited" }
+      ]
+    }
+  ],
+  "verdict": {
+    "kind": "undefined-behavior",
+    "message": "16 of 32 lanes wait at the barrier while the other 16 have exited; the barrier can never be satisfied — undefined behavior on hardware, usually a permanent hang",
+    "step": 4
+  }
+}

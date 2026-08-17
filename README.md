@@ -5,12 +5,12 @@
 > why, lane by lane, in your terminal. **No GPU required.**
 
 ![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![version: 0.1.0](https://img.shields.io/badge/version-0.1.0-blue)
+![version: 0.1.1](https://img.shields.io/badge/version-0.1.1-blue)
 ![toolchain: nightly-2026-04-03](https://img.shields.io/badge/toolchain-nightly--2026--04--03-orange)
 ![GPU: not required](https://img.shields.io/badge/GPU-not%20required-brightgreen)
 [![CI](https://github.com/vyncint/reconverge/actions/workflows/ci.yml/badge.svg)](https://github.com/vyncint/reconverge/actions/workflows/ci.yml)
 
-> **Status: v0.1.0, the first public release.** The analysis, the four
+> **Status: v0.1.1.** The analysis, the four
 > terminal views, and the CI integration are complete and tested. Not yet on
 > crates.io — build it from source. Works with kernels written using
 > [cuda-oxide](https://github.com/NVlabs/cuda-oxide).
@@ -146,11 +146,11 @@ on a laptop, in a container, with no driver installed.
 
 | Code | Tier | Finding | Explain |
 |---|---|---|---|
-| `RC001` | confirmed / warning | `sync_threads()` reachable under thread-divergent control | [read](docs/explain/RC001.md) |
-| `RC002` | confirmed / warning | warp collective at a non-convergent point, or a mask naming absent lanes | [read](docs/explain/RC002.md) |
-| `RC003` | deny | `&mut [T]` as a `#[kernel]` parameter — one exclusive reference handed to every thread | [read](docs/explain/RC003.md) |
-| `RC004` | deny | static shared memory over the target's limit | [read](docs/explain/RC004.md) |
-| `RC005` | warning | launch-contract inconsistency | [read](docs/explain/RC005.md) |
+| `RC001` | confirmed / warning | `sync_threads()` reachable under thread-divergent control | [read](crates/cargo-reconverge/explain/RC001.md) |
+| `RC002` | confirmed / warning | warp collective at a non-convergent point, or a mask naming absent lanes | [read](crates/cargo-reconverge/explain/RC002.md) |
+| `RC003` | deny | `&mut [T]` as a `#[kernel]` parameter — one exclusive reference handed to every thread | [read](crates/cargo-reconverge/explain/RC003.md) |
+| `RC004` | deny | static shared memory over the target's limit | [read](crates/cargo-reconverge/explain/RC004.md) |
+| `RC005` | warning | launch-contract inconsistency | [read](crates/cargo-reconverge/explain/RC005.md) |
 
 `RC006`/`RC007` (coalescing and bank-conflict lints) are reserved for v1.1.
 Every code has an explain page you can read in the terminal:
