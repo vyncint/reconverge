@@ -5,15 +5,14 @@
 > why, lane by lane, in your terminal. **No GPU required.**
 
 ![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![version: 0.1.1](https://img.shields.io/badge/version-0.1.1-blue)
+[![crates.io](https://img.shields.io/crates/v/cargo-reconverge.svg)](https://crates.io/crates/cargo-reconverge)
 ![toolchain: nightly-2026-04-03](https://img.shields.io/badge/toolchain-nightly--2026--04--03-orange)
 ![GPU: not required](https://img.shields.io/badge/GPU-not%20required-brightgreen)
 [![CI](https://github.com/vyncint/reconverge/actions/workflows/ci.yml/badge.svg)](https://github.com/vyncint/reconverge/actions/workflows/ci.yml)
 
-> **Status: v0.1.1.** The analysis, the four
-> terminal views, and the CI integration are complete and tested. Not yet on
-> crates.io — build it from source. Works with kernels written using
-> [cuda-oxide](https://github.com/NVlabs/cuda-oxide).
+> The analysis, the four terminal views, and the CI integration are
+> complete and tested, and every crate is on crates.io. Works with kernels
+> written using [cuda-oxide](https://github.com/NVlabs/cuda-oxide).
 
 ## The problem
 
@@ -219,6 +218,26 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 
 An [asciinema recording](docs/demo/witness-debugger.cast) of the debugger
 walking the canonical hang and the mask mismatch is in `docs/demo/`.
+
+## Install
+
+Three binaries cooperate: the CLI, the analysis driver, and the terminal
+views. Install the CLI, then let it fetch its own matching pieces:
+
+```console
+$ cargo install cargo-reconverge
+$ cargo reconverge setup
+```
+
+`setup` installs the pinned nightly toolchain — a rustc-driver tool must be
+built by the exact rustc it wraps — and `reconverge-driver` +
+`reconverge-tui` at the CLI's own version, printing every command before it
+runs. Prefer to do it yourself? The equivalent is:
+
+```console
+$ rustup toolchain install nightly-2026-04-03 --profile minimal --component rustc-dev --component llvm-tools
+$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver reconverge-tui
+```
 
 ## Using it
 

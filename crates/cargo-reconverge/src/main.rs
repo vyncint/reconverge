@@ -1,8 +1,7 @@
 //! `cargo reconverge` — the reconverge CLI.
 //!
-//! `check` runs the analysis and owns the exit-code contract (README.md
-//! §7): 0 = clean, 1 = findings at deny/confirmed confidence, 2 = tool
-//! error. `--explain` prints a diagnostic's page; the rest are launchers
+//! `check` runs the analysis and owns the exit-code contract: 0 = clean,
+//! 1 = findings at deny/confirmed confidence, 2 = tool error. `--explain` prints a diagnostic's page; the rest are launchers
 //! and loops around that one analysis — `inspect`, `witness`, `learn`, and
 //! `triage` hand artifacts to the TUI, and `watch` re-runs `check` on
 //! every save.
@@ -20,6 +19,7 @@ mod learn_cmd;
 mod render;
 mod review;
 mod sarif;
+mod setup_cmd;
 mod triage_cmd;
 mod watch_cmd;
 mod witness_cmd;
@@ -30,6 +30,9 @@ const USAGE: &str = "\
 cargo-reconverge: static reconvergence analysis for Rust GPU kernels
 
 Usage:
+  cargo reconverge setup               install the matching reconverge-driver
+                                       and reconverge-tui (run once after
+                                       `cargo install cargo-reconverge`)
   cargo reconverge check [OPTIONS]     analyze the current project
   cargo reconverge inspect [--ascii]   browse the last check's uniformity
                                        map and findings in the Inspector
@@ -114,6 +117,19 @@ fn run(args: &[String]) -> u8 {
         },
         Some("inspect") => match inspect::InspectOptions::parse(&rest[1..]) {
             Ok(options) => match inspect::run(&options) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    2
+                }
+            },
+            Err(err) => {
+                eprintln!("error: {err}\n\n{USAGE}");
+                2
+            }
+        },
+        Some("setup") => match setup_cmd::SetupOptions::parse(&rest[1..]) {
+            Ok(options) => match setup_cmd::run(&options) {
                 Ok(code) => code,
                 Err(err) => {
                     eprintln!("error: {err}");
@@ -236,6 +252,11 @@ mod tests {
     #[test]
     fn learn_rejects_bad_flags_as_tool_error() {
         assert_eq!(run(&argv(&["reconverge", "learn", "--bogus"])), 2);
+    }
+
+    #[test]
+    fn setup_rejects_arguments_as_tool_error() {
+        assert_eq!(run(&argv(&["reconverge", "setup", "--bogus"])), 2);
     }
 
     #[test]
