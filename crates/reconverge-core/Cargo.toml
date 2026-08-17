@@ -1,0 +1,8 @@
+[package]
+name = "reconverge-core"
+description = "Dialect-agnostic divergence analysis engine for SIMT kernels (MIR dataflow)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

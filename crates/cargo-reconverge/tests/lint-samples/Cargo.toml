@@ -1,0 +1,14 @@
+[package]
+name = "lint-samples"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone: deliberately not a member of the reconverge workspace. The
+# CLI tests compile this crate through `cargo reconverge check` exactly the
+# way an end user's kernel crate would be compiled.
+[workspace]
+
+[dependencies]
+# Same pinned rev as the driver's sample crate; conformance/PIN records it.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }

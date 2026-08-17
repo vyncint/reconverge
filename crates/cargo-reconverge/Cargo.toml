@@ -1,0 +1,18 @@
+[package]
+name = "cargo-reconverge"
+description = "Cargo subcommand for reconverge: static reconvergence analysis for Rust GPU kernels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reconverge-artifacts = { path = "../reconverge-artifacts" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Same pin as reconverge-tui (see its Cargo.toml for the pinning policy):
+# the end-to-end tests drive the TUI subcommands through a PTY.
+termlens = { git = "https://github.com/vyncint/termlens", rev = "ecad6dacffff7605cd42cdeeca8631f223900479", default-features = false }

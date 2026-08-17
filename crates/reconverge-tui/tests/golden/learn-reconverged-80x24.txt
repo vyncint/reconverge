@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge learn ────────────────────────────────────────────────────────────┐
+│lesson 4/4 — reconvergence — the fix — page 2/3                               │
+│                                                                              │
+│The barriers-lesson kernel, fixed: the branch does its per-lane work,         │
+│the paths rejoin, and only then comes `sync_threads()`. Step with l —         │
+│the warp splits at the switch, becomes whole at the join, all 32 lanes        │
+│arrive at the barrier together, it releases, and the verdict says             │
+│completed. This is the shape that cannot hang.                                │
+│                                                                              │
+│    if i.get() % 2 == 0 {                                                     │
+│        // per-lane work, no barrier in here                                  │
+│    }                                                                         │
+│    // the paths rejoin at the branch's post-dominator                        │
+│    thread::sync_threads(); // every lane arrives                             │
+│                                                                              │
+│                                                                              │
+│replay — step 5/5  [====>]                                                    │
+│          0        8        16       24                                       │
+│lanes     ........ ........ ........ ........                                 │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│the barrier is satisfied and releases every thread; the kernel returns        │
+│verdict: completed — all 32 lanes reconverged at the branch's post-dominator …│
+└ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────┘

@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge learn ────────────────────────────────────────────────────────────┐
+│lesson 2/4 — barriers — why a divergent sync hangs — page 2/3                 │
+│                                                                              │
+│Watch it happen: the barrier sits inside `if i.get() % 2 == 0`, so only       │
+│the even lanes can ever reach it. Step with l — the even lanes park at        │
+│the barrier (W), the odd lanes walk past the branch and leave the kernel      │
+│(.), and the verdict lands: sixteen waiting for sixteen that no longer        │
+│exist. Undefined behavior; on hardware it usually hangs until a watchdog      │
+│kills the kernel.                                                             │
+│                                                                              │
+│    let i = thread::index_1d();                                               │
+│    if i.get() % 2 == 0 {                                                     │
+│        thread::sync_threads(); // <- RC001                                   │
+│    }                                                                         │
+│                                                                              │
+│                                                                              │
+│replay — step 5/5  [====>]                                                    │
+│          0        8        16       24                                       │
+│lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                 │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│return — the odd lanes leave the kernel without ever reaching the barrier     │
+│verdict: undefined behavior — 16 of 32 lanes wait at the barrier while the ot…│
+└ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────┘

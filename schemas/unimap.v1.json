@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/unimap.v1.json",
+  "title": "unimap.v1",
+  "description": "Uniformity-map artifact, one document per analyzed crate: per function, values with uniformity labels and divergence sources, provenance edges, CFG blocks with divergent-control bits, and source-span mapping. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::unimap is the Rust binding; fixtures/unimap/ are the API tests.",
+  "type": "object",
+  "required": ["schema", "tool", "crate", "functions"],
+  "properties": {
+    "schema": { "const": "unimap.v1" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "crate": { "type": "string" },
+    "functions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/function" }
+    }
+  },
+  "$defs": {
+    "function": {
+      "type": "object",
+      "required": ["name", "item", "span", "values", "provenance", "blocks"],
+      "properties": {
+        "name": { "type": "string", "description": "User-facing name (kernel base name for kernels)." },
+        "item": { "type": "string", "description": "Fully qualified item path." },
+        "span": { "$ref": "#/$defs/span" },
+        "coverage": {
+          "type": "object",
+          "description": "Coverage honesty (docs/ARCHITECTURE.md): how much of the body the analysis actually saw.",
+          "required": ["analyzed_statements", "opaque_statements"],
+          "properties": {
+            "analyzed_statements": { "type": "integer", "minimum": 0 },
+            "opaque_statements": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "uniformity", "span"],
+            "properties": {
+              "id": { "type": "string", "description": "Stable value id within the function, e.g. \"v3\"." },
+              "name": { "type": "string", "description": "Source-level name, when one exists." },
+              "uniformity": { "enum": ["uniform", "divergent"] },
+              "source": {
+                "enum": [
+                  "thread-index",
+                  "kernel-param",
+                  "block-index",
+                  "constant",
+                  "divergent-load",
+                  "atomic-return",
+                  "divergent-phi",
+                  "derived"
+                ],
+                "description": "Why the value has its label (divergence source or uniform origin)."
+              },
+              "span": { "$ref": "#/$defs/span" }
+            }
+          }
+        },
+        "provenance": {
+          "type": "array",
+          "description": "Def→use edges: `to` is derived from `from`.",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "what": { "type": "string", "description": "Human-readable description of the derivation." }
+            }
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "divergent_control"],
+            "properties": {
+              "id": { "type": "string", "description": "Basic-block id, e.g. \"bb0\"." },
+              "divergent_control": { "type": "boolean", "description": "True when the block executes under thread-divergent control." },
+              "span": { "$ref": "#/$defs/span" },
+              "values": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "description": "1-based lines and columns, end-inclusive.",
+      "required": ["file", "line_start", "column_start", "line_end", "column_end"],
+      "properties": {
+        "file": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "column_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "column_end": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

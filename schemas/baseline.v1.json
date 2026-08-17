@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/baseline.v1.json",
+  "title": "baseline.v1",
+  "description": "Baseline document: findings that were reviewed and deliberately accepted, each with a written reason. Maintained by `cargo reconverge triage` and applied by `check` to display and to the exit code; the analysis engine never reads it, so findings.v1 stays a faithful record of what was found. Entries match on (crate, kernel, code) and deliberately not on line numbers, which move on the first edit above a finding. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::baseline is the Rust binding; fixtures/baseline/ are the API tests.",
+  "type": "object",
+  "required": ["schema", "tool", "entries"],
+  "properties": {
+    "schema": { "const": "baseline.v1" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["crate", "code", "reason"],
+      "properties": {
+        "crate": {
+          "type": "string",
+          "description": "Analyzed crate the suppressed finding belongs to."
+        },
+        "kernel": {
+          "type": "string",
+          "description": "Kernel the finding is about; absent for crate-level findings, and an entry without a kernel never covers a finding with one."
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^RC[0-9]{3}$",
+          "description": "Diagnostic code. One entry covers every finding of this code in this kernel."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the finding is accepted. Required: a suppression without a reason is the silent debt this file exists to prevent."
+        }
+      }
+    }
+  }
+}

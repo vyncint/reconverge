@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # workflow_dispatch and schedule exist for the macOS job (see below); the
+  # Linux gates simply run again on those events.
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo test --workspace
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: ./scripts/check-isolation.sh
+
+  # Zero-FP gate: upstream's example kernels through the tool, diffed
+  # against the reviewed baseline (conformance/EXPECTED). Any new finding
+  # on conformance fails CI. The mutation corpus then reuses the same
+  # extraction and baseline: labeled bug injections, precision must stay
+  # 1.0 and the published table (conformance/MUTATION.md) must match.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: ./scripts/run-conformance.sh
+      - run: ./scripts/run-mutation-corpus.sh
+
+  # The TUI suite is the reason macOS runs at all: terminal behavior is
+  # where the platforms actually differ.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # The single required status check: green iff every Linux gate is green.
+  required-green:
+    name: required-green
+    if: always()
+    needs: [fmt, clippy, test, docs, deny, isolation, conformance]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every gate succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "gate results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "a required gate did not succeed" >&2
+              exit 1
+            fi
+          done

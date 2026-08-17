@@ -1,0 +1,68 @@
+# Release scaffold — INACTIVE BY DESIGN.
+# Publishing is a deliberate, human-run step. Do not automate it.
+#
+# Notes:
+# - Every crate carries `publish = false`, so the dry-run job fails by
+#   design until that is lifted on purpose: that is the guard working,
+#   not a bug.
+# - Publish order matters: artifacts → core → dialect → witness → driver →
+#   tui → cargo-reconverge.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to build (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: cargo build --release -p cargo-reconverge
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cargo-reconverge-${{ inputs.tag }}-${{ matrix.os }}
+          path: target/release/cargo-reconverge
+
+  publish-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - name: cargo publish --dry-run, in dependency order
+        run: |
+          for crate in \
+            reconverge-artifacts \
+            reconverge-core \
+            reconverge-dialect-oxide \
+            reconverge-witness \
+            reconverge-driver \
+            reconverge-tui \
+            cargo-reconverge
+          do
+            cargo publish --dry-run -p "$crate"
+          done

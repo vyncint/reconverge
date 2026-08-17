@@ -1,0 +1,13 @@
+# Reviewed findings baseline for the conformance corpus, at the PIN rev.
+# One data line per expected finding at gating confidence (deny/confirmed):
+#   <crate>\t<code>\t<kernel>\t<confidence>
+# The runner fails on any EXTRA finding (a false positive) and on any
+# MISSING line (a detection regression). Warning-confidence findings are
+# reported but not baselined: the release gate is zero FP at default
+# confidence.
+#
+# conformance-constant_index_from_end/write_last deliberately takes
+# `&mut [u32]` (upstream's last-element addressing test). Upstream's own
+# safety model says to treat such a kernel as unsafe, so RC003 here is a
+# reviewed true positive, not an FP.
+conformance_constant_index_from_end	RC003	write_last	deny

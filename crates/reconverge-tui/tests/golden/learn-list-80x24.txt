@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge learn ────────────────────────────────────────────────────────────┐
+│four interactive lessons, replayed from recorded witnesses — no GPU required  │
+│                                                                              │
+│> 1. divergence — how a warp splits                                           │
+│  2. barriers — why a divergent sync hangs                                    │
+│  3. masks — who joins a warp collective                                      │
+│  4. reconvergence — the fix                                                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└ j/k select  Enter open  q quit ──────────────────────────────────────────────┘

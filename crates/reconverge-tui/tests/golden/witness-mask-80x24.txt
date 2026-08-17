@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge witness ──────────────────────────────────────────────────────────┐
+│witness 2/2 — kernel `rc002_divergent_collective` — RC002 — grid (1,1,1) bloc…│
+│                                                                              │
+│          0        8        16       24                                       │
+│lanes     oWoWoWoW oWoWoWoW oWoWoWoW oWoWoWoW                                 │
+│mask      ######## ######## ######## ########  0xffffffff                     │
+│active    #.#.#.#. #.#.#.#. #.#.#.#. #.#.#.#.  0x55555555                     │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│step 3/3  [==>]                                                               │
+│_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)         │
+│at lib.rs:33                                                                  │
+│ballot_sync — named in the mask but not active: 0xaaaaaaaa                    │
+│                                                                              │
+│verdict: undefined behavior (at step 3)                                       │
+│ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are    │
+│active at the call — the named-but-absent lanes make the collective undefined;│
+│on hardware this usually never completes                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

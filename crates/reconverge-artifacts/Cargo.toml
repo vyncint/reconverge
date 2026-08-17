@@ -1,0 +1,15 @@
+[package]
+name = "reconverge-artifacts"
+description = "Typed bindings for reconverge's versioned artifact schemas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+# The schemas are JSON, and this crate writes one of them
+# (`BaselineArtifact::write_to`) so the CLI and the TUI cannot drift apart
+# on the bytes of a checked-in, human-reviewed file.
+serde_json = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "conformance-extractor"
+description = "Extracts kernel modules from pinned upstream examples into kernel-only conformance crates"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone tool: not a member of the reconverge workspace (it runs against
+# a separate upstream checkout and needs none of the workspace crates).
+[workspace]
+
+[dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+serde_json = "1"
+syn = { version = "2", features = ["full", "visit"] }

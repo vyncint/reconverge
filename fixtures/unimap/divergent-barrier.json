@@ -1,0 +1,108 @@
+{
+  "schema": "unimap.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "functions": [
+    {
+      "name": "divergent_barrier",
+      "item": "sample_kernels::cuda_oxide_codegen_v1_cuda_oxide_kernel_246e25db_divergent_barrier",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 19,
+        "column_start": 1,
+        "line_end": 27,
+        "column_end": 2
+      },
+      "coverage": {
+        "analyzed_statements": 12,
+        "opaque_statements": 0
+      },
+      "values": [
+        {
+          "id": "v0",
+          "name": "out",
+          "uniformity": "uniform",
+          "source": "kernel-param",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 19,
+            "column_start": 27,
+            "line_end": 19,
+            "column_end": 53
+          }
+        },
+        {
+          "id": "v1",
+          "name": "i",
+          "uniformity": "divergent",
+          "source": "thread-index",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 20,
+            "column_start": 9,
+            "line_end": 20,
+            "column_end": 9
+          }
+        },
+        {
+          "id": "v2",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 24
+          }
+        }
+      ],
+      "provenance": [
+        {
+          "from": "v1",
+          "to": "v2",
+          "what": "branch condition `i.get() % 2 == 0` derives from the thread-index witness"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "bb0",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 19,
+            "column_start": 1,
+            "line_end": 21,
+            "column_end": 24
+          },
+          "values": ["v0", "v1", "v2"]
+        },
+        {
+          "id": "bb1",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 22,
+            "column_start": 9,
+            "line_end": 22,
+            "column_end": 31
+          }
+        },
+        {
+          "id": "bb2",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 5,
+            "line_end": 27,
+            "column_end": 2
+          }
+        }
+      ]
+    }
+  ]
+}

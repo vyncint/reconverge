@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/findings.v1.json",
+  "title": "findings.v1",
+  "description": "Findings artifact: one document per analyzed crate. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::findings is the Rust binding; fixtures/findings/ are the API tests.",
+  "type": "object",
+  "required": ["schema", "tool", "crate", "findings"],
+  "properties": {
+    "schema": { "const": "findings.v1" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "crate": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["code", "confidence", "message", "span", "explain"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^RC[0-9]{3}$" },
+        "confidence": { "enum": ["deny", "confirmed", "warning"] },
+        "message": { "type": "string" },
+        "kernel": { "type": "string" },
+        "span": { "$ref": "#/$defs/span" },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "help": { "type": "string" },
+        "explain": { "type": "string" },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["what", "span"],
+            "properties": {
+              "what": { "type": "string" },
+              "span": { "$ref": "#/$defs/span" }
+            }
+          }
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "description": "1-based lines and columns, end-inclusive.",
+      "required": ["file", "line_start", "column_start", "line_end", "column_end"],
+      "properties": {
+        "file": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "column_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "column_end": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

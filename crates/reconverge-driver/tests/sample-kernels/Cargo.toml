@@ -1,0 +1,17 @@
+[package]
+name = "sample-kernels"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone: deliberately not a member of the reconverge workspace. The
+# driver test compiles this crate through the reconverge-driver wrapper exactly
+# the way an end user's kernel crate would be compiled.
+[workspace]
+
+[dependencies]
+# Kernel-only surface (no cuda-host): with the host feature off, #[kernel]
+# emits just the renamed no_mangle function and no host-side lookup
+# machinery. Pinned to the upstream rev recorded in conformance/PIN; moving the
+# pin into conformance/PIN.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }

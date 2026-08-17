@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/witness.v1.json",
+  "title": "witness.v1",
+  "description": "Witness artifact: a concrete 32-lane replay of one finding under one launch configuration. Lane states are delta-encoded per step (only changes are recorded), so a 10k-step trace stays small. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::witness is the Rust binding; fixtures/witness/ are the API tests.",
+  "type": "object",
+  "required": ["schema", "tool", "crate", "kernel", "launch", "lanes", "initial_lane_states", "steps", "verdict"],
+  "properties": {
+    "schema": { "const": "witness.v1" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "crate": { "type": "string" },
+    "kernel": { "type": "string", "description": "User-facing kernel name." },
+    "finding": {
+      "type": "object",
+      "description": "The finding this witness replays.",
+      "required": ["code"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^RC[0-9]{3}$" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "description": "Concrete thread configuration the search found.",
+      "required": ["grid", "block"],
+      "properties": {
+        "grid": { "$ref": "#/$defs/dim3" },
+        "block": { "$ref": "#/$defs/dim3" },
+        "warp": { "type": "integer", "minimum": 0, "description": "Index of the replayed warp within its block." }
+      }
+    },
+    "lanes": { "type": "integer", "const": 32 },
+    "initial_lane_states": {
+      "type": "array",
+      "minItems": 32,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/lane_state" }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "statement", "lane_changes"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "statement": { "type": "string", "description": "The MIR statement or terminator executed at this step." },
+          "span": { "$ref": "#/$defs/span" },
+          "lane_changes": {
+            "type": "array",
+            "description": "Delta encoding: only lanes whose state changed at this step.",
+            "items": {
+              "type": "object",
+              "required": ["lane", "state"],
+              "properties": {
+                "lane": { "type": "integer", "minimum": 0, "maximum": 31 },
+                "state": { "$ref": "#/$defs/lane_state" }
+              }
+            }
+          },
+          "barrier": {
+            "type": "object",
+            "description": "Present when this step is a barrier interaction.",
+            "required": ["arrived", "expected"],
+            "properties": {
+              "arrived": { "type": "integer", "minimum": 0 },
+              "expected": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "warp_op": {
+            "type": "object",
+            "description": "Present when this step is a warp collective.",
+            "required": ["op", "mask", "active"],
+            "properties": {
+              "op": { "type": "string", "description": "e.g. shfl_sync, ballot_sync" },
+              "mask": { "type": "string", "pattern": "^0x[0-9a-f]{8}$", "description": "Participation mask named by the call." },
+              "active": { "type": "string", "pattern": "^0x[0-9a-f]{8}$", "description": "Lanes actually active at the call site." }
+            }
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["kind", "message"],
+      "properties": {
+        "kind": { "enum": ["hang", "undefined-behavior", "completed", "no-witness"] },
+        "message": { "type": "string", "description": "Calibrated wording; hardware behavior is 'usually', never 'always'." },
+        "step": { "type": "integer", "minimum": 0, "description": "Step index where the verdict was reached." }
+      }
+    }
+  },
+  "$defs": {
+    "lane_state": { "enum": ["active", "waiting", "exited"] },
+    "dim3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "span": {
+      "type": "object",
+      "description": "1-based lines and columns, end-inclusive.",
+      "required": ["file", "line_start", "column_start", "line_end", "column_end"],
+      "properties": {
+        "file": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "column_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "column_end": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

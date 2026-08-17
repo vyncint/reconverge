@@ -1,0 +1,5 @@
+# Pinned upstream cuda-oxide commit for the conformance suite.
+# Format of the data line: "<git sha> <github repo>".
+# Bump deliberately, in lockstep with the sample-crate pins, and review the
+# baseline diff it produces (see conformance/README.md).
+a766fc2650ea8e9e56c1481698b5dfdf01c31ded NVlabs/cuda-oxide

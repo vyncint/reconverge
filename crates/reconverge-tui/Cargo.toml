@@ -1,0 +1,24 @@
+[package]
+name = "reconverge-tui"
+description = "Terminal UI for reconverge: inspector, witness debugger, learn mode, triage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# INVARIANT (docs/ARCHITECTURE.md): reconverge-artifacts is the only workspace
+# dependency the TUI may ever have; scripts/check-isolation.sh enforces it.
+reconverge-artifacts = { path = "../reconverge-artifacts" }
+ratatui = "0.30"
+serde_json = { workspace = true }
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+unicode-width = "0.2"
+
+[dev-dependencies]
+# Headless PTY harness (docs/ARCHITECTURE.md). Pinned to an exact rev — git
+# dependency until termlens publishes to crates.io; upgrade deliberately,
+# never `*`. default-features off: no insta, goldens are plain files.
+termlens = { git = "https://github.com/vyncint/termlens", rev = "ecad6dacffff7605cd42cdeeca8631f223900479", default-features = false }

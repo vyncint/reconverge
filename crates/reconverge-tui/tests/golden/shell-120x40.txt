@@ -1,0 +1,41 @@
+size: 120x40  cursor: hidden
+┌ reconverge ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│artifact shell                                                                                                        │
+│                                                                                                                      │
+│findings.v1  rc003-minimal.json  crate sample_kernels — 2 finding(s): 1 deny, 0 confirmed, 1 warning                  │
+│unimap.v1  divergent-barrier.json  crate sample_kernels — 1 function(s), 3 value(s), 2 divergent                      │
+│witness.v1  rc001-divergent-barrier.json  kernel divergent_barrier — verdict: undefined behavior at step 4 (5 steps, …│
+│                                                                                                                      │
+│views: inspect · witness · learn · triage                                                                             │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└ q quit ──────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

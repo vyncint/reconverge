@@ -1,0 +1,34 @@
+# Dependency policy (CONTRIBUTING.md). Adding a dependency whose license is
+# outside this allowlist is a stop-and-ask event (§0.4), never a quiet
+# config edit.
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+]
+# The allowlist is policy (§1.6), not a mirror of the current tree: entries
+# stay listed even while no dependency uses them yet.
+unused-allowed-license = "allow"
+
+[advisories]
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace-internal path dependencies carry no version requirement while
+# everything is publish = false; Phase R revisits this.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# termlens is a git dependency pinned to an exact rev until it publishes to
+# crates.io (docs/ARCHITECTURE.md); dual MIT/Apache-2.0.
+allow-git = ["https://github.com/vyncint/termlens"]

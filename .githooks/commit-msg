@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Repo-local soft guard, wired by `just setup` / `just hooks`
+# (git config core.hooksPath .githooks). CI enforces the same rules in
+# .github/workflows/commit-policy.yml; this hook only fails faster.
+# See CONTRIBUTING.md.
+set -euo pipefail
+
+msg_file="$1"
+# Ignore comment lines; git strips them before recording the message.
+msg="$(grep -v '^#' "$msg_file" || true)"
+
+reject() {
+  echo "commit-msg: $1" >&2
+  echo "AI assistance is welcome; AI attribution is not. Remove the trailer and recommit — you are the author of record." >&2
+  exit 1
+}
+
+if grep -qiE 'co-authored-by:[[:space:]]*.*\b(claude|anthropic|copilot|chatgpt|gpt|openai|cursor|devin|aider|codex|gemini|windsurf|jetbrains ai|amazon q|sweep|bot)\b' <<<"$msg"; then
+  reject "AI attribution trailer detected"
+fi
+if grep -qiE 'generated (with|by)\b' <<<"$msg"; then
+  reject "'generated with/by' attribution detected"
+fi
+if grep -qF '🤖' <<<"$msg"; then
+  reject "robot-emoji watermark detected"
+fi
+if grep -qiE 'noreply\.anthropic\.com' <<<"$msg"; then
+  reject "vendor noreply address detected"
+fi
+
+if ! grep -qiE '^signed-off-by: ' <<<"$msg"; then
+  echo "commit-msg: missing Signed-off-by trailer — commit with \`git commit -s\` (DCO, CONTRIBUTING.md)." >&2
+  exit 1
+fi

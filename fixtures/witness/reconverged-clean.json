@@ -1,0 +1,516 @@
+{
+  "schema": "witness.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "kernel": "convergent_barrier",
+  "launch": {
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "warp": 0
+  },
+  "lanes": 32,
+  "initial_lane_states": [
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active"
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "statement": "_4 = cuda_device::__internal::index_1d(&_3)",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 33,
+        "column_start": 13,
+        "line_end": 33,
+        "column_end": 30
+      },
+      "lane_changes": []
+    },
+    {
+      "index": 1,
+      "statement": "switchInt(i.get() % 2 == 0) \u2014 the even lanes take the branch and do their extra work; the odd lanes wait at the join",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 34,
+        "column_start": 8,
+        "line_end": 34,
+        "column_end": 25
+      },
+      "lane_changes": [
+        {
+          "lane": 1,
+          "state": "waiting"
+        },
+        {
+          "lane": 3,
+          "state": "waiting"
+        },
+        {
+          "lane": 5,
+          "state": "waiting"
+        },
+        {
+          "lane": 7,
+          "state": "waiting"
+        },
+        {
+          "lane": 9,
+          "state": "waiting"
+        },
+        {
+          "lane": 11,
+          "state": "waiting"
+        },
+        {
+          "lane": 13,
+          "state": "waiting"
+        },
+        {
+          "lane": 15,
+          "state": "waiting"
+        },
+        {
+          "lane": 17,
+          "state": "waiting"
+        },
+        {
+          "lane": 19,
+          "state": "waiting"
+        },
+        {
+          "lane": 21,
+          "state": "waiting"
+        },
+        {
+          "lane": 23,
+          "state": "waiting"
+        },
+        {
+          "lane": 25,
+          "state": "waiting"
+        },
+        {
+          "lane": 27,
+          "state": "waiting"
+        },
+        {
+          "lane": 29,
+          "state": "waiting"
+        },
+        {
+          "lane": 31,
+          "state": "waiting"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "statement": "the paths meet again at the branch's post-dominator \u2014 every lane is active before anything synchronizes",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 37,
+        "column_start": 5,
+        "line_end": 37,
+        "column_end": 6
+      },
+      "lane_changes": [
+        {
+          "lane": 1,
+          "state": "active"
+        },
+        {
+          "lane": 3,
+          "state": "active"
+        },
+        {
+          "lane": 5,
+          "state": "active"
+        },
+        {
+          "lane": 7,
+          "state": "active"
+        },
+        {
+          "lane": 9,
+          "state": "active"
+        },
+        {
+          "lane": 11,
+          "state": "active"
+        },
+        {
+          "lane": 13,
+          "state": "active"
+        },
+        {
+          "lane": 15,
+          "state": "active"
+        },
+        {
+          "lane": 17,
+          "state": "active"
+        },
+        {
+          "lane": 19,
+          "state": "active"
+        },
+        {
+          "lane": 21,
+          "state": "active"
+        },
+        {
+          "lane": 23,
+          "state": "active"
+        },
+        {
+          "lane": 25,
+          "state": "active"
+        },
+        {
+          "lane": 27,
+          "state": "active"
+        },
+        {
+          "lane": 29,
+          "state": "active"
+        },
+        {
+          "lane": 31,
+          "state": "active"
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "statement": "_9 = cuda_device::sync_threads()",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 38,
+        "column_start": 5,
+        "line_end": 38,
+        "column_end": 27
+      },
+      "lane_changes": [
+        {
+          "lane": 0,
+          "state": "waiting"
+        },
+        {
+          "lane": 1,
+          "state": "waiting"
+        },
+        {
+          "lane": 2,
+          "state": "waiting"
+        },
+        {
+          "lane": 3,
+          "state": "waiting"
+        },
+        {
+          "lane": 4,
+          "state": "waiting"
+        },
+        {
+          "lane": 5,
+          "state": "waiting"
+        },
+        {
+          "lane": 6,
+          "state": "waiting"
+        },
+        {
+          "lane": 7,
+          "state": "waiting"
+        },
+        {
+          "lane": 8,
+          "state": "waiting"
+        },
+        {
+          "lane": 9,
+          "state": "waiting"
+        },
+        {
+          "lane": 10,
+          "state": "waiting"
+        },
+        {
+          "lane": 11,
+          "state": "waiting"
+        },
+        {
+          "lane": 12,
+          "state": "waiting"
+        },
+        {
+          "lane": 13,
+          "state": "waiting"
+        },
+        {
+          "lane": 14,
+          "state": "waiting"
+        },
+        {
+          "lane": 15,
+          "state": "waiting"
+        },
+        {
+          "lane": 16,
+          "state": "waiting"
+        },
+        {
+          "lane": 17,
+          "state": "waiting"
+        },
+        {
+          "lane": 18,
+          "state": "waiting"
+        },
+        {
+          "lane": 19,
+          "state": "waiting"
+        },
+        {
+          "lane": 20,
+          "state": "waiting"
+        },
+        {
+          "lane": 21,
+          "state": "waiting"
+        },
+        {
+          "lane": 22,
+          "state": "waiting"
+        },
+        {
+          "lane": 23,
+          "state": "waiting"
+        },
+        {
+          "lane": 24,
+          "state": "waiting"
+        },
+        {
+          "lane": 25,
+          "state": "waiting"
+        },
+        {
+          "lane": 26,
+          "state": "waiting"
+        },
+        {
+          "lane": 27,
+          "state": "waiting"
+        },
+        {
+          "lane": 28,
+          "state": "waiting"
+        },
+        {
+          "lane": 29,
+          "state": "waiting"
+        },
+        {
+          "lane": 30,
+          "state": "waiting"
+        },
+        {
+          "lane": 31,
+          "state": "waiting"
+        }
+      ],
+      "barrier": {
+        "arrived": 32,
+        "expected": 32
+      }
+    },
+    {
+      "index": 4,
+      "statement": "the barrier is satisfied and releases every thread; the kernel returns",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 42,
+        "column_start": 1,
+        "line_end": 42,
+        "column_end": 2
+      },
+      "lane_changes": [
+        {
+          "lane": 0,
+          "state": "exited"
+        },
+        {
+          "lane": 1,
+          "state": "exited"
+        },
+        {
+          "lane": 2,
+          "state": "exited"
+        },
+        {
+          "lane": 3,
+          "state": "exited"
+        },
+        {
+          "lane": 4,
+          "state": "exited"
+        },
+        {
+          "lane": 5,
+          "state": "exited"
+        },
+        {
+          "lane": 6,
+          "state": "exited"
+        },
+        {
+          "lane": 7,
+          "state": "exited"
+        },
+        {
+          "lane": 8,
+          "state": "exited"
+        },
+        {
+          "lane": 9,
+          "state": "exited"
+        },
+        {
+          "lane": 10,
+          "state": "exited"
+        },
+        {
+          "lane": 11,
+          "state": "exited"
+        },
+        {
+          "lane": 12,
+          "state": "exited"
+        },
+        {
+          "lane": 13,
+          "state": "exited"
+        },
+        {
+          "lane": 14,
+          "state": "exited"
+        },
+        {
+          "lane": 15,
+          "state": "exited"
+        },
+        {
+          "lane": 16,
+          "state": "exited"
+        },
+        {
+          "lane": 17,
+          "state": "exited"
+        },
+        {
+          "lane": 18,
+          "state": "exited"
+        },
+        {
+          "lane": 19,
+          "state": "exited"
+        },
+        {
+          "lane": 20,
+          "state": "exited"
+        },
+        {
+          "lane": 21,
+          "state": "exited"
+        },
+        {
+          "lane": 22,
+          "state": "exited"
+        },
+        {
+          "lane": 23,
+          "state": "exited"
+        },
+        {
+          "lane": 24,
+          "state": "exited"
+        },
+        {
+          "lane": 25,
+          "state": "exited"
+        },
+        {
+          "lane": 26,
+          "state": "exited"
+        },
+        {
+          "lane": 27,
+          "state": "exited"
+        },
+        {
+          "lane": 28,
+          "state": "exited"
+        },
+        {
+          "lane": 29,
+          "state": "exited"
+        },
+        {
+          "lane": 30,
+          "state": "exited"
+        },
+        {
+          "lane": 31,
+          "state": "exited"
+        }
+      ]
+    }
+  ],
+  "verdict": {
+    "kind": "completed",
+    "message": "all 32 lanes reconverged at the branch's post-dominator before the barrier, so all 32 arrived and the barrier released \u2014 this is the shape that cannot hang",
+    "step": 4
+  }
+}

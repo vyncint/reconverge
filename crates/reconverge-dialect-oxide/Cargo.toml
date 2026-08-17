@@ -1,0 +1,11 @@
+[package]
+name = "reconverge-dialect-oxide"
+description = "SIMT dialect definition for kernels written using cuda-oxide"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reconverge-core = { path = "../reconverge-core" }

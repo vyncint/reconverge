@@ -1,0 +1,90 @@
+# reconverge GitHub Action: run `cargo reconverge check` on a repo.
+#
+# The action ships inside the reconverge repository itself: when a workflow
+# says `uses: vyncint/reconverge/action@<ref>`, the runner materializes the
+# whole repo at that ref, so the analyzer is built from the exact sources
+# the ref pins — no published binaries, no registry, nothing to fetch
+# beyond the action itself and the pinned Rust toolchain.
+#
+# The analyzed project is compiled with reconverge's pinned nightly
+# (exported as RUSTUP_TOOLCHAIN, overriding any toolchain file in the
+# target repo): a rustc-driver tool and the rustc it wraps must be the
+# same build. cuda-oxide projects already require this exact pin.
+name: reconverge
+description: >-
+  Static reconvergence analysis for Rust GPU kernels — catches divergent
+  barriers and non-convergent warp operations at compile time. No GPU
+  required.
+branding:
+  icon: git-merge
+  color: green
+
+inputs:
+  working-directory:
+    description: Directory of the project to analyze.
+    required: false
+    default: "."
+  cc:
+    description: >-
+      Target compute capability (X.Y, e.g. 8.6) for shared-memory capacity
+      context (RC004).
+    required: false
+    default: ""
+  strict:
+    description: >-
+      Also display warning-confidence findings ("true"/"false"). Warnings
+      never affect the exit code.
+    required: false
+    default: "false"
+  sarif:
+    description: >-
+      Path to also write a SARIF 2.1.0 report to (upload it with
+      github/codeql-action/upload-sarif in a follow-up step).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned toolchain
+      shell: bash
+      run: |
+        reconverge_root="$(cd "${GITHUB_ACTION_PATH}/.." && pwd)"
+        echo "RECONVERGE_ROOT=${reconverge_root}" >> "$GITHUB_ENV"
+        # `rustup toolchain install` inside the repo reads
+        # rust-toolchain.toml: the exact nightly plus rustc-dev/llvm-tools,
+        # which the driver needs.
+        (cd "${reconverge_root}" && rustup toolchain install)
+        toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "${reconverge_root}/rust-toolchain.toml")"
+        echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
+
+    - name: Cache the analyzer build
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.action_path }}/../target
+        # The ref key goes stale when a branch ref moves; the build step
+        # below always runs, so a stale hit only means an incremental
+        # rebuild instead of a cold one.
+        key: reconverge-action-${{ runner.os }}-${{ github.action_ref }}
+        restore-keys: |
+          reconverge-action-${{ runner.os }}-
+
+    - name: Build the analyzer
+      shell: bash
+      run: cargo build --release -p reconverge-driver -p cargo-reconverge
+      working-directory: ${{ github.action_path }}/..
+
+    - name: cargo reconverge check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        RECONVERGE_DRIVER: ${{ github.action_path }}/../target/release/reconverge-driver
+        INPUT_CC: ${{ inputs.cc }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+      run: |
+        args=()
+        if [ -n "${INPUT_CC}" ]; then args+=(--cc "${INPUT_CC}"); fi
+        if [ "${INPUT_STRICT}" = "true" ]; then args+=(--strict); fi
+        if [ -n "${INPUT_SARIF}" ]; then args+=(--sarif "${INPUT_SARIF}"); fi
+        "${RECONVERGE_ROOT}/target/release/cargo-reconverge" reconverge check "${args[@]}"

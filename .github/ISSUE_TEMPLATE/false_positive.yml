@@ -1,0 +1,40 @@
+name: False positive
+description: reconverge flagged code that is actually correct. Zero false positives at default confidence is a release requirement — this is the highest-value report you can file.
+labels: ["false-positive"]
+body:
+  - type: textarea
+    id: kernel
+    attributes:
+      label: Kernel snippet
+      description: Minimal kernel that triggers the finding.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected verdict
+      description: Why this code is correct (e.g. the branch condition is block-uniform).
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual diagnostic JSON
+      description: Output of `cargo reconverge check --message-format=json` (or the text diagnostic if JSON is unavailable).
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "`cargo reconverge --version` output"
+    validations:
+      required: true
+  - type: input
+    id: upstream-pin
+    attributes:
+      label: Upstream pin
+      description: The cuda-oxide rev you compile against (`conformance/PIN` holds the rev the suite uses).
+    validations:
+      required: true

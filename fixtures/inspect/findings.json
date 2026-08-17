@@ -1,0 +1,106 @@
+{
+  "schema": "findings.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "findings": [
+    {
+      "code": "RC005",
+      "confidence": "warning",
+      "message": "kernel `scale` calls `index_1d()` without a launch contract",
+      "kernel": "scale",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 11,
+        "column_start": 1,
+        "line_end": 11,
+        "column_end": 55
+      },
+      "notes": [
+        "without `#[launch_contract]` the launch shape is unknown, so the witness is only validated at runtime and is silently invalid on a mismatched launch — guarded writes are skipped with no error"
+      ],
+      "help": "declare `#[launch_contract(domain = 1, coordinates = u32, block = (…))]` on the kernel",
+      "explain": "RC005"
+    },
+    {
+      "code": "RC005",
+      "confidence": "warning",
+      "message": "kernel `divergent_barrier` calls `index_1d()` without a launch contract",
+      "kernel": "divergent_barrier",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 19,
+        "column_start": 1,
+        "line_end": 19,
+        "column_end": 54
+      },
+      "notes": [
+        "without `#[launch_contract]` the launch shape is unknown, so the witness is only validated at runtime and is silently invalid on a mismatched launch — guarded writes are skipped with no error"
+      ],
+      "help": "declare `#[launch_contract(domain = 1, coordinates = u32, block = (…))]` on the kernel",
+      "explain": "RC005"
+    },
+    {
+      "code": "RC001",
+      "confidence": "warning",
+      "message": "kernel `divergent_barrier` may execute `sync_threads()` under thread-divergent control",
+      "kernel": "divergent_barrier",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 22,
+        "column_start": 9,
+        "line_end": 22,
+        "column_end": 31
+      },
+      "notes": [
+        "lanes that skip the barrier never arrive, and the lanes that reach it wait for them forever — on hardware this is undefined behavior, usually a permanent hang with no error"
+      ],
+      "help": "make every thread of the block reach the barrier: hoist it out of the divergent branch, or make the branch condition uniform",
+      "explain": "RC001",
+      "provenance": [
+        {
+          "what": "thread-divergent branch",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 24
+          }
+        },
+        {
+          "what": "_7: result of `ThreadIndex::<'kernel, IndexSpace>::get` on divergent _8",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 15
+          }
+        },
+        {
+          "what": "_8: derived from divergent `i`",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 9
+          }
+        },
+        {
+          "what": "`i`: thread-index witness `index_1d()`",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 18,
+            "column_start": 1,
+            "line_end": 18,
+            "column_end": 10
+          }
+        }
+      ]
+    }
+  ]
+}

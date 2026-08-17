@@ -1,0 +1,41 @@
+size: 120x40  cursor: hidden
+┌ reconverge learn ────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│lesson 3/4 — masks — who joins a warp collective — page 2/3                                                           │
+│                                                                                                                      │
+│Watch the mismatch. The ballot below sits under `i.get() % 2 == 0` with                                               │
+│the full mask `0xffffffff`: the mask promises all 32 lanes, the branch                                                │
+│delivers 16.                                                                                                          │
+│                                                                                                                      │
+│Step with l to the collective: the mask strip names every lane (#), the                                               │
+│active strip shows who actually arrived, and the named-but-absent lanes                                               │
+│are computed for you. Sixteen promised voters never show up.                                                          │
+│                                                                                                                      │
+│    if i.get() % 2 == 0 {                                                                                             │
+│        vote = warp::ballot_sync(0xffff_ffff, true); // <- RC002                                                      │
+│    }                                                                                                                 │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│replay — step 3/3  [==>]                                                                                              │
+│          0        8        16       24                                                                               │
+│lanes     oWoWoWoW oWoWoWoW oWoWoWoW oWoWoWoW                                                                         │
+│mask      ######## ######## ######## ########  0xffffffff                                                             │
+│active    #.#.#.#. #.#.#.#. #.#.#.#. #.#.#.#.  0x55555555                                                             │
+│_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)                                                 │
+│verdict: undefined behavior — ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are active at th…│
+└ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────────────────────────────────────────────┘

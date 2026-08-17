@@ -1,0 +1,12 @@
+[package]
+name = "reconverge-witness"
+description = "Warp-accurate MIR interpreter that replays counterexample witnesses"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reconverge-artifacts = { path = "../reconverge-artifacts" }
+reconverge-core = { path = "../reconverge-core" }

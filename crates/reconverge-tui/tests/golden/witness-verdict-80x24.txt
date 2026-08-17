@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge witness ──────────────────────────────────────────────────────────┐
+│witness 1/2 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
+│                                                                              │
+│          0        8        16       24                                       │
+│lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                 │
+│mask      (not at a warp collective)                                          │
+│                                                                              │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│step 5/5  [====>]                                                             │
+│return — the odd lanes leave the kernel without ever reaching the barrier     │
+│at lib.rs:27                                                                  │
+│                                                                              │
+│                                                                              │
+│verdict: undefined behavior (at step 5)                                       │
+│16 of 32 lanes wait at the barrier while the other 16 have exited; the barrier│
+│can never be satisfied — undefined behavior on hardware, usually a permanent  │
+│hang                                                                          │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

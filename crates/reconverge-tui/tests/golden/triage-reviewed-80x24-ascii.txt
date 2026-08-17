@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
++ reconverge triage -----------------------------------------------------------+
+|2 finding(s) -- 1 suppressed -- baseline: minimal.json                        |
+|                                                                              |
+|>[s] deny      RC003 bad_mut_slice            kernel `bad_mut_slice` takes ...|
+| [ ] warning   RC005 scale                    kernel `scale` uses `index_1d...|
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|                                                                              |
+|sample_kernels RC003 -- lib.rs:4 -- accepted                                  |
+|kernel `bad_mut_slice` takes `&mut [f32]` as a parameter                      |
+|reason: reviewed: this kernel exists to demonstrate the &mut [T] hazard in ...|
+|                                                                              |
+|                                                                              |
++ j/k move  s suppress  u unsuppress  w write  q quit -------------------------+

@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
++ reconverge learn ------------------------------------------------------------+
+|lesson 1/4 -- divergence -- how a warp splits -- page 2/3                     |
+|                                                                              |
+|Below is the canonical split, replayed from a recorded witness. The           |
+|condition `i.get() % 2 == 0` depends on the thread index, so the even         |
+|lanes take the branch and the odd lanes skip it.                              |
+|                                                                              |
+|Step the replay with l and watch the strip: at the switch, one warp           |
+|becomes two groups.                                                           |
+|                                                                              |
+|    let i = thread::index_1d();                                               |
+|    if i.get() % 2 == 0 {                                                     |
+|        thread::sync_threads(); // <- RC001                                   |
+|    }                                                                         |
+|                                                                              |
+|                                                                              |
+|replay -- step 0/5  [.....]                                                   |
+|          0        8        16       24                                       |
+|lanes     oooooooo oooooooo oooooooo oooooooo                                 |
+|          o active   W waiting   . exited                                     |
+|                                                                              |
+|launch -- before the first event                                              |
+|                                                                              |
++ n/p page  h/l step  d/v jumps  Esc list  q quit -----------------------------+

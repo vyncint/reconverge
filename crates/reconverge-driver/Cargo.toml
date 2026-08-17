@@ -1,0 +1,15 @@
+[package]
+name = "reconverge-driver"
+description = "Compiler driver that runs reconverge analyses and emits versioned artifacts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+reconverge-core = { path = "../reconverge-core" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide" }
+reconverge-witness = { path = "../reconverge-witness" }
+reconverge-artifacts = { path = "../reconverge-artifacts" }
+serde_json = { workspace = true }

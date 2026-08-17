@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
++ reconverge inspect ----------------------------------------------------------+
+|kernel divergent_barrier (1/2 functions) -- 20/20 statements analyzed         |
+|lib.rs                                     values                             |
+|    9                                      >. `out` -- kernel-param           |
+|   10 #[kernel]                             D `i` -- thread-index             |
+|   11 pub fn scale(mut out: DisjointSlic... D `e` -- derived                  |
+|   12     let i = thread::index_1d();                                         |
+|   13     if let Some(e) = out.get_mut(i) {                                   |
+|   14         *e *= factor;                                                   |
+|   15     }                                                                   |
+|   16 }                                                                       |
+|   17                                      provenance of `out` (kernel-param) |
+|   18 #[kernel]                            (a source: no incoming provenance) |
+|>  19 pub fn divergent_barrier(mut out: ...                                   |
+|   20     let i = thread::index_1d();                                         |
+|   21     if i.get() % 2 == 0 {                                               |
+|   22         thread::sync_threads();                                         |
+|   23     }                                                                   |
+|   24     if let Some(e) = out.get_mut(i) {                                   |
+|   25         *e = 1;                                                         |
+|   26     }                                                                   |
+|   27 }                                                                       |
+|3 finding(s) loaded -- press n to visit them                                  |
++ j/k value  p walk  u back  n/N finding  f fn  q quit ------------------------+

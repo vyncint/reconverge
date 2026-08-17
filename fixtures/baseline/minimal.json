@@ -1,0 +1,15 @@
+{
+  "schema": "baseline.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "entries": [
+    {
+      "crate": "sample_kernels",
+      "kernel": "bad_mut_slice",
+      "code": "RC003",
+      "reason": "reviewed: this kernel exists to demonstrate the &mut [T] hazard in the docs, so the finding is the point"
+    }
+  ]
+}

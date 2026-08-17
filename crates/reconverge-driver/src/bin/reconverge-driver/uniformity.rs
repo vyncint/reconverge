@@ -1,0 +1,477 @@
+//! RC001 and the `unimap.v1` artifact, from the core engine's results.
+
+use reconverge_artifacts::findings::{Confidence, Finding, ProvenanceStep, SourceSpan};
+use reconverge_artifacts::unimap;
+use reconverge_artifacts::witness::{
+    FindingRef, LaneChange, LaneState, Launch, Step, Verdict, WitnessArtifact,
+};
+use reconverge_core::Uniformity;
+use reconverge_core::analysis::{self as engine, Analysis, ReasonKind, Summaries};
+use reconverge_core::dialect::CallKind;
+use reconverge_core::model::{FnId, FnModel, TermKind};
+use reconverge_witness::{Replay, SiteKind, ascii_warp_diagram, replay_hang};
+
+use crate::adapt::CrateModels;
+
+/// Analyze every kernel with the core engine.
+pub fn analyze_kernels(models: &CrateModels) -> Vec<(FnId, Analysis)> {
+    let summaries = Summaries::compute(&models.fns);
+    models
+        .kernels
+        .iter()
+        .map(|&id| (id, engine::analyze(&models.fns[id], &summaries)))
+        .collect()
+}
+
+fn span_of(models: &CrateModels, span_ref: usize) -> SourceSpan {
+    models.spans[span_ref].clone()
+}
+
+/// Attempt a witness replay for a direct site. On success: promote the
+/// finding to `confirmed`, add the concrete configuration and the ASCII
+/// warp diagram to its notes (they render in text and SARIF alike), and
+/// assemble the `witness.v1` artifact.
+///
+/// Interprocedural sites are never replayed: the summary bit only says the
+/// callee *may* reach a barrier or collective, which is not a concrete
+/// trace to stand behind.
+/// Everything a replay attempt needs to know about the finding's site.
+struct ReplaySite {
+    block: usize,
+    kind: SiteKind,
+    cause_span: usize,
+    /// Diagram glyph for lanes that reach the call (`W` barrier, `A`
+    /// collective).
+    arrived_glyph: char,
+}
+
+fn try_witness(
+    models: &CrateModels,
+    f: &FnModel,
+    finding: &mut Finding,
+    site: &ReplaySite,
+    witnesses: &mut Vec<WitnessArtifact>,
+) {
+    let Some(replay) = replay_hang(f, site.block, site.kind, site.cause_span) else {
+        return;
+    };
+    finding.confidence = Confidence::Confirmed;
+    finding.notes.push(format!(
+        "witness: replayed with grid ({},{},{}) x block ({},{},{}), warp 0 — {}",
+        replay.grid[0],
+        replay.grid[1],
+        replay.grid[2],
+        replay.block[0],
+        replay.block[1],
+        replay.block[2],
+        replay.verdict_message
+    ));
+    finding.notes.extend(ascii_warp_diagram(
+        replay.arrived,
+        replay.never_arrives,
+        site.arrived_glyph,
+    ));
+    witnesses.push(witness_artifact(models, f, finding, &replay));
+}
+
+fn witness_artifact(
+    models: &CrateModels,
+    f: &FnModel,
+    finding: &Finding,
+    replay: &Replay,
+) -> WitnessArtifact {
+    WitnessArtifact {
+        schema: reconverge_witness::emitted_schema().to_string(),
+        tool: reconverge_artifacts::findings::ToolInfo::current(),
+        krate: String::new(), // filled at write time with the crate name
+        kernel: f.name.clone(),
+        finding: Some(FindingRef {
+            code: finding.code.clone(),
+            span: Some(finding.span.clone()),
+        }),
+        launch: Launch {
+            grid: replay.grid,
+            block: replay.block,
+            warp: Some(0),
+        },
+        lanes: 32,
+        initial_lane_states: vec![LaneState::Active; 32],
+        steps: replay
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| Step {
+                index,
+                statement: step.statement.clone(),
+                span: step.span.map(|s| span_of(models, s)),
+                lane_changes: step
+                    .lane_changes
+                    .iter()
+                    .map(|&(lane, state)| LaneChange { lane, state })
+                    .collect(),
+                barrier: step.barrier.map(|(arrived, expected)| {
+                    reconverge_artifacts::witness::BarrierEvent { arrived, expected }
+                }),
+                warp_op: step.warp_op.as_ref().map(|(op, mask, active)| {
+                    reconverge_artifacts::witness::WarpOpEvent {
+                        op: op.clone(),
+                        mask: format!("{mask:#010x}"),
+                        active: format!("{active:#010x}"),
+                    }
+                }),
+            })
+            .collect(),
+        verdict: Verdict {
+            kind: replay.verdict_kind,
+            message: replay.verdict_message.clone(),
+            step: Some(replay.verdict_step),
+        },
+    }
+}
+
+/// RC001 (warning until a witness confirms it, per docs/ARCHITECTURE.md):
+/// a barrier reachable under thread-divergent control.
+pub fn rc001_divergent_barriers(
+    models: &CrateModels,
+    results: &[(FnId, Analysis)],
+    findings: &mut Vec<Finding>,
+    witnesses: &mut Vec<WitnessArtifact>,
+) {
+    for (fn_id, analysis) in results {
+        let f = &models.fns[*fn_id];
+        for site in &analysis.barriers {
+            let Some(cause) = site.divergent_cause else {
+                continue;
+            };
+            let message = if site.interprocedural {
+                format!(
+                    "kernel `{}` calls `{}`, which may execute a barrier, under \
+                     thread-divergent control",
+                    f.name, site.callee_display
+                )
+            } else {
+                format!(
+                    "kernel `{}` may execute `{}()` under thread-divergent control",
+                    f.name, site.callee_display
+                )
+            };
+
+            let mut notes = vec![
+                "lanes that skip the barrier never arrive, and the lanes that reach it wait \
+                 for them forever — on hardware this is undefined behavior, usually a \
+                 permanent hang with no error"
+                    .to_string(),
+            ];
+            if analysis.irreducible {
+                notes.push(
+                    "this function has irreducible control flow; the analysis degraded to \
+                     all-divergent for the whole body"
+                        .to_string(),
+                );
+            }
+            let total = analysis.analyzed_statements + analysis.opaque_statements;
+            if analysis.opaque_statements > 0 && total > 0 {
+                notes.push(format!(
+                    "coverage: {} of {total} statements analyzed ({} opaque)",
+                    analysis.analyzed_statements, analysis.opaque_statements
+                ));
+            }
+
+            let mut provenance = vec![ProvenanceStep {
+                what: "thread-divergent branch".to_string(),
+                span: span_of(models, cause.span),
+            }];
+            provenance.extend(
+                engine::provenance_chain(f, analysis, cause.cond)
+                    .into_iter()
+                    .filter(|step| !is_temp_plumbing(&step.detail))
+                    .map(|step| ProvenanceStep {
+                        what: step.detail,
+                        span: span_of(models, step.span),
+                    }),
+            );
+
+            let mut finding = Finding {
+                code: "RC001".to_string(),
+                confidence: Confidence::Warning,
+                message,
+                kernel: Some(f.name.clone()),
+                span: span_of(models, site.span),
+                notes,
+                help: Some(
+                    "make every thread of the block reach the barrier: hoist it out of the \
+                     divergent branch, or make the branch condition uniform"
+                        .to_string(),
+                ),
+                explain: "RC001".to_string(),
+                provenance,
+            };
+            if !site.interprocedural {
+                try_witness(
+                    models,
+                    f,
+                    &mut finding,
+                    &ReplaySite {
+                        block: site.block,
+                        kind: SiteKind::Barrier,
+                        cause_span: cause.span,
+                        arrived_glyph: 'W',
+                    },
+                    witnesses,
+                );
+            }
+            findings.push(finding);
+        }
+    }
+}
+
+/// RC002 (warning until a witness confirms it, per docs/ARCHITECTURE.md): a
+/// warp collective at a point where threads of the warp may be inactive.
+///
+/// Scope, from a survey of upstream's examples: they use FULL_MASK
+/// literals or runtime-computed masks, and essentially no constant partial
+/// masks — so the check is about convergence, with constant masks reported
+/// as context (mask refinement) rather than arithmetically verified.
+pub fn rc002_nonconvergent_warp_ops(
+    models: &CrateModels,
+    results: &[(FnId, Analysis)],
+    findings: &mut Vec<Finding>,
+    witnesses: &mut Vec<WitnessArtifact>,
+) {
+    for (fn_id, analysis) in results {
+        let f = &models.fns[*fn_id];
+        for site in &analysis.warp_ops {
+            let Some(cause) = site.divergent_cause else {
+                continue;
+            };
+            let message = if site.interprocedural {
+                format!(
+                    "kernel `{}` calls `{}`, which may execute a warp collective, under \
+                     thread-divergent control",
+                    f.name, site.callee_display
+                )
+            } else {
+                format!(
+                    "kernel `{}` calls `{}()` at a point where threads of the warp may be \
+                     inactive",
+                    f.name, site.callee_display
+                )
+            };
+
+            let mut notes = vec![
+                "a warp collective synchronizes the lanes its participation mask names; a \
+                 named lane that never reaches the call makes the operation undefined — \
+                 upstream calls this the worst kind of bug, because there is no crash and \
+                 no error, just a kernel that usually never finishes"
+                    .to_string(),
+            ];
+            match site.mask {
+                Some(0xffff_ffff) => notes.push(
+                    "the mask is 0xffffffff (every lane), but under this branch some lanes \
+                     may never arrive"
+                        .to_string(),
+                ),
+                Some(mask) => notes.push(format!(
+                    "the mask is {mask:#010x}; verify the branch admits exactly the lanes \
+                     it names"
+                )),
+                None if !site.interprocedural => notes.push(
+                    "the mask is not a literal the analysis can evaluate (a runtime value, or a \
+                     named const — opaque through rustc_public at this pin), so it cannot be \
+                     checked statically"
+                        .to_string(),
+                ),
+                None => {}
+            }
+            if analysis.irreducible {
+                notes.push(
+                    "this function has irreducible control flow; the analysis degraded to \
+                     all-divergent for the whole body"
+                        .to_string(),
+                );
+            }
+
+            let mut provenance = vec![ProvenanceStep {
+                what: "thread-divergent branch".to_string(),
+                span: span_of(models, cause.span),
+            }];
+            provenance.extend(
+                engine::provenance_chain(f, analysis, cause.cond)
+                    .into_iter()
+                    .filter(|step| !is_temp_plumbing(&step.detail))
+                    .map(|step| ProvenanceStep {
+                        what: step.detail,
+                        span: span_of(models, step.span),
+                    }),
+            );
+
+            let mut finding = Finding {
+                code: "RC002".to_string(),
+                confidence: Confidence::Warning,
+                message,
+                kernel: Some(f.name.clone()),
+                span: span_of(models, site.span),
+                notes,
+                help: Some(
+                    "make the call site convergent (hoist it out of the divergent branch), \
+                     or derive the mask from the guard itself (e.g. ballot the condition) \
+                     so it names exactly the lanes that arrive"
+                        .to_string(),
+                ),
+                explain: "RC002".to_string(),
+                provenance,
+            };
+            if !site.interprocedural {
+                try_witness(
+                    models,
+                    f,
+                    &mut finding,
+                    &ReplaySite {
+                        block: site.block,
+                        kind: SiteKind::Collective { mask: site.mask },
+                        cause_span: cause.span,
+                        arrived_glyph: 'A',
+                    },
+                    witnesses,
+                );
+            }
+            findings.push(finding);
+        }
+    }
+}
+
+/// A chain hop that only shuffles one unnamed temporary into another adds
+/// nothing to the displayed story; the full graph stays in the unimap.
+fn is_temp_plumbing(detail: &str) -> bool {
+    detail.starts_with('_')
+        && detail
+            .split_once(": ")
+            .is_some_and(|(_, rest)| rest.starts_with("derived from divergent _"))
+}
+
+/// Build the `unimap.v1` functions for the analyzed kernels.
+pub fn build_unimap(models: &CrateModels, results: &[(FnId, Analysis)]) -> Vec<unimap::Function> {
+    results
+        .iter()
+        .map(|(fn_id, analysis)| {
+            let f = &models.fns[*fn_id];
+            unimap::Function {
+                name: f.name.clone(),
+                item: f.item_path.clone(),
+                span: span_of(models, f.span),
+                coverage: Some(unimap::Coverage {
+                    analyzed_statements: analysis.analyzed_statements,
+                    opaque_statements: analysis.opaque_statements,
+                }),
+                values: values_of(models, f, analysis),
+                provenance: provenance_edges(f, analysis),
+                blocks: blocks_of(models, f, analysis),
+            }
+        })
+        .collect()
+}
+
+fn values_of(models: &CrateModels, f: &FnModel, analysis: &Analysis) -> Vec<unimap::Value> {
+    (0..f.local_count)
+        .map(|local| {
+            let uniformity = match analysis.locals[local] {
+                Uniformity::Uniform => unimap::Uniformity::Uniform,
+                Uniformity::Divergent => unimap::Uniformity::Divergent,
+            };
+            let source = match &analysis.reasons[local] {
+                Some(reason) => Some(value_source(&reason.kind, reason.source_call)),
+                None if (1..=f.arg_count).contains(&local) => {
+                    Some(unimap::ValueSource::KernelParam)
+                }
+                None => None,
+            };
+            unimap::Value {
+                id: format!("_{local}"),
+                name: f.local_names[local].clone(),
+                uniformity,
+                source,
+                span: f.local_spans[local]
+                    .map_or_else(|| span_of(models, f.span), |s| span_of(models, s)),
+            }
+        })
+        .collect()
+}
+
+fn value_source(kind: &ReasonKind, call: Option<CallKind>) -> unimap::ValueSource {
+    match kind {
+        ReasonKind::Source => match call {
+            Some(CallKind::ThreadIndexWitness) => unimap::ValueSource::ThreadIndex,
+            Some(CallKind::AtomicRmw) => unimap::ValueSource::AtomicReturn,
+            _ => unimap::ValueSource::Derived,
+        },
+        ReasonKind::DerivedFrom(_) => unimap::ValueSource::Derived,
+        // A value written on only some lanes' paths is the MIR-level phi.
+        ReasonKind::ControlDependent { .. } => unimap::ValueSource::DivergentPhi,
+    }
+}
+
+fn provenance_edges(f: &FnModel, analysis: &Analysis) -> Vec<unimap::ProvenanceEdge> {
+    let mut edges = Vec::new();
+    for (local, reason) in analysis.reasons.iter().enumerate() {
+        let Some(reason) = reason else { continue };
+        match &reason.kind {
+            ReasonKind::DerivedFrom(uses) => {
+                for use_local in uses {
+                    edges.push(unimap::ProvenanceEdge {
+                        from: format!("_{use_local}"),
+                        to: format!("_{local}"),
+                        what: Some(reason.detail.clone()),
+                    });
+                }
+            }
+            ReasonKind::ControlDependent { branch } => {
+                if let Some(cause) =
+                    analysis.block_cause[*branch].or_else(|| match &f.blocks[*branch].term.kind {
+                        TermKind::Branch { cond, .. } => Some(engine::BranchCause {
+                            block: *branch,
+                            cond: *cond,
+                            span: f.blocks[*branch].term.span,
+                        }),
+                        _ => None,
+                    })
+                {
+                    edges.push(unimap::ProvenanceEdge {
+                        from: format!("_{}", cause.cond),
+                        to: format!("_{local}"),
+                        what: Some("written under thread-divergent control".to_string()),
+                    });
+                }
+            }
+            ReasonKind::Source => {}
+        }
+    }
+    edges
+}
+
+fn blocks_of(models: &CrateModels, f: &FnModel, analysis: &Analysis) -> Vec<unimap::Block> {
+    f.blocks
+        .iter()
+        .enumerate()
+        .map(|(b, block)| {
+            let mut values: Vec<String> = block
+                .stmts
+                .iter()
+                .filter_map(|s| s.dest)
+                .map(|l| format!("_{l}"))
+                .collect();
+            if let TermKind::Call {
+                dest: Some(dest), ..
+            } = &block.term.kind
+            {
+                values.push(format!("_{dest}"));
+            }
+            values.dedup();
+            unimap::Block {
+                id: format!("bb{b}"),
+                divergent_control: analysis.block_divergent[b],
+                span: Some(span_of(models, block.term.span)),
+                values,
+            }
+        })
+        .collect()
+}

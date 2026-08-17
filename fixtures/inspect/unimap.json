@@ -1,0 +1,651 @@
+{
+  "schema": "unimap.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "functions": [
+    {
+      "name": "divergent_barrier",
+      "item": "sample_kernels::cuda_oxide_codegen_v1_cuda_oxide_kernel_246e25db_divergent_barrier",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 19,
+        "column_start": 1,
+        "line_end": 19,
+        "column_end": 54
+      },
+      "coverage": {
+        "analyzed_statements": 20,
+        "opaque_statements": 0
+      },
+      "values": [
+        {
+          "id": "_0",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 19,
+            "column_start": 54,
+            "line_end": 19,
+            "column_end": 54
+          }
+        },
+        {
+          "id": "_1",
+          "name": "out",
+          "uniformity": "uniform",
+          "source": "kernel-param",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 19,
+            "column_start": 26,
+            "line_end": 19,
+            "column_end": 33
+          }
+        },
+        {
+          "id": "_2",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 18,
+            "column_start": 1,
+            "line_end": 18,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_3",
+          "name": "i",
+          "uniformity": "divergent",
+          "source": "thread-index",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 20,
+            "column_start": 9,
+            "line_end": 20,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_4",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 18,
+            "column_start": 1,
+            "line_end": 18,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_5",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 24
+          }
+        },
+        {
+          "id": "_6",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 19
+          }
+        },
+        {
+          "id": "_7",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 15
+          }
+        },
+        {
+          "id": "_8",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 9
+          }
+        },
+        {
+          "id": "_9",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 19
+          }
+        },
+        {
+          "id": "_10",
+          "uniformity": "divergent",
+          "source": "divergent-phi",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 22,
+            "column_start": 9,
+            "line_end": 22,
+            "column_end": 31
+          }
+        },
+        {
+          "id": "_11",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 22,
+            "line_end": 24,
+            "column_end": 36
+          }
+        },
+        {
+          "id": "_12",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 22,
+            "line_end": 24,
+            "column_end": 25
+          }
+        },
+        {
+          "id": "_13",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 12,
+            "line_end": 24,
+            "column_end": 19
+          }
+        },
+        {
+          "id": "_14",
+          "name": "e",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 17,
+            "line_end": 24,
+            "column_end": 18
+          }
+        }
+      ],
+      "provenance": [
+        {
+          "from": "_6",
+          "to": "_5",
+          "what": "derived from divergent _6"
+        },
+        {
+          "from": "_7",
+          "to": "_6",
+          "what": "derived from divergent _7"
+        },
+        {
+          "from": "_8",
+          "to": "_7",
+          "what": "result of `ThreadIndex::<'kernel, IndexSpace>::get` on divergent _8"
+        },
+        {
+          "from": "_3",
+          "to": "_8",
+          "what": "derived from divergent `i`"
+        },
+        {
+          "from": "_5",
+          "to": "_10",
+          "what": "written under thread-divergent control"
+        },
+        {
+          "from": "_3",
+          "to": "_11",
+          "what": "result of `DisjointSlice::<'a, T, IndexSpace>::get_mut` on divergent `i`"
+        },
+        {
+          "from": "_11",
+          "to": "_13",
+          "what": "derived from divergent _11"
+        },
+        {
+          "from": "_11",
+          "to": "_14",
+          "what": "derived from divergent _11"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "bb0",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 18,
+            "column_start": 1,
+            "line_end": 18,
+            "column_end": 10
+          },
+          "values": [
+            "_2"
+          ]
+        },
+        {
+          "id": "bb1",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 18,
+            "column_start": 1,
+            "line_end": 18,
+            "column_end": 10
+          },
+          "values": [
+            "_4",
+            "_3"
+          ]
+        },
+        {
+          "id": "bb2",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 15
+          },
+          "values": [
+            "_8",
+            "_7"
+          ]
+        },
+        {
+          "id": "bb3",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 19
+          },
+          "values": [
+            "_9"
+          ]
+        },
+        {
+          "id": "bb4",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 21,
+            "column_start": 8,
+            "line_end": 21,
+            "column_end": 24
+          },
+          "values": [
+            "_6",
+            "_5"
+          ]
+        },
+        {
+          "id": "bb5",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 22,
+            "column_start": 9,
+            "line_end": 22,
+            "column_end": 31
+          },
+          "values": [
+            "_10"
+          ]
+        },
+        {
+          "id": "bb6",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 22,
+            "line_end": 24,
+            "column_end": 36
+          },
+          "values": [
+            "_12",
+            "_11"
+          ]
+        },
+        {
+          "id": "bb7",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 12,
+            "line_end": 24,
+            "column_end": 19
+          },
+          "values": [
+            "_13"
+          ]
+        },
+        {
+          "id": "bb8",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 24,
+            "column_start": 5,
+            "line_end": 26,
+            "column_end": 6
+          },
+          "values": [
+            "_14"
+          ]
+        },
+        {
+          "id": "bb9",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 27,
+            "column_start": 2,
+            "line_end": 27,
+            "column_end": 2
+          }
+        },
+        {
+          "id": "bb10",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 19,
+            "column_start": 1,
+            "line_end": 27,
+            "column_end": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "scale",
+      "item": "sample_kernels::cuda_oxide_codegen_v1_cuda_oxide_kernel_246e25db_scale",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 11,
+        "column_start": 1,
+        "line_end": 11,
+        "column_end": 55
+      },
+      "coverage": {
+        "analyzed_statements": 12,
+        "opaque_statements": 0
+      },
+      "values": [
+        {
+          "id": "_0",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 11,
+            "column_start": 55,
+            "line_end": 11,
+            "column_end": 55
+          }
+        },
+        {
+          "id": "_1",
+          "name": "out",
+          "uniformity": "uniform",
+          "source": "kernel-param",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 11,
+            "column_start": 14,
+            "line_end": 11,
+            "column_end": 21
+          }
+        },
+        {
+          "id": "_2",
+          "name": "factor",
+          "uniformity": "uniform",
+          "source": "kernel-param",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 11,
+            "column_start": 43,
+            "line_end": 11,
+            "column_end": 49
+          }
+        },
+        {
+          "id": "_3",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 10,
+            "column_start": 1,
+            "line_end": 10,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_4",
+          "name": "i",
+          "uniformity": "divergent",
+          "source": "thread-index",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 12,
+            "column_start": 9,
+            "line_end": 12,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_5",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 10,
+            "column_start": 1,
+            "line_end": 10,
+            "column_end": 10
+          }
+        },
+        {
+          "id": "_6",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 22,
+            "line_end": 13,
+            "column_end": 36
+          }
+        },
+        {
+          "id": "_7",
+          "uniformity": "uniform",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 22,
+            "line_end": 13,
+            "column_end": 25
+          }
+        },
+        {
+          "id": "_8",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 12,
+            "line_end": 13,
+            "column_end": 19
+          }
+        },
+        {
+          "id": "_9",
+          "name": "e",
+          "uniformity": "divergent",
+          "source": "derived",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 17,
+            "line_end": 13,
+            "column_end": 18
+          }
+        }
+      ],
+      "provenance": [
+        {
+          "from": "_4",
+          "to": "_6",
+          "what": "result of `DisjointSlice::<'a, T, IndexSpace>::get_mut` on divergent `i`"
+        },
+        {
+          "from": "_6",
+          "to": "_8",
+          "what": "derived from divergent _6"
+        },
+        {
+          "from": "_6",
+          "to": "_9",
+          "what": "derived from divergent _6"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "bb0",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 10,
+            "column_start": 1,
+            "line_end": 10,
+            "column_end": 10
+          },
+          "values": [
+            "_3"
+          ]
+        },
+        {
+          "id": "bb1",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 10,
+            "column_start": 1,
+            "line_end": 10,
+            "column_end": 10
+          },
+          "values": [
+            "_5",
+            "_4"
+          ]
+        },
+        {
+          "id": "bb2",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 22,
+            "line_end": 13,
+            "column_end": 36
+          },
+          "values": [
+            "_7",
+            "_6"
+          ]
+        },
+        {
+          "id": "bb3",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 12,
+            "line_end": 13,
+            "column_end": 19
+          },
+          "values": [
+            "_8"
+          ]
+        },
+        {
+          "id": "bb4",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 13,
+            "column_start": 5,
+            "line_end": 15,
+            "column_end": 6
+          },
+          "values": [
+            "_9"
+          ]
+        },
+        {
+          "id": "bb5",
+          "divergent_control": false,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 16,
+            "column_start": 2,
+            "line_end": 16,
+            "column_end": 2
+          }
+        },
+        {
+          "id": "bb6",
+          "divergent_control": true,
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 11,
+            "column_start": 1,
+            "line_end": 16,
+            "column_end": 2
+          }
+        }
+      ]
+    }
+  ]
+}

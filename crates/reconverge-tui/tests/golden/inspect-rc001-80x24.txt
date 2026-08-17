@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge inspect ──────────────────────────────────────────────────────────┐
+│kernel divergent_barrier (1/2 functions) — 20/20 statements analyzed          │
+│lib.rs                                     values                             │
+│    9                                       · `out` — kernel-param            │
+│   10 #[kernel]                             ◆ `i` — thread-index              │
+│   11 pub fn scale(mut out: DisjointSlice<… ◆ `e` — derived                   │
+│   12     let i = thread::index_1d();                                         │
+│   13     if let Some(e) = out.get_mut(i) {                                   │
+│   14         *e *= factor;                                                   │
+│   15     }                                                                   │
+│   16 }                                                                       │
+│   17                                      provenance of _5 (derived)         │
+│   18 #[kernel]                             1. ← derived from divergent _6    │
+│   19 pub fn divergent_barrier(mut out: Di… 2. ← derived from divergent _7    │
+│   20     let i = thread::index_1d();       3. ← result of `ThreadIndex::<'ke…│
+│>  21     if i.get() % 2 == 0 {             4. ← derived from divergent `i`   │
+│   22         thread::sync_threads();      source: `i` — thread-index         │
+│   23     }                                                                   │
+│   24     if let Some(e) = out.get_mut(i) {                                   │
+│   25         *e = 1;                                                         │
+│   26     }                                                                   │
+│   27 }                                                                       │
+│finding 3/3 [RC001] kernel `divergent_barrier` may execute `sync_threads()` u…│
+└ j/k value  p walk  u back  n/N finding  f fn  q quit ────────────────────────┘

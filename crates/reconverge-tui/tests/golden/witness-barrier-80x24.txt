@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge witness ──────────────────────────────────────────────────────────┐
+│witness 1/2 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
+│                                                                              │
+│          0        8        16       24                                       │
+│lanes     WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo                                 │
+│mask      (not at a warp collective)                                          │
+│                                                                              │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│step 4/5  [===>.]                                                             │
+│_8 = cuda_device::sync_threads()                                              │
+│at lib.rs:22                                                                  │
+│barrier: 16 of 32 threads arrived                                             │
+│                                                                              │
+│verdict: undefined behavior (at step 5)                                       │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

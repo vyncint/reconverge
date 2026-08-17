@@ -1,0 +1,58 @@
+{
+  "schema": "findings.v1",
+  "tool": {
+    "name": "reconverge",
+    "version": "0.0.0"
+  },
+  "crate": "sample_kernels",
+  "findings": [
+    {
+      "code": "RC003",
+      "confidence": "deny",
+      "message": "kernel `bad_mut_slice` takes `&mut [f32]` as a parameter",
+      "kernel": "bad_mut_slice",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 4,
+        "column_start": 22,
+        "line_end": 4,
+        "column_end": 37
+      },
+      "notes": [
+        "every thread sees the same backing pointer, so writes through it alias across threads"
+      ],
+      "help": "pass `DisjointSlice<f32>` instead; upstream treats any `&mut` kernel argument as unsafe",
+      "explain": "RC003"
+    },
+    {
+      "code": "RC005",
+      "confidence": "warning",
+      "message": "kernel `scale` uses `index_1d()` without a launch contract",
+      "kernel": "scale",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 12,
+        "column_start": 13,
+        "line_end": 12,
+        "column_end": 30
+      },
+      "notes": [
+        "without `#[launch_contract(domain = 1)]` the 1D witness is only checked at runtime; on a mismatched launch it is silently invalid and guarded work is skipped"
+      ],
+      "help": "declare `#[launch_contract(domain = 1, coordinates = u32, block = (...))]` on the kernel",
+      "explain": "RC005",
+      "provenance": [
+        {
+          "what": "thread index minted here",
+          "span": {
+            "file": "src/lib.rs",
+            "line_start": 12,
+            "column_start": 13,
+            "line_end": 12,
+            "column_end": 30
+          }
+        }
+      ]
+    }
+  ]
+}
