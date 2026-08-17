@@ -189,8 +189,10 @@ fn locate_driver() -> Result<PathBuf, String> {
         return Ok(sibling);
     }
     Err(format!(
-        "reconverge-driver not found next to this binary ({}); build it with \
-         `cargo build -p reconverge-driver` or set RECONVERGE_DRIVER",
+        "reconverge-driver not found next to this binary ({}); run \
+         `cargo reconverge setup` to install the matching version — in a \
+         source checkout, `cargo build -p reconverge-driver` — or set \
+         RECONVERGE_DRIVER",
         sibling.display()
     ))
 }

@@ -103,8 +103,10 @@ pub(crate) fn locate_tui() -> Result<PathBuf, String> {
         return Ok(sibling);
     }
     Err(format!(
-        "reconverge-tui not found next to this binary ({}); build it with \
-         `cargo build -p reconverge-tui` or set RECONVERGE_TUI",
+        "reconverge-tui not found next to this binary ({}); run \
+         `cargo reconverge setup` to install the matching version — in a \
+         source checkout, `cargo build -p reconverge-tui` — or set \
+         RECONVERGE_TUI",
         sibling.display()
     ))
 }

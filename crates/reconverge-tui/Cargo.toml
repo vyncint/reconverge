@@ -6,11 +6,17 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+readme = "README.md"
+keywords = ["gpu", "tui", "terminal", "debugging"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+# The integration tests need sibling binaries and repo fixtures that a
+# published package cannot carry; they run from the repository.
+exclude = ["/tests"]
 
 [dependencies]
 # INVARIANT (docs/ARCHITECTURE.md): reconverge-artifacts is the only workspace
 # dependency the TUI may ever have; scripts/check-isolation.sh enforces it.
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.1" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.2" }
 ratatui = "0.30"
 serde_json = { workspace = true }
 unicode-normalization = "0.1"

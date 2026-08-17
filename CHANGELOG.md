@@ -10,6 +10,24 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.2] — 2026-08-17
+
+The crates.io pages, and a one-stop install.
+
+- `cargo reconverge setup`: after `cargo install cargo-reconverge`, one
+  command installs the pinned toolchain with the components the driver
+  needs, then `reconverge-driver` and `reconverge-tui` at the CLI's own
+  version — the three binaries cannot drift apart. Every command is printed
+  before it runs, and failures end with the manual steps.
+- Every crate now ships a README (the pages on crates.io were blank: the
+  repository README sits at the workspace root, which is never packaged),
+  plus keywords and categories. The driver's documentation link points at
+  the repository, since docs.rs cannot build `rustc_private` crates.
+- The bin crates no longer package their integration tests, which need
+  sibling binaries and repository fixtures a package cannot carry.
+- The driver/TUI not-found errors now tell installed users about `setup`
+  instead of suggesting a `cargo build` that only works in a checkout.
+
 ## [0.1.1] — 2026-08-17
 
 Packaging only; no behavior changes.
@@ -71,5 +89,6 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.2]: https://github.com/vyncint/reconverge/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vyncint/reconverge/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vyncint/reconverge/releases/tag/v0.1.0
