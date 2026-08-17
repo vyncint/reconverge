@@ -1,11 +1,11 @@
-//! The four lessons, embedded whole: prose from `docs/learn/` (pages
-//! separated by `---` lines), kernels as source snippets, replays as
-//! the shipped fixture witnesses. Everything is compiled in — learn mode
-//! runs with no network, no analysis step, and no files on disk, which
-//! the flow tests prove by running it in an empty directory.
+//! The four lessons, embedded whole: prose from this crate's `lessons/`
+//! directory (pages separated by `---` lines), kernels as source snippets,
+//! and recorded replays. Everything is compiled in — learn mode runs with
+//! no network, no analysis step, and no files on disk, which the flow tests
+//! prove by running it in an empty directory.
 //!
-//! TODO(phase-r): like the explain pages, `include_str!` reaches outside
-//! the package directory; mirror into OUT_DIR before publishing.
+//! The replay JSONs here are copies of `fixtures/witness/`; a test below
+//! fails if the two ever drift apart.
 
 use reconverge_artifacts::witness::WitnessArtifact;
 
@@ -60,10 +60,9 @@ if i.get() % 2 == 0 {
 // the paths rejoin at the branch's post-dominator
 thread::sync_threads(); // every lane arrives";
 
-const RC001_WITNESS: &str =
-    include_str!("../../../../fixtures/witness/rc001-divergent-barrier.json");
-const RC002_WITNESS: &str = include_str!("../../../../fixtures/witness/rc002-partial-mask.json");
-const CLEAN_WITNESS: &str = include_str!("../../../../fixtures/witness/reconverged-clean.json");
+const RC001_WITNESS: &str = include_str!("../../lessons/rc001-divergent-barrier.json");
+const RC002_WITNESS: &str = include_str!("../../lessons/rc002-partial-mask.json");
+const CLEAN_WITNESS: &str = include_str!("../../lessons/reconverged-clean.json");
 
 /// Split a lesson file into pages on `---` separator lines and zip with
 /// per-page extras. Page counts are locked by the unit tests below, so a
@@ -103,7 +102,7 @@ pub fn lessons() -> Vec<Lesson> {
             id: "divergence",
             title: "divergence — how a warp splits",
             pages: pages(
-                include_str!("../../../../docs/learn/divergence.md"),
+                include_str!("../../lessons/divergence.md"),
                 &[
                     (None, None),
                     (Some(DIVERGENT_KERNEL), Some(RC001_WITNESS)),
@@ -115,7 +114,7 @@ pub fn lessons() -> Vec<Lesson> {
             id: "barriers",
             title: "barriers — why a divergent sync hangs",
             pages: pages(
-                include_str!("../../../../docs/learn/barriers.md"),
+                include_str!("../../lessons/barriers.md"),
                 &[
                     (None, None),
                     (Some(DIVERGENT_KERNEL), Some(RC001_WITNESS)),
@@ -127,7 +126,7 @@ pub fn lessons() -> Vec<Lesson> {
             id: "masks",
             title: "masks — who joins a warp collective",
             pages: pages(
-                include_str!("../../../../docs/learn/masks.md"),
+                include_str!("../../lessons/masks.md"),
                 &[
                     (None, None),
                     (Some(COLLECTIVE_KERNEL), Some(RC002_WITNESS)),
@@ -139,7 +138,7 @@ pub fn lessons() -> Vec<Lesson> {
             id: "reconvergence",
             title: "reconvergence — the fix",
             pages: pages(
-                include_str!("../../../../docs/learn/reconvergence.md"),
+                include_str!("../../lessons/reconvergence.md"),
                 &[
                     (None, None),
                     (Some(RECONVERGED_KERNEL), Some(CLEAN_WITNESS)),
@@ -155,6 +154,26 @@ mod tests {
     use reconverge_artifacts::witness::VerdictKind;
 
     use super::*;
+
+    /// The embedded replays are copies of `fixtures/witness/`, which the
+    /// artifacts crate round-trips as its schema tests. They must stay
+    /// byte-identical, or the lessons would teach something the schema
+    /// tests never checked.
+    #[test]
+    fn embedded_replays_match_the_canonical_fixtures() {
+        use std::path::Path;
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/witness");
+        let lessons = Path::new(env!("CARGO_MANIFEST_DIR")).join("lessons");
+        for name in [
+            "rc001-divergent-barrier.json",
+            "rc002-partial-mask.json",
+            "reconverged-clean.json",
+        ] {
+            let canonical = std::fs::read_to_string(fixtures.join(name)).unwrap();
+            let embedded = std::fs::read_to_string(lessons.join(name)).unwrap();
+            assert_eq!(canonical, embedded, "{name} drifted from the fixture");
+        }
+    }
 
     #[test]
     fn four_lessons_of_three_pages_each() {

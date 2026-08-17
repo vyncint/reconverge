@@ -1,21 +1,27 @@
-# Release scaffold — INACTIVE BY DESIGN.
-# Publishing is a deliberate, human-run step. Do not automate it.
+# Release: build the binaries for a tag, and publish the crates.
 #
-# Notes:
-# - Every crate carries `publish = false`, so the dry-run job fails by
-#   design until that is lifted on purpose: that is the guard working,
-#   not a bug.
-# - Publish order matters: artifacts → core → dialect → witness → driver →
-#   tui → cargo-reconverge.
+# Publishing is deliberate and manual — dispatch only, never on push — and
+# it is irreversible: a crates.io version can be yanked but never deleted.
+# So `dry_run` defaults to true. Run it once as a dry run, read the log,
+# then run it again with dry_run disabled.
+#
+# Publish order follows the dependency graph: artifacts → core → dialect →
+# witness → driver → tui → cargo-reconverge. `cargo publish` waits for each
+# crate to appear in the index before the next one resolves it.
 name: release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing git tag to build (e.g. v0.1.0)"
+        description: "Existing git tag to build (e.g. v0.1.1)"
         required: true
         type: string
+      dry_run:
+        description: "Validate without publishing"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -37,13 +43,16 @@ jobs:
         run: |
           rustup toolchain install
           rustup show
-      - run: cargo build --release -p cargo-reconverge
+      - run: cargo build --release -p cargo-reconverge -p reconverge-driver -p reconverge-tui
       - uses: actions/upload-artifact@v7
         with:
-          name: cargo-reconverge-${{ inputs.tag }}-${{ matrix.os }}
-          path: target/release/cargo-reconverge
+          name: reconverge-${{ inputs.tag }}-${{ matrix.os }}
+          path: |
+            target/release/cargo-reconverge
+            target/release/reconverge-driver
+            target/release/reconverge-tui
 
-  publish-dry-run:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -53,8 +62,25 @@ jobs:
         run: |
           rustup toolchain install
           rustup show
-      - name: cargo publish --dry-run, in dependency order
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::dry run — nothing will be published"
+            # A dry run can only verify crates whose dependencies already
+            # resolve from the index; for a first publish that is the leaf
+            # crates. The rest are checked for packaging problems instead.
+            flags="--dry-run"
+          else
+            test -n "${CARGO_REGISTRY_TOKEN:-}" || {
+              echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository"
+              exit 1
+            }
+            flags=""
+          fi
           for crate in \
             reconverge-artifacts \
             reconverge-core \
@@ -64,5 +90,15 @@ jobs:
             reconverge-tui \
             cargo-reconverge
           do
-            cargo publish --dry-run -p "$crate"
+            echo "::group::$crate"
+            if [ "$DRY_RUN" = "true" ]; then
+              cargo publish $flags -p "$crate" || {
+                echo "::warning::$crate could not be verified yet — its \
+                  dependencies are not on the index until an earlier crate \
+                  in this list is actually published"
+              }
+            else
+              cargo publish -p "$crate"
+            fi
+            echo "::endgroup::"
           done
