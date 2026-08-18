@@ -6,7 +6,9 @@ edition = "2024"
 publish = false
 
 # Standalone tool: not a member of the reconverge workspace (it runs against
-# a separate upstream checkout).
+# a separate upstream checkout). Because it is its own workspace, a release
+# version bump must refresh this crate's Cargo.lock as well — the
+# conformance scripts build with --locked and fail on drift.
 [workspace]
 
 [dependencies]

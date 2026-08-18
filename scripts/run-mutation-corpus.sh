@@ -30,7 +30,7 @@ fi
 # 2. Generate the mutants workspace + labels.
 cargo build -q -p reconverge-driver -p cargo-reconverge
 mkdir -p "$MWORK"
-(cd "$ROOT/conformance/extractor" && cargo run -q -- mutate "$WORK/corpus" "$MUTANTS")
+(cd "$ROOT/conformance/extractor" && cargo run -q --locked -- mutate "$WORK/corpus" "$MUTANTS")
 
 # 3. Prune mutants that do not compile (counted; e.g. a DisjointSlice ->
 #    &mut [T] swap whose body needs DisjointSlice-only API).
@@ -64,7 +64,7 @@ printf '%s\n' "$JSON" > "$MWORK/findings.jsonl"
 
 # 5. Score: precision must be 1.0, and the published table must match the
 #    committed copy exactly.
-(cd "$ROOT/conformance/extractor" && cargo run -q -- score \
+(cd "$ROOT/conformance/extractor" && cargo run -q --locked -- score \
   "$MUTANTS" "$WORK/findings.jsonl" "$MWORK/findings.jsonl" "$MWORK/MUTATION.md")
 
 if ! diff -u "$ROOT/conformance/MUTATION.md" "$MWORK/MUTATION.md" > "$MWORK/mutation.diff"; then

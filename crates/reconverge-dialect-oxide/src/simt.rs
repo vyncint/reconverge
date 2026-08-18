@@ -38,8 +38,16 @@ pub fn classify_call(def_path: &str) -> CallKind {
         "blockIdx_x" | "blockIdx_y" | "blockIdx_z" | "blockDim_x" | "blockDim_y" | "blockDim_z"
         | "gridDim_x" | "gridDim_y" | "gridDim_z" => CallKind::BlockUniform,
 
-        // The block-wide execution barrier (RC001's subject).
-        "sync_threads" => CallKind::Barrier,
+        // Execution barriers (RC001's subject): every primitive whose
+        // contract is "all threads of the scope must reach this call".
+        // Divergence *within a block* breaks the block, cluster, and grid
+        // scopes alike, so one CallKind covers all three. The mbarrier
+        // arrive/wait family (`barrier::Barrier`) is deliberately absent:
+        // it is a phase-counted split barrier where partial participation
+        // is the designed use, so "some threads never reach the wait" is
+        // not by itself a bug — a documented v1 boundary (explain/RC001.md).
+        "sync_threads" | "cluster_sync" => CallKind::Barrier,
+        "sync" if def_path.contains("::grid::") => CallKind::Barrier,
 
         // Warp collectives (RC002's subject): cuda-device's masked `*_sync`
         // surface, every one taking the participation mask as its first
@@ -84,10 +92,16 @@ pub fn classify_call(def_path: &str) -> CallKind {
         | "is_elected_sync"
         | "sync_mask" => CallKind::WarpCollective,
 
-        // Which lanes are currently active: divergent by definition, but
-        // not a collective — it takes no mask, synchronizes nothing, and is
-        // legal (indeed designed) to call under divergence.
-        "active_mask" => CallKind::DivergentEnvRead,
+        // Per-lane and per-warp environment reads: divergent by definition
+        // (the lanemask registers differ on every lane; `warp_id` and
+        // `live_lanes_1d` are warp-uniform, and the lattice does not
+        // distinguish warp- from block-uniformity — same rule as collective
+        // results), but none is a collective: no mask, no synchronization,
+        // legal under divergence. Not replay-evaluable yet: giving the
+        // interpreter their values needs width-typed evaluation (integer
+        // `!`, truncating casts), so guards on them stay warning-tier.
+        "active_mask" | "lanemask_lt" | "lanemask_le" | "lanemask_eq" | "lanemask_ge"
+        | "lanemask_gt" | "warp_id" | "live_lanes_1d" => CallKind::DivergentEnvRead,
 
         // Dialect plumbing with uniform, effect-free results.
         "make_kernel_scope"
@@ -230,6 +244,50 @@ mod tests {
             classify_call("cuda_device::warp::active_mask"),
             CallKind::DivergentEnvRead
         );
+    }
+
+    #[test]
+    fn classifies_every_all_threads_barrier() {
+        // Block, cluster, and grid scope: all three deadlock when reached
+        // divergently, and all three must be RC001's subject.
+        assert_eq!(
+            classify_call("cuda_device::cluster::cluster_sync"),
+            CallKind::Barrier
+        );
+        assert_eq!(classify_call("cuda_device::grid::sync"), CallKind::Barrier);
+        // `sync` is a barrier only in the grid module — the bare name is
+        // too generic to match anywhere else.
+        assert_eq!(classify_call("cuda_device::foo::sync"), CallKind::Other);
+        // The mbarrier arrive/wait family is a phase-counted split barrier
+        // where partial participation is the designed use: deliberately
+        // outside RC001 (explain/RC001.md documents the boundary).
+        assert_eq!(
+            classify_call("cuda_device::barrier::Barrier::wait"),
+            CallKind::Other
+        );
+    }
+
+    #[test]
+    fn lane_environment_reads_are_divergent_sources() {
+        // The lanemask registers differ on every lane; warp_id and
+        // live_lanes_1d are warp-uniform, which the lattice must treat as
+        // divergent (it does not distinguish warp- from block-uniformity).
+        // None is a collective and none is replay-evaluable yet.
+        for name in [
+            "lanemask_lt",
+            "lanemask_le",
+            "lanemask_eq",
+            "lanemask_ge",
+            "lanemask_gt",
+            "warp_id",
+            "live_lanes_1d",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::warp::{name}")),
+                CallKind::DivergentEnvRead,
+                "{name} must be a divergent environment read"
+            );
+        }
     }
 
     #[test]

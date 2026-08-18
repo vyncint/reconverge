@@ -15,8 +15,8 @@ categories = ["development-tools"]
 exclude = ["/tests"]
 
 [dependencies]
-reconverge-core = { path = "../reconverge-core", version = "0.1.5" }
-reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.1.5" }
-reconverge-witness = { path = "../reconverge-witness", version = "0.1.5" }
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.5" }
+reconverge-core = { path = "../reconverge-core", version = "0.1.6" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.1.6" }
+reconverge-witness = { path = "../reconverge-witness", version = "0.1.6" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.6" }
 serde_json = { workspace = true }
