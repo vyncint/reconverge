@@ -19,6 +19,6 @@ reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.
 serde_json = { workspace = true }
 
 [dev-dependencies]
-# Same pin as reconverge-tui (see its Cargo.toml for the pinning policy):
-# the end-to-end tests drive the TUI subcommands through a PTY.
-termlens = { git = "https://github.com/vyncint/termlens", rev = "ecad6dacffff7605cd42cdeeca8631f223900479", default-features = false }
+# Same version as reconverge-tui (see its Cargo.toml for the pinning
+# policy): the end-to-end tests drive the TUI subcommands through a PTY.
+termlens = { version = "0.3.0", default-features = false }
