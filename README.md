@@ -307,13 +307,17 @@ one that does less.
   shapes other than the one it runs (one full warp).
 - **Guards built on the per-lane mask registers stay warnings.** The
   `lanemask_*` registers and `active_mask` are recognized as divergence
-  sources, but their 32-bit mask values are never evaluated in a replay
-  (the interpreter's evaluation is not width-typed, and a wrong mask value
-  could fabricate a confirmation), so findings under such guards are never
-  witness-promoted. When such a guard sits *upstream* of a finding with a
-  barrier inside it, that finding stays at warning too. `warp_id` and
-  `live_lanes_1d` are exact under the replay's one-warp launch and do
-  evaluate.
+  sources, but their values are never fed into a replay, so findings under
+  such guards are never witness-promoted — and a finding *below* such a
+  guard with a barrier inside it stays at warning too. What is actually
+  missing is width-typed evaluation of the unchecked operations a 32-bit
+  mask would flow through: integer `!` is modeled for booleans only, and
+  casts are evaluated as the identity — exact for the small thread-index
+  values replays traffic in today (a truncating cast on the thread index
+  promotes normally), wrong for full-width masks, and a wrong mask value
+  could fabricate a confirmation. Overflow-checked arithmetic is already
+  width-typed. `warp_id` and `live_lanes_1d` are exact under the replay's
+  one-warp launch and do evaluate.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.
