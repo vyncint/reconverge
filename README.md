@@ -299,6 +299,12 @@ one that does less.
   `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
   `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
   cuda-device and are not yet analyzed.
+- **A construct the declared launch cannot reach is reported at `warning`
+  and never promoted.** The syntactic recognizer speaks — a launch
+  contract is a declaration, not a proof, and a kernel launched outside
+  its declared shape would otherwise lose the diagnostic entirely — while
+  the replay finds no lane that arrives and so has nothing to confirm.
+  Such findings never gate.
 - **RC002's replay compares the mask against the lanes present.** A
   literal mask at a divergent call promotes to `confirmed` exactly when it
   names a lane the replay proves absent; a mask naming exactly the arriving
