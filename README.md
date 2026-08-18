@@ -299,6 +299,12 @@ one that does less.
   `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
   `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
   cuda-device and are not yet analyzed.
+- **RC002's replay compares the mask against the lanes present.** A
+  literal mask at a divergent call promotes to `confirmed` exactly when it
+  names a lane the replay proves absent; a mask naming exactly the arriving
+  lanes — the guarded partial-warp idiom — is never promoted and never
+  gates. What the replay does *not* do is mask arithmetic against launch
+  shapes other than the one it runs (one full warp).
 - **Guards built on the per-lane mask registers stay warnings.** The
   `lanemask_*` registers and `active_mask` are recognized as divergence
   sources, but their 32-bit mask values are never evaluated in a replay

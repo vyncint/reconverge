@@ -47,11 +47,14 @@ Promotion additionally needs a mask the analysis can evaluate; upstream
 writes masks as named consts, which `rustc_public` cannot evaluate at
 the pin, and an unevaluable mask is never witness-promoted — it could
 be the correct guarded partial-warp idiom.
-- **shrinkmask** — a shrunk full mask at a *convergent* call site is a
-mask-lane mismatch only under launch shapes the static engine does not
-model (RC002 v1 checks convergence; it does not do mask arithmetic
-against launch shapes). Expected recall 0 in v1; the class stays in
-the corpus so the gap is public and any improvement shows up here.
+- **shrinkmask** — a shrunk full mask at a *convergent* call site names
+no lane that is absent, so the witness has nothing to confirm: the
+replay *does* compare the mask against the lanes it finds present
+(that comparison is what promotes a divergent full-mask call and what
+keeps the correct guarded partial-warp idiom out of the gate), and a
+mismatch under some *other* launch shape than the replayed one is not
+witnessed. Expected recall 0; the class stays in the corpus so the
+boundary is public and any improvement shows up here.
 - **mutslice** — RC003 is a syntactic `deny`; expected recall 100% of
 compiling mutants. Swaps whose kernel body needs `DisjointSlice`-only
 API do not compile and are pruned (counted below).
