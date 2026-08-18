@@ -28,7 +28,6 @@ allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
+# Every dependency comes from crates.io (termlens moved there in 0.1.5);
+# any git dependency is a deliberate, reviewed exception.
 unknown-git = "deny"
-# termlens is a git dependency pinned to an exact rev until it publishes to
-# crates.io (docs/ARCHITECTURE.md); dual MIT/Apache-2.0.
-allow-git = ["https://github.com/vyncint/termlens"]

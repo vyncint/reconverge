@@ -91,6 +91,17 @@ fn main() -> ExitCode {
 /// Terminal setup/teardown shared by every view, with a panic hook that
 /// restores the screen first so panics stay readable.
 fn with_terminal(body: impl FnOnce(&mut Term) -> io::Result<()>) -> io::Result<()> {
+    // Say what is actually wrong before raw-mode setup turns it into a
+    // bare errno: every view is interactive, so a pipe or a CI job cannot
+    // host it.
+    use std::io::IsTerminal;
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(io::Error::other(
+            "an interactive terminal is required (stdin/stdout is not a TTY); \
+             for machine-readable output use `cargo reconverge check \
+             --message-format json` or `--sarif`",
+        ));
+    }
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen)?;
     let default_hook = std::panic::take_hook();

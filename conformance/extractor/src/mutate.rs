@@ -93,7 +93,7 @@ fn is_classified_collective(name: &str) -> bool {
 /// lists: it takes no mask and is legal under divergence, so a site using
 /// it is not a maskable hazard at all.)
 fn is_unclassified_collective(name: &str) -> bool {
-    matches!(name, "shuffle" | "ballot" | "all" | "any" | "live_lanes_1d")
+    matches!(name, "shuffle" | "ballot" | "all" | "any")
         || (name.starts_with("shuffle_") && !name.ends_with("_sync"))
         || name.starts_with("reduce_")
 }
@@ -192,6 +192,29 @@ fn call_name(expr: &syn::Expr) -> Option<String> {
     None
 }
 
+/// Is this statement-expression a call to an execution barrier the dialect
+/// classifies? Asked of the dialect itself (like the collectives), with the
+/// callee's module segment preserved — `grid::sync` is a barrier only under
+/// its module, the bare name being too generic to match alone.
+fn is_barrier_call(expr: &syn::Expr) -> bool {
+    let syn::Expr::Call(call) = expr else {
+        return false;
+    };
+    let syn::Expr::Path(path) = call.func.as_ref() else {
+        return false;
+    };
+    let mut segments = path.path.segments.iter().rev().map(|s| s.ident.to_string());
+    let Some(name) = segments.next() else {
+        return false;
+    };
+    let def_path = match segments.next() {
+        Some(module) if module != "cuda_device" => format!("cuda_device::{module}::{name}"),
+        _ => format!("cuda_device::{name}"),
+    };
+    reconverge_dialect_oxide::simt::classify_call(&def_path)
+        == reconverge_core::dialect::CallKind::Barrier
+}
+
 impl<'ast, 'src> Visit<'ast> for Collector<'src> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         if !has_attr(&node.attrs, "kernel") || self.kernel.is_some() {
@@ -267,7 +290,7 @@ impl<'ast, 'src> Visit<'ast> for Collector<'src> {
 
         // A statement that IS the barrier call.
         if let syn::Stmt::Expr(expr, Some(_)) = node
-            && call_name(expr).as_deref() == Some("sync_threads")
+            && is_barrier_call(expr)
         {
             match &self.kernel {
                 Some(kernel) => self.sites.barriers.push(BarrierSite {

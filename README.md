@@ -232,11 +232,13 @@ $ cargo reconverge setup
 `setup` installs the pinned nightly toolchain — a rustc-driver tool must be
 built by the exact rustc it wraps — and `reconverge-driver` +
 `reconverge-tui` at the CLI's own version, printing every command before it
-runs. Prefer to do it yourself? The equivalent is:
+runs. Prefer to do it yourself? The equivalent is (the `@VERSION` pins
+matter — all three binaries must be the same version, so pin both to the
+version of `cargo-reconverge` you installed):
 
 ```console
 $ rustup toolchain install nightly-2026-04-03 --profile minimal --component rustc-dev --component llvm-tools
-$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver reconverge-tui
+$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
 ## Using it
@@ -286,11 +288,22 @@ one that does less.
 - **Interprocedural analysis is summary-based in v1** — per-function
   `may_contain_barrier` / `may_contain_warp_op` bits, no context sensitivity.
   Call-site findings stay at `warning` and are never witness-promoted.
+- **RC001 covers the all-threads barriers** — `thread::sync_threads`,
+  `cluster::cluster_sync`, and `grid::sync`, whose shared contract is that
+  every thread of the scope must reach the call. The mbarrier arrive/wait
+  family (`barrier::Barrier`) is deliberately out: it is a phase-counted
+  split barrier where partial participation is the designed use, so
+  divergence at the wait is not by itself a bug.
 - **RC002 covers the masked collective surface** — every `*_sync` function
   of cuda-device's `warp` module (mask-first by convention) plus
   `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
   `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
   cuda-device and are not yet analyzed.
+- **Guards built on the lane-environment registers stay warnings.** The
+  `lanemask_*` registers, `warp_id`, and `live_lanes_1d` are recognized as
+  divergence sources, but the witness interpreter cannot yet evaluate their
+  values (that needs width-typed evaluation of integer `!` and truncating
+  casts), so findings under such guards are never witness-promoted.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.

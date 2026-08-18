@@ -10,6 +10,53 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.6] — 2026-08-18
+
+Two more coverage bugs from a second independent end-to-end review, plus
+hygiene.
+
+### Fixed
+
+- **RC001 now covers every all-threads barrier, not just the block one.**
+  `cluster::cluster_sync()` and `grid::sync()` deadlock exactly like
+  `sync_threads()` when reached divergently — upstream's own safety note on
+  the cluster barrier says so — but only `sync_threads` was classified, so
+  a divergent cluster or grid barrier reported nothing, interprocedurally
+  included. All three now classify as barriers (a divergent `cluster_sync`
+  is witness-confirmed like any other). The mbarrier arrive/wait family
+  stays out *deliberately*: it is a phase-counted split barrier where
+  partial participation is the designed use, and the boundary is now
+  written down in `--explain RC001` and the README.
+- **The lane-environment registers are no longer read as uniform.** The
+  `lanemask_*` registers (per-lane by definition — upstream documents
+  `lanemask_eq()` as `1 << lane_id()`), `warp_id()`, and `live_lanes_1d()`
+  took no arguments, so the lattice defaulted their results to uniform:
+  guards built on them marked no divergence, silencing RC001 and RC002
+  entirely, and the Inspector labeled per-lane hardware registers uniform.
+  All seven now classify as divergent environment reads — findings under
+  such guards fire at warning tier. They are not witness-promoted yet:
+  giving the replay their exact values needs width-typed evaluation
+  (integer `!`, truncating casts), which the interpreter does not have —
+  and approximating would risk false confirmations, the one thing this
+  tool must never produce. The README's Limitations section states the
+  tier honestly.
+- The mutation corpus's barrier operators now ask the dialect which calls
+  are barriers (as the collectives already did), so cluster and grid
+  barrier sites join the wrapbar/delbar classes and can never drift from
+  the analyzer.
+
+### Changed
+
+- `reconverge-tui` on a non-TTY now explains that an interactive terminal
+  is required and points at `--message-format json` / `--sarif`, instead
+  of dying with a bare `os error 6`.
+- The README's manual-install path now pins `reconverge-driver` and
+  `reconverge-tui` to the CLI's version, matching the guarantee
+  `cargo reconverge setup` provides.
+- The conformance scripts build the extractor with `--locked`, and the
+  extractor's lockfile is refreshed as part of a release bump — previously
+  it drifted silently and every conformance run dirtied the tree.
+
 ## [0.1.5] — 2026-08-18
 
 Dependency housekeeping; no behavior changes.
@@ -152,6 +199,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.6]: https://github.com/vyncint/reconverge/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vyncint/reconverge/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vyncint/reconverge/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vyncint/reconverge/releases/tag/v0.1.3

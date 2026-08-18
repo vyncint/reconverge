@@ -450,6 +450,7 @@ fn source_detail(kind: CallKind, display: &str) -> String {
         CallKind::ThreadIndexWitness => format!("thread-index witness `{display}()`"),
         CallKind::AtomicRmw => format!("atomic return value of `{display}()`"),
         CallKind::WarpCollective => format!("warp-collective result of `{display}()`"),
+        CallKind::DivergentEnvRead => format!("per-lane environment read `{display}()`"),
         _ => format!("result of `{display}()`"),
     }
 }

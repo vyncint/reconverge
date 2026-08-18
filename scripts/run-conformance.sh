@@ -45,7 +45,7 @@ echo "conformance: upstream $REPO @ $SHA"
 
 # 2. Build the tool and the extractor; extract the corpus.
 cargo build -q -p reconverge-driver -p cargo-reconverge
-(cd "$ROOT/conformance/extractor" && cargo test -q >/dev/null && cargo run -q -- extract "$CHECKOUT" "$CORPUS")
+(cd "$ROOT/conformance/extractor" && cargo test -q --locked >/dev/null && cargo run -q --locked -- extract "$CHECKOUT" "$CORPUS")
 
 # 3. Prune corpus members whose kernels reach host items the extractor
 #    deliberately does not carry over (they fail host-side compilation).
