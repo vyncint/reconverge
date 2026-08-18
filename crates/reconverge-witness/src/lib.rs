@@ -177,6 +177,21 @@ pub fn replay_hang(
         if parked.is_empty() {
             break;
         }
+        if lanes.iter().any(|l| l.stop == Some(LaneStop::Arrived)) {
+            // Lanes are split between the site and one or more earlier
+            // barriers: a mutual deadlock. The arrived lanes hold the site
+            // forever — a barrier site waits for the whole block, and a
+            // collective site is only ever emitted when its mask names a
+            // lane that is absent (`build_replay`) — so no parked barrier
+            // can be satisfied either: it waits for the arrived lanes, who
+            // wait for it. The parked lanes therefore never arrive.
+            for lane in &mut lanes {
+                if matches!(lane.stop, Some(LaneStop::AtBarrier(_))) {
+                    lane.stop = Some(LaneStop::NeverArrives);
+                }
+            }
+            continue;
+        }
         let first = parked[0];
         let all_running_parked_together = parked.len()
             == lanes
@@ -189,10 +204,10 @@ pub fn replay_hang(
                 })
                 .count()
             && parked.iter().all(|&b| b == first);
-        if !all_running_parked_together || lanes.iter().any(|l| l.stop == Some(LaneStop::Arrived)) {
-            // A partial barrier before the site, or lanes split between the
-            // site and another sync point: this is a different story than
-            // the finding under replay — no witness.
+        if !all_running_parked_together {
+            // Lanes are parked across different barriers with none at the
+            // site: everyone is stuck upstream and nobody arrives — nothing
+            // for this site's replay to witness.
             return None;
         }
         // Release: everyone passes the intervening barrier together.
@@ -499,6 +514,7 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                         }
                         CallKind::ThreadIndexWitness => Some(u128::from(lane_id)),
                         CallKind::BlockUniform => block_uniform_value(&callee.display),
+                        CallKind::DivergentEnvRead => lane_env_value(&callee.display),
                         CallKind::WitnessRead => arg_operands
                             .first()
                             .copied()
@@ -516,6 +532,23 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                 }
             }
         }
+    }
+}
+
+/// Values of the divergent environment reads that are exact under the
+/// replay's launch shape: one full warp, so `warp_id` is 0 and
+/// `live_lanes_1d` is 32 for every lane. The per-lane registers
+/// (`lanemask_*`) and the path-dependent `active_mask` stay unknown — their
+/// 32-bit mask values would flow into evaluation that is not width-typed
+/// (integer `!` is modeled boolean-only), and a wrong value here could
+/// fabricate a confirmation.
+fn lane_env_value(display: &str) -> Option<u128> {
+    if display.contains("warp_id") {
+        Some(0)
+    } else if display.contains("live_lanes_1d") {
+        Some(u128::from(LANES))
+    } else {
+        None
     }
 }
 

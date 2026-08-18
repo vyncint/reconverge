@@ -299,11 +299,15 @@ one that does less.
   `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
   `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
   cuda-device and are not yet analyzed.
-- **Guards built on the lane-environment registers stay warnings.** The
-  `lanemask_*` registers, `warp_id`, and `live_lanes_1d` are recognized as
-  divergence sources, but the witness interpreter cannot yet evaluate their
-  values (that needs width-typed evaluation of integer `!` and truncating
-  casts), so findings under such guards are never witness-promoted.
+- **Guards built on the per-lane mask registers stay warnings.** The
+  `lanemask_*` registers and `active_mask` are recognized as divergence
+  sources, but their 32-bit mask values are never evaluated in a replay
+  (the interpreter's evaluation is not width-typed, and a wrong mask value
+  could fabricate a confirmation), so findings under such guards are never
+  witness-promoted. When such a guard sits *upstream* of a finding with a
+  barrier inside it, that finding stays at warning too. `warp_id` and
+  `live_lanes_1d` are exact under the replay's one-warp launch and do
+  evaluate.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.

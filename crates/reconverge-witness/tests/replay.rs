@@ -456,3 +456,232 @@ fn uniform_arrival_produces_no_witness() {
     );
     assert!(replay_hang(&f, 0, SiteKind::Barrier, 0).is_none());
 }
+
+/// Issue #9: lanes split between the site and an upstream barrier are a
+/// mutual deadlock, not an abort — the parked lanes never arrive, and the
+/// site's own divergence is witnessed. Shape: even lanes park at a first
+/// barrier, odd lanes reach the site behind the complementary guard.
+///
+/// locals: 0 ret, 1 param, 2 witness, 3 ref, 4 got, 5 rem, 6 even, 7 odd
+#[test]
+fn deadlock_behind_an_upstream_barrier_still_witnesses_the_site() {
+    let f = kernel(
+        8,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                    ),
+                    stmt_eval(
+                        6,
+                        &[5],
+                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                    ),
+                ],
+                // evens → the upstream barrier, odds → onward.
+                term: term(TermKind::Branch {
+                    cond: 6,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    7,
+                    &[5],
+                    Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(1)),
+                )],
+                // odds → the site, evens (if ever released) → exit.
+                term: term(TermKind::Branch {
+                    cond: 7,
+                    targets: vec![6, 5],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 6)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 5, SiteKind::Barrier, 0)
+        .expect("the deadlocked shape must witness the site");
+    assert_eq!(replay.arrived, ODD_LANES, "odd lanes reach the site");
+    assert_eq!(
+        replay.never_arrives, EVEN_LANES,
+        "even lanes are parked forever at the upstream barrier"
+    );
+}
+
+/// Issue #9: `warp_id` (and `live_lanes_1d`) are exact under the replay's
+/// one-warp launch, so a warp-uniform-guarded barrier upstream no longer
+/// takes a downstream finding out of the gate.
+///
+/// locals: 0 ret, 1 param, 2 witness, 3 ref, 4 got, 5 rem, 6 even,
+/// 7 warp_id, 8 wcond
+#[test]
+fn warp_uniform_guard_upstream_does_not_ungate_the_site() {
+    let f = kernel(
+        9,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp_id",
+                    vec![],
+                    Some(7),
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    8,
+                    &[7],
+                    Eval::Binary(BinOp::Eq, Operand::Local(7), Operand::Const(0)),
+                )],
+                // warp 0 (everyone, under one warp) → the upstream barrier.
+                term: term(TermKind::Branch {
+                    cond: 8,
+                    targets: vec![5, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                    ),
+                    stmt_eval(
+                        6,
+                        &[5],
+                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 6,
+                    targets: vec![7, 6],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 7)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 6, SiteKind::Barrier, 0)
+        .expect("the uniform upstream barrier releases and the site is witnessed");
+    assert_eq!(replay.arrived, EVEN_LANES);
+    assert_eq!(replay.never_arrives, ODD_LANES);
+}
+
+/// The per-lane registers stay unevaluable by design: a `lanemask_*`
+/// guard whose diamond holds a barrier still aborts the replay (their
+/// 32-bit values would flow into evaluation that is not width-typed, and
+/// a wrong value could fabricate a confirmation).
+///
+/// locals: 0 ret, 1 param, 2 mask, 3 mcond
+#[test]
+fn lanemask_guards_stay_unevaluable() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "lanemask_eq",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(BinOp::BitAnd, Operand::Local(2), Operand::Const(1)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
+        "a lanemask-guarded site must not be witnessed"
+    );
+}
