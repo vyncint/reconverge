@@ -10,6 +10,26 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.8] — 2026-08-18
+
+Fixes [#10](https://github.com/vyncint/reconverge/issues/10): a divergent
+guard *inside* a loop is witness-promoted like the same guard outside one.
+
+### Fixed
+
+- **Overflow-checked arithmetic evaluates in replays.** Debug builds lower
+  `n += 1` to a checked pair (`CheckedBinaryOp` + assert + field read),
+  which the interpreter did not model — the counter went unknown after one
+  iteration, the loop condition became unknowable, and any site inside the
+  loop's cyclic region was abandoned. The adapter now recognizes the whole
+  idiom (the pair local, function-wide, excluded if anything else ever
+  writes it; the `.0` read; the width from the operand's unsigned type)
+  and the interpreter evaluates it **exactly within the type's width,
+  yielding unknown past it** — the checked form panics the thread on
+  overflow, so a wrapped value never exists in the real program and is
+  never fabricated in a replay. Signed and 128-bit operands stay
+  unmodeled.
+
 ## [0.1.7] — 2026-08-18
 
 Fixes [#9](https://github.com/vyncint/reconverge/issues/9): witness
@@ -230,6 +250,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.8]: https://github.com/vyncint/reconverge/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vyncint/reconverge/releases/tag/v0.1.7
 [0.1.6]: https://github.com/vyncint/reconverge/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vyncint/reconverge/releases/tag/v0.1.5

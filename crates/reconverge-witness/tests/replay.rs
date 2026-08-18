@@ -685,3 +685,151 @@ fn lanemask_guards_stay_unevaluable() {
         "a lanemask-guarded site must not be witnessed"
     );
 }
+
+/// Issue #10: a divergent guard *inside* a loop is promoted. The loop
+/// counter increments through overflow-checked arithmetic (what debug
+/// builds lower `n += 1` to), which the interpreter now evaluates.
+/// Shape of `while n < i%4 { if i%2 == 0 { site } n += 1 }`.
+///
+/// locals: 0 ret, 1 param, 2 witness, 3 ref, 4 got, 5 bound, 6 n,
+/// 7 loop-cond, 8 rem2, 9 even
+#[test]
+fn guard_inside_a_loop_is_witnessed() {
+    let f = kernel(
+        10,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(4)),
+                    ),
+                    stmt_eval(6, &[], Eval::Use(Operand::Const(0))),
+                ],
+                term: term(TermKind::Goto { target: 3 }),
+            },
+            // loop header: n < bound?
+            Block {
+                stmts: vec![stmt_eval(
+                    7,
+                    &[6, 5],
+                    Eval::Binary(BinOp::Lt, Operand::Local(6), Operand::Local(5)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 7,
+                    targets: vec![7, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            // body: even lanes reach the site
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        8,
+                        &[4],
+                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                    ),
+                    stmt_eval(
+                        9,
+                        &[8],
+                        Eval::Binary(BinOp::Eq, Operand::Local(8), Operand::Const(0)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 9,
+                    targets: vec![6, 5],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 6)),
+            },
+            // n += 1, back to the header
+            Block {
+                stmts: vec![stmt_eval(
+                    6,
+                    &[6],
+                    Eval::CheckedBinary(BinOp::Add, Operand::Local(6), Operand::Const(1), 32),
+                )],
+                term: term(TermKind::Goto { target: 3 }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 5, SiteKind::Barrier, 0)
+        .expect("the guard inside the loop must be witnessed");
+    // Lanes with i%4 > 0 enter the loop; the even ones among them
+    // (i % 4 == 2) reach the barrier on their first iteration.
+    assert_eq!(replay.arrived, 0x4444_4444);
+    assert_eq!(replay.never_arrives, !0x4444_4444);
+}
+
+/// The checked form panics the thread on overflow: past the width the
+/// value does not exist, so the interpreter yields unknown — never a
+/// wrapped value a real thread would not see.
+///
+/// locals: 0 ret, 1 param, 2 underflowed, 3 cond
+#[test]
+fn checked_arithmetic_never_fabricates_a_wrapped_value() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        2,
+                        &[],
+                        Eval::CheckedBinary(BinOp::Sub, Operand::Const(0), Operand::Const(1), 32),
+                    ),
+                    stmt_eval(
+                        3,
+                        &[2],
+                        Eval::Binary(BinOp::Gt, Operand::Local(2), Operand::Const(5)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![2, 1],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 2)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        replay_hang(&f, 1, SiteKind::Barrier, 0).is_none(),
+        "an underflow must abort the replay, not wrap"
+    );
+}

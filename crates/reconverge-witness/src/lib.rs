@@ -274,6 +274,14 @@ fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
                 UnOp::Neg => a.wrapping_neg(),
             })
         }
+        Eval::CheckedBinary(op, a, b, bits) => {
+            // The checked form panics the thread on overflow: a value past
+            // the width never exists in the real program, so the result is
+            // the exact in-range value or nothing. (Underflow wraps to the
+            // top of the 128-bit range and fails the same width test.)
+            let value = eval(store, Eval::Binary(op, a, b))?;
+            (value >> bits == 0).then_some(value)
+        }
         Eval::Binary(op, a, b) => {
             let a = operand_value(store, a)?;
             let b = operand_value(store, b)?;

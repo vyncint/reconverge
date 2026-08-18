@@ -14,8 +14,8 @@ categories = ["development-tools::cargo-plugins", "development-tools"]
 exclude = ["/tests"]
 
 [dependencies]
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.7" }
-reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.1.7" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.1.8" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.1.8" }
 serde_json = { workspace = true }
 
 [dev-dependencies]
