@@ -74,10 +74,11 @@ pub struct Replay {
     pub verdict_kind: VerdictKind,
     pub verdict_message: String,
     pub verdict_step: usize,
-    /// Bitmask of lanes that arrived at the site.
-    pub arrived: u32,
+    /// Bitmask of lanes that arrived at the site (bit per lane; the block
+    /// may be more than one warp, so this is wider than a warp mask).
+    pub arrived: u128,
     /// Bitmask of lanes that can never arrive.
-    pub never_arrives: u32,
+    pub never_arrives: u128,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +112,30 @@ pub fn replay_hang(
     site: SiteKind,
     cause_span: SpanRef,
 ) -> Option<Replay> {
+    replay_hang_at(f, site_block, site, cause_span, LANES)
+}
+
+/// Like [`replay_hang`], under a block of `lanes` threads (`[lanes,1,1]`,
+/// grid `[1,1,1]`) — the shape a kernel's launch contract declares.
+///
+/// `lanes` must be a multiple of 32 between 32 and 128. Beyond one warp,
+/// only barrier sites are replayed, and any warp collective on any lane's
+/// path aborts: a collective synchronizes *within* each warp, and modeling
+/// that per-warp release choreography wrongly could fabricate a witness.
+#[must_use]
+pub fn replay_hang_at(
+    f: &FnModel,
+    site_block: BlockId,
+    site: SiteKind,
+    cause_span: SpanRef,
+    lanes: u32,
+) -> Option<Replay> {
+    if !(LANES..=128).contains(&lanes) || !lanes.is_multiple_of(LANES) {
+        return None;
+    }
+    if lanes > LANES && !matches!(site, SiteKind::Barrier) {
+        return None;
+    }
     let cfg = Cfg::build(f);
     let can_reach = reaches(&cfg, site_block);
     if !can_reach[0] {
@@ -135,6 +160,7 @@ pub fn replay_hang(
         })
         .collect();
     let ipdom = post_dominators(&cfg, &is_exit);
+    let n_lanes = lanes;
     let ctx = ReplayCtx {
         f,
         cfg: &cfg,
@@ -142,9 +168,10 @@ pub fn replay_hang(
         ipdom: &ipdom,
         site_block,
         site,
+        lanes: n_lanes,
     };
 
-    let mut lanes: Vec<Lane> = (0..LANES)
+    let mut lanes: Vec<Lane> = (0..n_lanes)
         .map(|_| Lane {
             store: vec![None; f.local_count],
             block: 0,
@@ -221,8 +248,8 @@ pub fn replay_hang(
         }
     }
 
-    let mut arrived: u32 = 0;
-    let mut never: u32 = 0;
+    let mut arrived: u128 = 0;
+    let mut never: u128 = 0;
     for (lane_id, lane) in lanes.iter().enumerate() {
         match lane.stop {
             Some(LaneStop::Arrived) => arrived |= 1 << lane_id,
@@ -234,7 +261,7 @@ pub fn replay_hang(
         return None; // uniform behavior: nothing to witness
     }
 
-    build_replay(f, site_block, site, cause_span, arrived, never)
+    build_replay(f, site_block, site, cause_span, arrived, never, n_lanes)
 }
 
 /// Blocks from which `site` is reachable (including the site itself).
@@ -418,6 +445,8 @@ struct ReplayCtx<'a> {
     ipdom: &'a [Option<BlockId>],
     site_block: BlockId,
     site: SiteKind,
+    /// Threads in the replayed block (a multiple of 32, at most 128).
+    lanes: u32,
 }
 
 fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
@@ -514,15 +543,26 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                 } else {
                     match callee.kind {
                         CallKind::Barrier => return LaneStop::AtBarrier(lane.block),
+                        CallKind::WarpCollective if ctx.lanes > LANES => {
+                            // A collective synchronizes within each warp;
+                            // the multi-warp replay does not model that
+                            // per-warp choreography, and guessing it could
+                            // fabricate a witness.
+                            return LaneStop::Bailed;
+                        }
                         CallKind::WarpCollective => {
                             // A non-site collective synchronizes too; treat
                             // it like a barrier for the release logic.
                             let _ = ctx.site;
                             return LaneStop::AtBarrier(lane.block);
                         }
-                        CallKind::ThreadIndexWitness => Some(u128::from(lane_id)),
-                        CallKind::BlockUniform => block_uniform_value(&callee.display),
-                        CallKind::DivergentEnvRead => lane_env_value(&callee.display),
+                        CallKind::ThreadIndexWitness => {
+                            thread_index_value(&callee.display, lane_id)
+                        }
+                        CallKind::BlockUniform => block_uniform_value(&callee.display, ctx.lanes),
+                        CallKind::DivergentEnvRead => {
+                            lane_env_value(&callee.display, lane_id, ctx.lanes)
+                        }
                         CallKind::WitnessRead => arg_operands
                             .first()
                             .copied()
@@ -543,28 +583,51 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
     }
 }
 
+/// Values of the thread-index witnesses under the replay's launch shape
+/// (block `[lanes,1,1]`, grid `[1,1,1]`), by name — verified against
+/// cuda-device's formulas at the pinned rev. Every formula below reduces to
+/// a function of the in-block thread index when the grid is 1 and the block
+/// is one-dimensional; a name not listed evaluates to unknown, never to a
+/// guess (an unlisted witness with the wrong value could fabricate a
+/// confirmation — `threadIdx_y` is 0 under this launch, not the lane id).
+fn thread_index_value(display: &str, idx: u32) -> Option<u128> {
+    let last = display.rsplit("::").next().unwrap_or(display);
+    match last {
+        // blockIdx.x * blockDim.x + threadIdx.x = idx; 2D columns and the
+        // flattened 2D indices reduce the same way with row 0.
+        "threadIdx_x" | "index_1d" | "index_1d_u32" | "index_2d" | "index_2d_runtime"
+        | "index_2d_col" => Some(u128::from(idx)),
+        // The y/z axes of a one-dimensional block are 0 — as is the 2D row.
+        "threadIdx_y" | "threadIdx_z" | "index_2d_row" => Some(0),
+        "lane_id" => Some(u128::from(idx % LANES)),
+        // blockIdx.x * warps_per_block + threadIdx.x / 32 = idx / 32.
+        "warp_index" => Some(u128::from(idx / LANES)),
+        _ => None,
+    }
+}
+
 /// Values of the divergent environment reads that are exact under the
-/// replay's launch shape: one full warp, so `warp_id` is 0 and
-/// `live_lanes_1d` is 32 for every lane. The per-lane registers
-/// (`lanemask_*`) and the path-dependent `active_mask` stay unknown — their
-/// 32-bit mask values would flow into evaluation that is not width-typed
-/// (integer `!` is modeled boolean-only), and a wrong value here could
-/// fabricate a confirmation.
-fn lane_env_value(display: &str) -> Option<u128> {
+/// replay's launch shape: `warp_id` is the warp of the thread index and
+/// `live_lanes_1d` counts the warp's launched lanes. The per-lane
+/// registers (`lanemask_*`) and the path-dependent `active_mask` stay
+/// unknown — their 32-bit mask values would flow into evaluation that is
+/// not width-typed (integer `!` is modeled boolean-only), and a wrong
+/// value here could fabricate a confirmation.
+fn lane_env_value(display: &str, idx: u32, lanes: u32) -> Option<u128> {
     if display.contains("warp_id") {
-        Some(0)
+        Some(u128::from(idx / LANES))
     } else if display.contains("live_lanes_1d") {
-        Some(u128::from(LANES))
+        Some(u128::from((lanes - (idx / LANES) * LANES).min(LANES)))
     } else {
         None
     }
 }
 
 /// Values of the block-uniform built-ins under the replay's launch shape
-/// (block `[32,1,1]`, grid `[1,1,1]`).
-fn block_uniform_value(display: &str) -> Option<u128> {
+/// (block `[lanes,1,1]`, grid `[1,1,1]`).
+fn block_uniform_value(display: &str, lanes: u32) -> Option<u128> {
     if display.contains("blockDim_x") {
-        Some(u128::from(LANES))
+        Some(u128::from(lanes))
     } else if display.contains("blockDim") || display.contains("gridDim") {
         Some(1)
     } else if display.contains("blockIdx") {
@@ -574,8 +637,8 @@ fn block_uniform_value(display: &str) -> Option<u128> {
     }
 }
 
-fn lanes_of(mask: u32) -> Vec<u8> {
-    (0..LANES as u8).filter(|l| mask & (1 << l) != 0).collect()
+fn lanes_of(mask: u128, lanes: u32) -> Vec<u8> {
+    (0..lanes as u8).filter(|l| mask & (1 << l) != 0).collect()
 }
 
 fn build_replay(
@@ -583,8 +646,9 @@ fn build_replay(
     site_block: BlockId,
     site: SiteKind,
     cause_span: SpanRef,
-    arrived: u32,
-    never: u32,
+    arrived: u128,
+    never: u128,
+    lanes: u32,
 ) -> Option<Replay> {
     let site_span = f.blocks[site_block].term.span;
     let site_display = match &f.blocks[site_block].term.kind {
@@ -608,13 +672,15 @@ fn build_replay(
     let (verdict_kind, verdict_message) = match site {
         SiteKind::Barrier => {
             steps.push(ReplayStep {
-                statement: format!("{site_display}() — {n_arrived} of 32 lanes arrive and wait"),
+                statement: format!(
+                    "{site_display}() — {n_arrived} of {lanes} lanes arrive and wait"
+                ),
                 span: Some(site_span),
-                lane_changes: lanes_of(arrived)
+                lane_changes: lanes_of(arrived, lanes)
                     .into_iter()
                     .map(|l| (l, LaneState::Waiting))
                     .collect(),
-                barrier: Some((n_arrived, LANES)),
+                barrier: Some((n_arrived, lanes)),
                 warp_op: None,
             });
             steps.push(ReplayStep {
@@ -623,7 +689,7 @@ fn build_replay(
                      ever reaching the barrier"
                 ),
                 span: Some(cause_span),
-                lane_changes: lanes_of(never)
+                lane_changes: lanes_of(never, lanes)
                     .into_iter()
                     .map(|l| (l, LaneState::Exited))
                     .collect(),
@@ -633,13 +699,16 @@ fn build_replay(
             (
                 VerdictKind::UndefinedBehavior,
                 format!(
-                    "{n_arrived} of 32 lanes wait at `{site_display}()` while {n_never} \
+                    "{n_arrived} of {lanes} lanes wait at `{site_display}()` while {n_never} \
                      never arrive; the barrier cannot be satisfied — undefined behavior \
                      on hardware, usually a permanent hang"
                 ),
             )
         }
         SiteKind::Collective { mask } => {
+            // Collectives are replayed under one warp only (the entry gate
+            // guarantees it), so the lane set fits the 32-bit mask domain.
+            let arrived = u32::try_from(arrived).ok()?;
             // Without a known constant mask there is nothing to check the
             // arrivals against — claiming a mismatch would overreach.
             let mask = u32::try_from(mask?).ok()?;
@@ -664,7 +733,7 @@ fn build_replay(
                     named_absent.count_ones()
                 ),
                 span: Some(cause_span),
-                lane_changes: lanes_of(never)
+                lane_changes: lanes_of(never, lanes)
                     .into_iter()
                     .map(|l| (l, LaneState::Exited))
                     .collect(),
@@ -685,7 +754,7 @@ fn build_replay(
 
     let verdict_step = steps.len() - 1;
     Some(Replay {
-        block: [LANES, 1, 1],
+        block: [lanes, 1, 1],
         grid: [1, 1, 1],
         steps,
         verdict_kind,
@@ -697,37 +766,66 @@ fn build_replay(
 }
 
 /// The pure-ASCII warp diagram for text diagnostics and SARIF (§7): lane
-/// states at the failure point, eight lanes per group.
+/// states at the failure point, eight lanes per group, one row per warp.
 #[must_use]
-pub fn ascii_warp_diagram(arrived: u32, never: u32, arrived_glyph: char) -> Vec<String> {
-    let mut row = String::new();
-    for lane in 0..LANES {
-        if lane > 0 && lane % 8 == 0 {
-            row.push(' ');
+pub fn ascii_warp_diagram(
+    arrived: u128,
+    never: u128,
+    lanes: u32,
+    arrived_glyph: char,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for warp in 0..lanes.div_ceil(LANES) {
+        let mut row = String::new();
+        for offset in 0..LANES {
+            let lane = warp * LANES + offset;
+            if offset > 0 && offset % 8 == 0 {
+                row.push(' ');
+            }
+            row.push(if arrived & (1 << lane) != 0 {
+                arrived_glyph
+            } else if never & (1 << lane) != 0 {
+                '.'
+            } else {
+                '?'
+            });
         }
-        row.push(if arrived & (1 << lane) != 0 {
-            arrived_glyph
-        } else if never & (1 << lane) != 0 {
-            '.'
-        } else {
-            '?'
-        });
+        out.push(format!(
+            "lanes {}..{} at the failure point: {row}",
+            warp * LANES,
+            warp * LANES + LANES - 1
+        ));
     }
-    vec![
-        format!("lanes 0..31 at the failure point: {row}"),
-        format!("({arrived_glyph} = reaches the call, . = never arrives)"),
-    ]
+    out.push(format!(
+        "({arrived_glyph} = reaches the call, . = never arrives)"
+    ));
+    out
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn diagram_groups_lanes_by_eight() {
-        let lines = super::ascii_warp_diagram(0x5555_5555, 0xaaaa_aaaa, 'W');
+        let lines = super::ascii_warp_diagram(0x5555_5555, 0xaaaa_aaaa, 32, 'W');
         assert_eq!(
             lines[0],
             "lanes 0..31 at the failure point: W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W."
         );
         assert!(lines[1].contains("W = reaches the call"));
+    }
+
+    #[test]
+    fn diagram_prints_one_row_per_warp() {
+        // Warp 0 arrives whole, warp 1 never does: the multi-warp shape.
+        let lines = super::ascii_warp_diagram(0xffff_ffff, 0xffff_ffff_0000_0000, 64, 'W');
+        assert_eq!(
+            lines[0],
+            "lanes 0..31 at the failure point: WWWWWWWW WWWWWWWW WWWWWWWW WWWWWWWW"
+        );
+        assert_eq!(
+            lines[1],
+            "lanes 32..63 at the failure point: ........ ........ ........ ........"
+        );
+        assert!(lines[2].contains("W = reaches the call"));
     }
 }

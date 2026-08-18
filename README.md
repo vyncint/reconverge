@@ -322,8 +322,18 @@ one that does less.
   values replays traffic in today (a truncating cast on the thread index
   promotes normally), wrong for full-width masks, and a wrong mask value
   could fabricate a confirmation. Overflow-checked arithmetic is already
-  width-typed. `warp_id` and `live_lanes_1d` are exact under the replay's
-  one-warp launch and do evaluate.
+  width-typed. `warp_id` and `live_lanes_1d` are exact under the replayed
+  launch and do evaluate.
+- **Whole-warp divergence is witnessed at the declared block.** When the
+  one-warp replay finds nothing and the kernel's `#[launch_contract]`
+  declares a one-dimensional block of several whole warps (64, 96, or
+  128), barrier findings are replayed again at that size — so a
+  `warp_id()`-guarded barrier that is safe at one warp and undefined at
+  two gates exactly when the contract says two. The multi-warp replay
+  covers barriers only: any warp collective on any lane's path aborts it,
+  because a collective synchronizes within each warp and that per-warp
+  choreography is not modeled. Blocks that are 2D, not whole warps, or
+  wider than 128 threads stay at the one-warp replay.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.

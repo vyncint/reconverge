@@ -10,6 +10,35 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.12] — 2026-08-18
+
+Fixes [#14](https://github.com/vyncint/reconverge/issues/14): whole-warp
+divergence is witnessed at the block the launch contract declares, so a
+kernel that is safe at one warp and undefined at two gates exactly when
+its contract says two.
+
+### Fixed
+
+- **The witness replays the declared block.** When the one-warp replay
+  finds nothing and the kernel's `#[launch_contract]` declares a
+  one-dimensional block of several whole warps (64, 96, or 128), barrier
+  findings are replayed again at that size. `warp_id()` becomes the warp
+  of the thread index, `lane_id()` wraps per warp, `blockDim_x` is the
+  declared width, and the lane diagram prints one row per warp. The
+  multi-warp replay covers barriers only — any warp collective on any
+  lane's path aborts it, since a collective synchronizes within each warp
+  and modeling that per-warp choreography wrongly could fabricate a
+  witness.
+- **Thread-index witnesses now evaluate per name, closing a latent
+  false-confirmation hole.** Every `ThreadIndexWitness` used to replay as
+  the lane id — but `threadIdx_y` and `threadIdx_z` are 0 under the
+  replay's one-dimensional block, not the lane id, so a barrier guarded
+  on them (uniform on hardware, correct code) could have been falsely
+  confirmed. Each witness name now maps to its cuda-device formula under
+  the replayed launch (`index_2d_row` is 0, `warp_index` is the warp,
+  `lane_id` wraps), and an unrecognized name evaluates to unknown, never
+  to a guess.
+
 ## [0.1.11] — 2026-08-18
 
 Fixes [#13](https://github.com/vyncint/reconverge/issues/13):
@@ -304,6 +333,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.12]: https://github.com/vyncint/reconverge/releases/tag/v0.1.12
 [0.1.11]: https://github.com/vyncint/reconverge/releases/tag/v0.1.11
 [0.1.10]: https://github.com/vyncint/reconverge/releases/tag/v0.1.10
 [0.1.9]: https://github.com/vyncint/reconverge/releases/tag/v0.1.9

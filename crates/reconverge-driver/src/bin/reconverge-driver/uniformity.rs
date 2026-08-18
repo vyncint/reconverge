@@ -52,23 +52,42 @@ fn try_witness(
     site: &ReplaySite,
     witnesses: &mut Vec<WitnessArtifact>,
 ) {
-    let Some(replay) = replay_hang(f, site.block, site.kind, site.cause_span) else {
+    // One warp first — a divergent lane pair inside a warp is the common
+    // case. When that finds nothing and the kernel's launch contract
+    // declares a one-dimensional block of several whole warps, replay the
+    // declared block: whole-warp divergence (a `warp_id()` guard) has no
+    // divergent pair inside 32 lanes and only exists at the declared size.
+    let replay = replay_hang(f, site.block, site.kind, site.cause_span).or_else(|| {
+        let [x, 1, 1] = f.declared_block? else {
+            return None;
+        };
+        (x > 32).then_some(())?;
+        reconverge_witness::replay_hang_at(f, site.block, site.kind, site.cause_span, x)
+    });
+    let Some(replay) = replay else {
         return;
     };
     finding.confidence = Confidence::Confirmed;
+    let warps = replay.block[0].div_ceil(32);
     finding.notes.push(format!(
-        "witness: replayed with grid ({},{},{}) x block ({},{},{}), warp 0 — {}",
+        "witness: replayed with grid ({},{},{}) x block ({},{},{}), {} — {}",
         replay.grid[0],
         replay.grid[1],
         replay.grid[2],
         replay.block[0],
         replay.block[1],
         replay.block[2],
+        if warps == 1 {
+            "warp 0".to_string()
+        } else {
+            format!("all {warps} warps")
+        },
         replay.verdict_message
     ));
     finding.notes.extend(ascii_warp_diagram(
         replay.arrived,
         replay.never_arrives,
+        replay.block[0],
         site.arrived_glyph,
     ));
     witnesses.push(witness_artifact(models, f, finding, &replay));
@@ -92,10 +111,12 @@ fn witness_artifact(
         launch: Launch {
             grid: replay.grid,
             block: replay.block,
-            warp: Some(0),
+            // A one-warp replay is warp 0; a whole-block replay is not a
+            // single warp's view.
+            warp: (replay.block[0] == 32).then_some(0),
         },
-        lanes: 32,
-        initial_lane_states: vec![LaneState::Active; 32],
+        lanes: u8::try_from(replay.block[0]).unwrap_or(32),
+        initial_lane_states: vec![LaneState::Active; replay.block[0] as usize],
         steps: replay
             .steps
             .iter()

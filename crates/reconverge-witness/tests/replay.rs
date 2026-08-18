@@ -53,6 +53,7 @@ fn kernel(local_count: usize, blocks: Vec<Block>) -> FnModel {
         local_names: vec![None; local_count],
         local_spans: vec![None; local_count],
         blocks,
+        declared_block: None,
     }
 }
 
@@ -116,8 +117,8 @@ fn canonical(site: TermKind) -> FnModel {
     )
 }
 
-const EVEN_LANES: u32 = 0x5555_5555;
-const ODD_LANES: u32 = 0xaaaa_aaaa;
+const EVEN_LANES: u128 = 0x5555_5555;
+const ODD_LANES: u128 = 0xaaaa_aaaa;
 
 /// M4 gate, RC001 half: the canonical divergent barrier replays as a hang.
 #[test]
@@ -170,7 +171,7 @@ fn rc002_mask_mismatch_replays_concretely() {
         .expect("a collective step");
     assert_eq!(
         op_step.warp_op,
-        Some(("ballot_sync".to_string(), 0xffff_ffff, EVEN_LANES))
+        Some(("ballot_sync".to_string(), 0xffff_ffff, EVEN_LANES as u32))
     );
     assert!(replay.verdict_message.contains("16 lane(s)"));
 }
@@ -182,7 +183,7 @@ fn matching_partial_mask_produces_no_witness() {
     let f = canonical(call(
         CallKind::WarpCollective,
         "ballot_sync",
-        vec![Some(Operand::Const(u64::from(EVEN_LANES) as u128))],
+        vec![Some(Operand::Const(EVEN_LANES))],
         Some(0),
         4,
     ));
@@ -191,7 +192,7 @@ fn matching_partial_mask_produces_no_witness() {
             &f,
             3,
             SiteKind::Collective {
-                mask: Some(u64::from(EVEN_LANES)),
+                mask: Some(EVEN_LANES as u64),
             },
             0,
         )
@@ -785,8 +786,8 @@ fn guard_inside_a_loop_is_witnessed() {
         .expect("the guard inside the loop must be witnessed");
     // Lanes with i%4 > 0 enter the loop; the even ones among them
     // (i % 4 == 2) reach the barrier on their first iteration.
-    assert_eq!(replay.arrived, 0x4444_4444);
-    assert_eq!(replay.never_arrives, !0x4444_4444);
+    assert_eq!(replay.arrived, 0x4444_4444_u128);
+    assert_eq!(replay.never_arrives, 0xbbbb_bbbb_u128);
 }
 
 /// The checked form panics the thread on overflow: past the width the
@@ -832,4 +833,219 @@ fn checked_arithmetic_never_fabricates_a_wrapped_value() {
         replay_hang(&f, 1, SiteKind::Barrier, 0).is_none(),
         "an underflow must abort the replay, not wrap"
     );
+}
+
+/// Issue #14: whole-warp divergence exists only beyond one warp. A
+/// `warp_id()`-guarded barrier replayed at the declared block of 64
+/// threads has a divergent pair — warp 0 arrives, warp 1 never does —
+/// while the same model at 32 lanes is uniform and correctly witnesses
+/// nothing.
+///
+/// locals: 0 ret, 1 param, 2 warp_id, 3 cond
+#[test]
+fn whole_warp_divergence_is_witnessed_at_the_declared_block() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(0)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    use reconverge_witness::replay_hang_at;
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
+        "at one warp the guard is uniform — nothing to witness"
+    );
+    let replay = replay_hang_at(&f, 2, SiteKind::Barrier, 0, 64).expect("two warps diverge");
+    assert_eq!(replay.arrived, 0xffff_ffff, "warp 0 arrives");
+    assert_eq!(
+        replay.never_arrives, 0xffff_ffff_0000_0000,
+        "warp 1 never does"
+    );
+    assert_eq!(replay.block, [64, 1, 1]);
+    assert!(replay.verdict_message.contains("32 of 64 lanes"));
+}
+
+/// A collective anywhere on a lane's path aborts a multi-warp replay:
+/// its synchronization is per warp, which the replay does not model.
+#[test]
+fn multi_warp_replay_bails_on_any_collective() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::WarpCollective,
+                    "ballot_sync",
+                    vec![Some(Operand::Const(0xffff_ffff))],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp_id",
+                    vec![],
+                    Some(3),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[3],
+                    Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(0)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(reconverge_witness::replay_hang_at(&f, 3, SiteKind::Barrier, 0, 64).is_none());
+}
+
+/// The thread-index witnesses evaluate per name: `threadIdx_y` is 0 under
+/// the replay's one-dimensional block, never the lane id. A barrier
+/// guarded on it is uniform — treating the guard as per-lane would have
+/// fabricated a confirmation of a correct kernel.
+///
+/// locals: 0 ret, 1 param, 2 y, 3 cond
+#[test]
+fn thread_idx_y_is_zero_not_the_lane_id() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "threadIdx_y",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(0)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
+        "every lane has y = 0, every lane arrives — nothing to witness, \
+         and definitely not a confirmation"
+    );
+}
+
+/// `lane_id` is the in-warp lane, not the thread index: at 64 threads a
+/// `lane_id() % 2` guard splits *every* warp the same way.
+///
+/// locals: 0 ret, 1 param, 2 lane, 3 rem, 4 cond
+#[test]
+fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
+    let f = kernel(
+        5,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        3,
+                        &[2],
+                        Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(2)),
+                    ),
+                    stmt_eval(
+                        4,
+                        &[3],
+                        Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(0)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 4,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = reconverge_witness::replay_hang_at(&f, 2, SiteKind::Barrier, 0, 64)
+        .expect("even lanes of both warps diverge");
+    assert_eq!(replay.arrived, 0x5555_5555_5555_5555_u128);
+    assert_eq!(replay.never_arrives, 0xaaaa_aaaa_aaaa_aaaa_u128);
 }

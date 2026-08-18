@@ -47,6 +47,7 @@ fn kernel(local_count: usize, arg_count: usize, blocks: Vec<Block>) -> FnModel {
         local_names: vec![None; local_count],
         local_spans: vec![None; local_count],
         blocks,
+        declared_block: None,
     }
 }
 
@@ -368,6 +369,7 @@ fn call_to_barrier_helper_under_divergence_is_flagged() {
         arg_count: 0,
         local_names: vec![None],
         local_spans: vec![None],
+        declared_block: None,
         blocks: vec![
             Block {
                 stmts: vec![],
@@ -506,6 +508,7 @@ fn call_to_collective_helper_under_divergence_is_flagged() {
         arg_count: 0,
         local_names: vec![None],
         local_spans: vec![None],
+        declared_block: None,
         blocks: vec![
             Block {
                 stmts: vec![],

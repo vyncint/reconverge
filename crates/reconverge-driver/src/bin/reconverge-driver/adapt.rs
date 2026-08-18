@@ -108,6 +108,13 @@ fn adapt_fn(
         .collect();
 
     let overflow_tuples = overflow_tuple_locals(body);
+    let declared_block = body.blocks.iter().find_map(|bb| {
+        if let TerminatorKind::Call { func, .. } = &bb.terminator.kind {
+            block_config_dims(func)
+        } else {
+            None
+        }
+    });
     let blocks = body
         .blocks
         .iter()
@@ -138,7 +145,47 @@ fn adapt_fn(
         local_names,
         local_spans,
         blocks,
+        declared_block,
     }
+}
+
+/// The `(X, Y, Z)` a `#[launch_contract(block = …)]` declares, read from
+/// the const generics of the `__launch_contract_block_config::<X, Y, Z>()`
+/// marker the macro plants in the kernel body.
+fn block_config_dims(func: &Operand) -> Option<[u32; 3]> {
+    let Operand::Constant(constant) = func else {
+        return None;
+    };
+    let TyKind::RigidTy(RigidTy::FnDef(def, args)) = constant.const_.ty().kind() else {
+        return None;
+    };
+    if !def.name().ends_with("__launch_contract_block_config") {
+        return None;
+    }
+    let dims: Vec<u32> = args
+        .0
+        .iter()
+        .filter_map(|arg| {
+            if let rustc_public::ty::GenericArgKind::Const(c) = arg {
+                u32::try_from(ty_const_uint(c)?).ok()
+            } else {
+                None
+            }
+        })
+        .collect();
+    <[u32; 3]>::try_from(dims).ok()
+}
+
+/// The value of an unsigned const generic argument.
+fn ty_const_uint(c: &rustc_public::ty::TyConst) -> Option<u128> {
+    if let rustc_public::ty::TyConstKind::Value(_, allocation) = c.kind()
+        && allocation.provenance.ptrs.is_empty()
+        && !allocation.bytes.is_empty()
+        && allocation.bytes.len() <= 16
+    {
+        return allocation.read_uint().ok();
+    }
+    None
 }
 
 /// Locals that hold the `(value, overflowed)` pair of an overflow-checked

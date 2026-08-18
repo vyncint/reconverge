@@ -33,6 +33,10 @@ pub struct FnModel {
     pub local_names: Vec<Option<String>>,
     pub local_spans: Vec<Option<SpanRef>>,
     pub blocks: Vec<Block>,
+    /// Block dimensions declared by the kernel's `#[launch_contract]`
+    /// (`block = (X, Y, Z)`), when present — the launch shape a witness may
+    /// replay beyond one warp.
+    pub declared_block: Option<[u32; 3]>,
 }
 
 #[derive(Debug, Clone)]

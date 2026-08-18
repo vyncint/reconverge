@@ -189,11 +189,15 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
         return;
     };
 
+    // The lane strip is one row per warp; a one-warp witness keeps the
+    // historical five-row block exactly.
+    let warp_rows = u16::from(witness.lanes.max(1)).div_ceil(32);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // header + blank
-            Constraint::Length(5), // lanes: indices, lanes, mask, active, legend
+            // lanes: indices, one strip per warp, mask, active, legend
+            Constraint::Length(4 + warp_rows),
             Constraint::Length(5), // event: blank, step, statement, at, event line
             Constraint::Min(2),    // verdict
         ])
@@ -278,18 +282,27 @@ fn render_lanes(
     )));
 
     // The lane strip, one styled span per lane so states are color-coded
-    // cell by cell (NO_COLOR renders the identical text).
-    let mut spans = vec![Span::raw(label_cell("lanes"))];
-    for (lane, state) in states.iter().enumerate() {
-        if lane > 0 && lane % 8 == 0 {
-            spans.push(Span::raw(" "));
+    // cell by cell (NO_COLOR renders the identical text). Blocks wider
+    // than a warp get one row per warp, labeled by its warp index; the
+    // indices header above applies to every row.
+    for (warp, chunk) in states.chunks(32).enumerate() {
+        let label = if states.len() > 32 {
+            format!("w{warp}")
+        } else {
+            "lanes".to_string()
+        };
+        let mut spans = vec![Span::raw(label_cell(&label))];
+        for (lane, state) in chunk.iter().enumerate() {
+            if lane > 0 && lane % 8 == 0 {
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::styled(
+                lane_glyph(*state).to_string(),
+                view.lane_style(*state),
+            ));
         }
-        spans.push(Span::styled(
-            lane_glyph(*state).to_string(),
-            view.lane_style(*state),
-        ));
+        lines.push(Line::from(spans));
     }
-    lines.push(Line::from(spans));
 
     // Mask and active rows: real strips at a collective step, a quiet
     // placeholder elsewhere so the layout never jumps.
