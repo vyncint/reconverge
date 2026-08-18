@@ -243,9 +243,12 @@ pub fn score(
            the row is published anyway, and doubles as a precision invariant:\n\
            removing a barrier must not conjure findings.\n\
          - **wrapcol** — same mechanics as wrapbar, over the collectives the\n\
-           dialect classifies (`shfl*_sync`, `ballot/any/all_sync`). Sites hidden\n\
-           behind upstream helper wrappers (`match_*_sync`, typed `shuffle_*`) are\n\
-           outside the v1 surface and counted under site accounting below.\n\
+           dialect classifies: the masked `*_sync` surface of cuda-device's warp\n\
+           module (`shuffle_*_sync` in every width, `ballot/any/all_sync`,\n\
+           `match_*_sync`, `redux_sync_*`, `elect_sync`) plus `sync_mask`. Sites\n\
+           hidden behind the unmasked convenience wrappers (`warp::shuffle`,\n\
+           `warp::ballot`, the `reduce_*` helpers) are outside the v1 surface\n\
+           and counted under site accounting below.\n\
            Promotion additionally needs a mask the analysis can evaluate; upstream\n\
            writes masks as named consts, which `rustc_public` cannot evaluate at\n\
            the pin, and an unevaluable mask is never witness-promoted — it could\n\

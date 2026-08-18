@@ -13,8 +13,8 @@ hand; rerun the script and review the diff.
 |-------|--------------|----------|--------:|----------:|-------------------:|----------------------:|
 | wrapbar | barrier wrapped in an index-derived `if` | RC001 | 57 | 57 | 40/57 (70%) | 52/57 (91%) |
 | delbar | barrier deleted (data race) | - | 57 | 57 | 0/57 (0%) | 0/57 (0%) |
-| wrapcol | warp collective wrapped the same way | RC002 | 3 | 3 | 0/3 (0%) | 3/3 (100%) |
-| shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 3 | 3 | 0/3 (0%) | 0/3 (0%) |
+| wrapcol | warp collective wrapped the same way | RC002 | 14 | 14 | 0/14 (0%) | 14/14 (100%) |
+| shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 17 | 17 | 0/17 (0%) | 0/17 (0%) |
 | mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 414 | 393 | 393/393 (100%) | 393/393 (100%) |
 
 **Precision at default confidence: 1.000** — 436 gating finding(s)
@@ -37,9 +37,12 @@ the witness replays only *found* divergence bugs). Expected recall 0;
 the row is published anyway, and doubles as a precision invariant:
 removing a barrier must not conjure findings.
 - **wrapcol** — same mechanics as wrapbar, over the collectives the
-dialect classifies (`shfl*_sync`, `ballot/any/all_sync`). Sites hidden
-behind upstream helper wrappers (`match_*_sync`, typed `shuffle_*`) are
-outside the v1 surface and counted under site accounting below.
+dialect classifies: the masked `*_sync` surface of cuda-device's warp
+module (`shuffle_*_sync` in every width, `ballot/any/all_sync`,
+`match_*_sync`, `redux_sync_*`, `elect_sync`) plus `sync_mask`. Sites
+hidden behind the unmasked convenience wrappers (`warp::shuffle`,
+`warp::ballot`, the `reduce_*` helpers) are outside the v1 surface
+and counted under site accounting below.
 Promotion additionally needs a mask the analysis can evaluate; upstream
 writes masks as named consts, which `rustc_public` cannot evaluate at
 the pin, and an unevaluable mask is never witness-promoted — it could
@@ -61,11 +64,11 @@ caps (from `mutation-report.tsv`):
 ```
 emitted_wrapbar	57
 emitted_delbar	57
-emitted_wrapcol	3
-emitted_shrinkmask	3
+emitted_wrapcol	14
+emitted_shrinkmask	17
 emitted_mutslice	414
 skipped_sites_outside_kernels	0
-skipped_unclassified_collectives	23
-skipped_tail_expression_collectives	0
+skipped_unclassified_collectives	33
+skipped_tail_expression_collectives	3
 skipped_extra_disjoint_params	45
 ```

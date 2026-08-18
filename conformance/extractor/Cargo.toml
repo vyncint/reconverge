@@ -6,10 +6,14 @@ edition = "2024"
 publish = false
 
 # Standalone tool: not a member of the reconverge workspace (it runs against
-# a separate upstream checkout and needs none of the workspace crates).
+# a separate upstream checkout).
 [workspace]
 
 [dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# The dialect itself decides which collectives the mutation corpus may
+# target, so the corpus can never drift from what the analyzer recognizes.
+reconverge-core = { path = "../../crates/reconverge-core" }
+reconverge-dialect-oxide = { path = "../../crates/reconverge-dialect-oxide" }
 serde_json = "1"
 syn = { version = "2", features = ["full", "visit"] }

@@ -10,6 +10,50 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.3] — 2026-08-18
+
+Three bug fixes, from an independent end-to-end review of 0.1.1.
+
+### Fixed
+
+- **`--cc` changes now actually re-lint.** The `--cc` invalidation (and the
+  missing-artifact self-heal) deleted `<build>/.fingerprint`, but cargo
+  keeps freshness fingerprints under the *profile* directory
+  (`<build>/debug/.fingerprint`), so the deletion hit a path that never
+  existed and stale RC004 findings were re-rendered verbatim — reporting
+  the first capability ever seen as fact, even when `--cc` was dropped
+  entirely. Both sites now sweep the profile directories.
+- **Workspaces with a proc-macro member no longer re-drive every run.**
+  Findings artifacts are named `findings-<crate>-<crate types>.json` and
+  the crate name was split off at the *last* hyphen — but `proc-macro` is a
+  crate type with a hyphen in it, so those artifacts never matched a
+  member, and the self-heal re-ran the whole wrapped `cargo check` on every
+  warm invocation. The name now splits at the first hyphen (crate names
+  cannot contain one).
+- **RC002 now recognizes the collectives cuda-device actually exports.**
+  The dialect matched CUDA C spellings (`shfl_*_sync`, `activemask`) that
+  do not exist in the Rust API, so every real shuffle fell through
+  unclassified. The classifier now covers the full masked `*_sync` surface
+  at the pinned rev — `shuffle_*_sync` in every width, `match_*_sync`,
+  `redux_sync_*`, `elect_sync`, `is_elected_sync` — plus `sync_mask`, the
+  warp barrier, whose mask carries the same contract. `active_mask()` is
+  classified as a divergent environment read: its result is divergent for
+  the lattice, but it is never flagged (no mask, no synchronization, legal
+  under divergence). The conformance extractor now asks the dialect itself
+  which collectives it classifies, so the mutation corpus can never drift
+  from the analyzer again; the unmasked convenience wrappers
+  (`warp::shuffle`, `warp::ballot`, the `reduce_*` helpers) remain outside
+  v1 and are now documented as such in `--explain RC002`, the masks lesson,
+  and the README.
+- **`check` works from any directory, on any default toolchain.** The
+  wrapped `cargo check` now exports the pinned toolchain (as the CI action
+  always did) and resolves the driver's dylib path from that toolchain
+  instead of the ambient one, so a kernel crate no longer needs a copy of
+  reconverge's `rust-toolchain.toml` just to keep the driver from dying in
+  the dynamic linker. When the wrapped build still fails, the error no
+  longer claims "build errors" unconditionally — it distinguishes a driver
+  that failed to start and points at `cargo reconverge setup`.
+
 ## [0.1.2] — 2026-08-17
 
 The crates.io pages, and a one-stop install.
@@ -89,6 +133,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.3]: https://github.com/vyncint/reconverge/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vyncint/reconverge/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vyncint/reconverge/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vyncint/reconverge/releases/tag/v0.1.0

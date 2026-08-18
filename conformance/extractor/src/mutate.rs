@@ -75,28 +75,27 @@ pub struct Mutant {
     pub source: String,
 }
 
-/// Collectives the shipped dialect classifies (RC002's surface). Upstream
-/// helper wrappers (`match_*_sync`, typed `shuffle_*`) hide the collective
-/// inside `cuda_device` and are outside the v1 static surface — sites using
-/// them are skipped *and counted*, so the published table names the gap.
+/// Collectives the shipped dialect classifies (RC002's surface) — asked of
+/// the dialect itself, so this predicate can never drift from what the
+/// analyzer actually recognizes. (It drifted once: a hand-kept copy matched
+/// CUDA C spellings like `shfl_sync` that cuda-device never exports, and
+/// the corpus silently skipped every real shuffle site.)
 fn is_classified_collective(name: &str) -> bool {
-    matches!(
-        name,
-        "shfl_sync"
-            | "shfl_up_sync"
-            | "shfl_down_sync"
-            | "shfl_xor_sync"
-            | "ballot_sync"
-            | "any_sync"
-            | "all_sync"
-    )
+    reconverge_dialect_oxide::simt::classify_call(&format!("cuda_device::warp::{name}"))
+        == reconverge_core::dialect::CallKind::WarpCollective
 }
 
+/// Warp-collective-backed helpers the dialect does not classify: the
+/// unmasked convenience wrappers, which hide the collective (and an
+/// implicit full mask) inside `cuda_device` where the analysis cannot see
+/// the mask. Sites using them are skipped *and counted*, so the published
+/// table names the gap. (`active_mask` is deliberately absent from both
+/// lists: it takes no mask and is legal under divergence, so a site using
+/// it is not a maskable hazard at all.)
 fn is_unclassified_collective(name: &str) -> bool {
-    name == "match_any_sync"
-        || name == "match_all_sync"
-        || name == "activemask"
-        || name.starts_with("shuffle_")
+    matches!(name, "shuffle" | "ballot" | "all" | "any" | "live_lanes_1d")
+        || (name.starts_with("shuffle_") && !name.ends_with("_sync"))
+        || name.starts_with("reduce_")
 }
 
 /// The index-derived guard every wrap operator injects: the canonical
@@ -667,7 +666,7 @@ mod kernels {
         let i = thread::index_1d();
         thread::sync_threads();
         let vote = warp::ballot_sync(FULL_MASK, n > 1);
-        let echo = warp::shfl_sync(0xffff_ffff, vote, 0);
+        let echo = warp::shuffle_sync(0xffff_ffff, vote, 0);
         if let Some(e) = out.get_mut(i) {
             *e = vote + echo;
         }
@@ -711,7 +710,7 @@ mod kernels {
     #[test]
     fn wraps_collective_initializers_preserving_the_binding() {
         let wraps = mutants_of(Class::WrapCollective);
-        assert_eq!(wraps.len(), 2, "ballot and shfl sites");
+        assert_eq!(wraps.len(), 2, "ballot and shuffle sites");
         for m in &wraps {
             assert!(m.source.contains("} else { Default::default() }"));
             syn::parse_file(&m.source).expect("collective mutant parses");

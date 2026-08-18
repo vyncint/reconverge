@@ -29,10 +29,17 @@ pub enum CallKind {
     UniformMarker,
     /// A block-wide execution barrier (`sync_threads`): RC001's subject.
     Barrier,
-    /// A warp collective (`shfl_sync`, `ballot_sync`, …): RC002's subject.
-    /// Results are treated as divergent (they are at most warp-uniform,
-    /// and the lattice does not distinguish warp- from block-uniformity).
+    /// A warp collective (`shuffle_sync`, `ballot_sync`, …): RC002's
+    /// subject. Results are treated as divergent (they are at most
+    /// warp-uniform, and the lattice does not distinguish warp- from
+    /// block-uniformity).
     WarpCollective,
+    /// Reads the per-lane execution environment (`active_mask`): the
+    /// result depends on which lanes are active, so it is divergent for
+    /// the lattice — but the call takes no participation mask and
+    /// synchronizes nothing, so it is never RC002's subject and never a
+    /// synchronization point for the witness interpreter.
+    DivergentEnvRead,
     /// Reads a thread-index witness back out (`ThreadIndex::get`): for the
     /// dataflow it joins its arguments like any call; for the witness
     /// interpreter it is the identity on its first argument.
@@ -54,9 +61,10 @@ impl CallKind {
     #[must_use]
     pub fn result_base(self) -> Option<crate::Uniformity> {
         match self {
-            CallKind::ThreadIndexWitness | CallKind::AtomicRmw | CallKind::WarpCollective => {
-                Some(crate::Uniformity::Divergent)
-            }
+            CallKind::ThreadIndexWitness
+            | CallKind::AtomicRmw
+            | CallKind::WarpCollective
+            | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
             CallKind::BlockUniform | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
             CallKind::Barrier | CallKind::WitnessRead | CallKind::Other => None,
         }

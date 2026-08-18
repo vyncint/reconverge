@@ -286,6 +286,11 @@ one that does less.
 - **Interprocedural analysis is summary-based in v1** — per-function
   `may_contain_barrier` / `may_contain_warp_op` bits, no context sensitivity.
   Call-site findings stay at `warning` and are never witness-promoted.
+- **RC002 covers the masked collective surface** — every `*_sync` function
+  of cuda-device's `warp` module (mask-first by convention) plus
+  `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
+  `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
+  cuda-device and are not yet analyzed.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.
