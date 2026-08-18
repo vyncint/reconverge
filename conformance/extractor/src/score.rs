@@ -253,11 +253,14 @@ pub fn score(
            writes masks as named consts, which `rustc_public` cannot evaluate at\n\
            the pin, and an unevaluable mask is never witness-promoted — it could\n\
            be the correct guarded partial-warp idiom.\n\
-         - **shrinkmask** — a shrunk full mask at a *convergent* call site is a\n\
-           mask-lane mismatch only under launch shapes the static engine does not\n\
-           model (RC002 v1 checks convergence; it does not do mask arithmetic\n\
-           against launch shapes). Expected recall 0 in v1; the class stays in\n\
-           the corpus so the gap is public and any improvement shows up here.\n\
+         - **shrinkmask** — a shrunk full mask at a *convergent* call site names\n\
+           no lane that is absent, so the witness has nothing to confirm: the\n\
+           replay *does* compare the mask against the lanes it finds present\n\
+           (that comparison is what promotes a divergent full-mask call and what\n\
+           keeps the correct guarded partial-warp idiom out of the gate), and a\n\
+           mismatch under some *other* launch shape than the replayed one is not\n\
+           witnessed. Expected recall 0; the class stays in the corpus so the\n\
+           boundary is public and any improvement shows up here.\n\
          - **mutslice** — RC003 is a syntactic `deny`; expected recall 100% of\n\
            compiling mutants. Swaps whose kernel body needs `DisjointSlice`-only\n\
            API do not compile and are pruned (counted below).\n",

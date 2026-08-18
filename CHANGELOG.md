@@ -10,6 +10,26 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.9] — 2026-08-18
+
+Fixes [#11](https://github.com/vyncint/reconverge/issues/11):
+documentation only — the behavior was measured to be better than the
+claim, and the claim is what changes.
+
+### Changed
+
+- `conformance/MUTATION.md` said RC002 v1 "does not do mask arithmetic
+  against launch shapes", which read literally predicts a gating finding
+  for the correct guarded partial-warp idiom. The replay *does* compare
+  the mask against the lanes it finds present — promotion happens exactly
+  when a named lane is absent, and a mask naming exactly the arrivals is
+  never promoted. The shrinkmask row's explanation now says the true,
+  narrower thing: a shrunk mask at a *convergent* site names no absent
+  lane, so there is nothing to witness; recall numbers are unchanged.
+- The README Limitations now state positively what the replay checks
+  (mask versus lanes present, under the one-warp launch it runs), instead
+  of leaving the stronger property undocumented.
+
 ## [0.1.8] — 2026-08-18
 
 Fixes [#10](https://github.com/vyncint/reconverge/issues/10): a divergent
@@ -250,6 +270,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.9]: https://github.com/vyncint/reconverge/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vyncint/reconverge/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vyncint/reconverge/releases/tag/v0.1.7
 [0.1.6]: https://github.com/vyncint/reconverge/releases/tag/v0.1.6
