@@ -121,7 +121,7 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
         .filter(|krate| !artifacts.iter().any(|a| &&a.krate == krate))
         .collect();
     if !missing.is_empty() {
-        let _ = fs::remove_dir_all(build_dir.join(".fingerprint"));
+        drop_build_fingerprints(&build_dir);
         run_wrapped_check(&driver, &reconverge_dir, &build_dir, options)?;
         artifacts = collect_artifacts(&reconverge_dir, &metadata.member_crates)?;
     }
@@ -255,10 +255,26 @@ fn refresh_cc_marker(
     let current = cc.unwrap_or("(none)");
     let previous = fs::read_to_string(&marker).ok();
     if previous.as_deref() != Some(current) {
-        let _ = fs::remove_dir_all(build_dir.join(".fingerprint"));
+        drop_build_fingerprints(build_dir);
         fs::write(&marker, current).map_err(|e| format!("cannot write cc marker: {e}"))?;
     }
     Ok(())
+}
+
+/// Drop cargo's freshness fingerprints in our dedicated build directory,
+/// forcing the next wrapped `cargo check` to re-lint everything.
+///
+/// Cargo keeps fingerprints under each *profile* directory
+/// (`<build_dir>/debug/.fingerprint`), so sweep every immediate
+/// subdirectory rather than assuming one profile name.
+fn drop_build_fingerprints(build_dir: &Path) {
+    let _ = fs::remove_dir_all(build_dir.join(".fingerprint"));
+    let Ok(entries) = fs::read_dir(build_dir) else {
+        return; // nothing built yet: nothing to invalidate
+    };
+    for entry in entries.flatten() {
+        let _ = fs::remove_dir_all(entry.path().join(".fingerprint"));
+    }
 }
 
 fn run_wrapped_check(
@@ -267,13 +283,24 @@ fn run_wrapped_check(
     build_dir: &Path,
     options: &CheckOptions,
 ) -> Result<(), String> {
-    let sysroot_lib = sysroot_lib_dir()?;
+    // The driver is a rustc-driver binary: it only runs against the exact
+    // toolchain it was built by (the pin `cargo reconverge setup` installs,
+    // which is also the repo's own `rust-toolchain.toml`). The analyzed
+    // project has no reason to carry that pin, so export it — exactly what
+    // action/action.yml does in CI — and resolve the driver's dylib path
+    // from that toolchain, never the ambient one. An explicit
+    // RUSTUP_TOOLCHAIN in the environment still wins, for drivers built
+    // against a deliberately different toolchain (RECONVERGE_DRIVER).
+    let toolchain = std::env::var("RUSTUP_TOOLCHAIN")
+        .unwrap_or_else(|_| crate::setup_cmd::PINNED_TOOLCHAIN.to_string());
+    let sysroot_lib = sysroot_lib_dir(&toolchain)?;
     let mut command = Command::new(cargo_bin());
     command
         .arg("check")
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env("RECONVERGE_ARTIFACTS_OUT", reconverge_dir)
         .env("CARGO_TARGET_DIR", build_dir)
+        .env("RUSTUP_TOOLCHAIN", &toolchain)
         .env(
             "LD_LIBRARY_PATH",
             prepend_path("LD_LIBRARY_PATH", &sysroot_lib),
@@ -291,20 +318,49 @@ fn run_wrapped_check(
         .status()
         .map_err(|e| format!("cannot run cargo check: {e}"))?;
     if !status.success() {
-        return Err("`cargo check` failed; fix the build errors above and rerun".to_string());
+        return Err(format!(
+            "`cargo check` under the reconverge driver failed (see the errors \
+             above). If rustc reported real build errors, fix those and rerun; \
+             if the driver itself failed to start (for example `error while \
+             loading shared libraries`), the toolchain does not match the \
+             driver — run `cargo reconverge setup` to install {} and the \
+             matching binaries",
+            crate::setup_cmd::PINNED_TOOLCHAIN
+        ));
     }
     Ok(())
 }
 
-/// Library dir of the active toolchain, for the driver's rustc dylibs.
-fn sysroot_lib_dir() -> Result<PathBuf, String> {
-    let output = Command::new("rustc")
-        .args(["--print", "sysroot"])
+/// Library dir of the given toolchain, for the driver's rustc dylibs.
+fn sysroot_lib_dir(toolchain: &str) -> Result<PathBuf, String> {
+    // `rustup run` resolves the pinned toolchain even when the `rustc` on
+    // PATH is not rustup's shim (a distro or Homebrew rust would otherwise
+    // shadow it). Fall back to plain `rustc` — with the toolchain exported
+    // for the shim case — only when rustup itself is absent.
+    let output = match Command::new("rustup")
+        .args(["run", toolchain, "rustc", "--print", "sysroot"])
         .output()
-        .map_err(|e| format!("cannot run rustc --print sysroot: {e}"))?;
-    if !output.status.success() {
-        return Err("rustc --print sysroot failed".to_string());
-    }
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            return Err(format!(
+                "cannot resolve the {toolchain} sysroot: {}\nrun `cargo \
+                 reconverge setup` to install it",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Err(_) => {
+            let output = Command::new("rustc")
+                .args(["--print", "sysroot"])
+                .env("RUSTUP_TOOLCHAIN", toolchain)
+                .output()
+                .map_err(|e| format!("cannot run rustc --print sysroot: {e}"))?;
+            if !output.status.success() {
+                return Err("rustc --print sysroot failed".to_string());
+            }
+            output
+        }
+    };
     let sysroot = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
     Ok(PathBuf::from(sysroot.trim()).join("lib"))
 }
@@ -337,15 +393,16 @@ fn collect_artifacts(
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        // Crate names cannot contain `-`, so the last `-` separates the
-        // crate from the crate-types suffix unambiguously.
+        // Crate names cannot contain `-`, so the *first* `-` separates the
+        // crate from the crate-types suffix unambiguously. (Not the last:
+        // the suffix itself can contain one — `proc-macro`.)
         let Some(stem) = name
             .strip_prefix("findings-")
             .and_then(|s| s.strip_suffix(".json"))
         else {
             continue;
         };
-        let Some((krate_in_name, _types)) = stem.rsplit_once('-') else {
+        let Some((krate_in_name, _types)) = stem.split_once('-') else {
             continue;
         };
         if !members.contains(&krate_in_name.to_string()) {
@@ -361,4 +418,63 @@ fn collect_artifacts(
     }
     artifacts.sort_by(|a, b| a.krate.cmp(&b.krate));
     Ok(artifacts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh, empty scratch directory. Every caller passes a unique tag:
+    /// tests run in parallel and each wipes its own directory on entry.
+    fn empty_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("reconverge-check-unit-{tag}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn fingerprints_are_dropped_per_profile() {
+        // Cargo keeps fingerprints under the *profile* directory
+        // (`build/debug/.fingerprint`), not at the build root; deleting only
+        // the root path silently invalidates nothing (the --cc-is-ignored
+        // bug). The sweep must reach one level down.
+        let build_dir = empty_dir("fingerprints");
+        let profile_fp = build_dir.join("debug/.fingerprint/some-crate");
+        let root_fp = build_dir.join(".fingerprint/other");
+        fs::create_dir_all(&profile_fp).unwrap();
+        fs::create_dir_all(&root_fp).unwrap();
+
+        drop_build_fingerprints(&build_dir);
+
+        assert!(!build_dir.join("debug/.fingerprint").exists());
+        assert!(!build_dir.join(".fingerprint").exists());
+        // The rest of the profile directory survives: only freshness is
+        // invalidated, compiled deps stay cached.
+        assert!(build_dir.join("debug").exists());
+    }
+
+    #[test]
+    fn dropping_fingerprints_before_any_build_is_fine() {
+        let build_dir = empty_dir("fingerprints-missing").join("never-built");
+        drop_build_fingerprints(&build_dir); // must not panic or error
+    }
+
+    #[test]
+    fn artifacts_of_proc_macro_members_are_collected() {
+        // The crate-types suffix can itself contain `-` (`proc-macro`), so
+        // the filename must split on the first hyphen, not the last.
+        let dir = empty_dir("collect-proc-macro");
+        let artifact =
+            reconverge_artifacts::findings::FindingsArtifact::new("helper_macros", vec![]);
+        fs::write(
+            dir.join("findings-helper_macros-proc-macro.json"),
+            serde_json::to_string(&artifact).unwrap(),
+        )
+        .unwrap();
+
+        let collected = collect_artifacts(&dir, &["helper_macros".to_string()]).unwrap();
+        assert_eq!(collected.len(), 1, "proc-macro artifact must be collected");
+        assert_eq!(collected[0].krate, "helper_macros");
+    }
 }

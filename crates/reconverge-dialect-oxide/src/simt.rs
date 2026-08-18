@@ -41,9 +41,53 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // The block-wide execution barrier (RC001's subject).
         "sync_threads" => CallKind::Barrier,
 
-        // Warp collectives (RC002's subject, wired in M3).
-        "shfl_sync" | "shfl_up_sync" | "shfl_down_sync" | "shfl_xor_sync" | "ballot_sync"
-        | "any_sync" | "all_sync" | "activemask" => CallKind::WarpCollective,
+        // Warp collectives (RC002's subject): cuda-device's masked `*_sync`
+        // surface, every one taking the participation mask as its first
+        // argument, plus `sync_mask` — the warp barrier, whose mask carries
+        // the same contract. The unmasked convenience wrappers (`shuffle`,
+        // `ballot`, `all`, `any`, `reduce_*`, …) hide the collective — and
+        // an implicit full mask — inside cuda-device, where the analysis
+        // cannot see the mask argument; they are a documented v1 recall gap
+        // (explain/RC002.md), never misread as mask-first calls.
+        "ballot_sync"
+        | "any_sync"
+        | "all_sync"
+        | "shuffle_sync"
+        | "shuffle_up_sync"
+        | "shuffle_down_sync"
+        | "shuffle_xor_sync"
+        | "shuffle_f32_sync"
+        | "shuffle_up_f32_sync"
+        | "shuffle_down_f32_sync"
+        | "shuffle_xor_f32_sync"
+        | "shuffle_u64_sync"
+        | "shuffle_up_u64_sync"
+        | "shuffle_down_u64_sync"
+        | "shuffle_xor_u64_sync"
+        | "shuffle_f64_sync"
+        | "shuffle_up_f64_sync"
+        | "shuffle_down_f64_sync"
+        | "shuffle_xor_f64_sync"
+        | "match_any_sync"
+        | "match_any_i64_sync"
+        | "match_all_sync"
+        | "match_all_i64_sync"
+        | "redux_sync_add"
+        | "redux_sync_and"
+        | "redux_sync_or"
+        | "redux_sync_xor"
+        | "redux_sync_min_u32"
+        | "redux_sync_min_i32"
+        | "redux_sync_max_u32"
+        | "redux_sync_max_i32"
+        | "elect_sync"
+        | "is_elected_sync"
+        | "sync_mask" => CallKind::WarpCollective,
+
+        // Which lanes are currently active: divergent by definition, but
+        // not a collective — it takes no mask, synchronizes nothing, and is
+        // legal (indeed designed) to call under divergence.
+        "active_mask" => CallKind::DivergentEnvRead,
 
         // Dialect plumbing with uniform, effect-free results.
         "make_kernel_scope"
@@ -122,6 +166,93 @@ mod tests {
             classify_call("cuda_device::atomic::atomic_add"),
             CallKind::AtomicRmw
         );
+    }
+
+    #[test]
+    fn classifies_the_full_masked_sync_surface() {
+        // The names cuda-device actually exports at the pinned rev (its
+        // `warp` module): `shuffle_*_sync` in every width, the match and
+        // redux families, election, and the warp barrier. The historical
+        // CUDA C spellings (`shfl_sync`, `activemask`) do not exist in the
+        // Rust API and must NOT be matched — a name that matches nothing
+        // is a silent recall hole.
+        for name in [
+            "shuffle_sync",
+            "shuffle_up_sync",
+            "shuffle_down_sync",
+            "shuffle_xor_sync",
+            "shuffle_f32_sync",
+            "shuffle_up_f32_sync",
+            "shuffle_down_f32_sync",
+            "shuffle_xor_f32_sync",
+            "shuffle_u64_sync",
+            "shuffle_up_u64_sync",
+            "shuffle_down_u64_sync",
+            "shuffle_xor_u64_sync",
+            "shuffle_f64_sync",
+            "shuffle_up_f64_sync",
+            "shuffle_down_f64_sync",
+            "shuffle_xor_f64_sync",
+            "match_any_sync",
+            "match_any_i64_sync",
+            "match_all_sync",
+            "match_all_i64_sync",
+            "redux_sync_add",
+            "redux_sync_and",
+            "redux_sync_or",
+            "redux_sync_xor",
+            "redux_sync_min_u32",
+            "redux_sync_min_i32",
+            "redux_sync_max_u32",
+            "redux_sync_max_i32",
+            "elect_sync",
+            "is_elected_sync",
+            "sync_mask",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::warp::{name}")),
+                CallKind::WarpCollective,
+                "{name} must be a warp collective"
+            );
+        }
+        for dead in ["shfl_sync", "shfl_down_sync", "activemask"] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::warp::{dead}")),
+                CallKind::Other,
+                "{dead} does not exist in cuda-device"
+            );
+        }
+    }
+
+    #[test]
+    fn active_mask_is_divergent_but_never_a_collective() {
+        assert_eq!(
+            classify_call("cuda_device::warp::active_mask"),
+            CallKind::DivergentEnvRead
+        );
+    }
+
+    #[test]
+    fn unmasked_wrappers_are_the_documented_v1_gap() {
+        // `shuffle`/`ballot`/`all`/`any` (and the typed non-`_sync`
+        // variants) pass an implicit full mask inside cuda-device. Their
+        // first argument is NOT a mask, so classifying them as collectives
+        // would corrupt mask reasoning; they stay Other until the dialect
+        // can carry an implicit-mask convention.
+        for name in [
+            "shuffle",
+            "shuffle_down",
+            "shuffle_down_f32",
+            "ballot",
+            "all",
+            "any",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::warp::{name}")),
+                CallKind::Other,
+                "{name} is outside the v1 surface"
+            );
+        }
     }
 
     #[test]

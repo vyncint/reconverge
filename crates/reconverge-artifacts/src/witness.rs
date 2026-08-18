@@ -88,7 +88,7 @@ pub struct BarrierEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WarpOpEvent {
-    /// e.g. `shfl_sync`, `ballot_sync`.
+    /// e.g. `shuffle_sync`, `ballot_sync`.
     pub op: String,
     /// Participation mask named by the call, `0x` + 8 hex digits.
     pub mask: String,

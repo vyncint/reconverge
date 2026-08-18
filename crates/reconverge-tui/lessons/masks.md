@@ -1,5 +1,6 @@
-Warp collectives — `ballot_sync`, `any_sync`, `all_sync`, the `shfl_*`
-family — make the lanes of one warp cooperate: vote, exchange, gather.
+Warp collectives — `ballot_sync`, `any_sync`, `all_sync`, the
+`shuffle_*_sync` family — make the lanes of one warp cooperate: vote,
+exchange, gather.
 Their first argument is the participation mask, one bit per lane, and it
 is a contract: the collective synchronizes exactly the lanes the mask
 names, every named lane must eventually execute the same call, and a
