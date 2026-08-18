@@ -10,6 +10,22 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.11] — 2026-08-18
+
+Fixes [#13](https://github.com/vyncint/reconverge/issues/13):
+documentation only — the behavior is deliberate and was undocumented.
+
+### Changed
+
+- Written down, in the README Limitations and `--explain RC001`: a
+  recognized construct that the declared launch cannot reach (for
+  example a barrier behind mutually exclusive guards) is reported at
+  `warning` tier and never witness-promoted. The split is intentional —
+  a launch contract is a declaration, not a proof, so staying silent
+  would lose the diagnostic for kernels launched outside their declared
+  shape, while the replay honestly has nothing to confirm under the
+  declared one. Such findings never gate.
+
 ## [0.1.10] — 2026-08-18
 
 Fixes [#12](https://github.com/vyncint/reconverge/issues/12):
@@ -288,6 +304,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.11]: https://github.com/vyncint/reconverge/releases/tag/v0.1.11
 [0.1.10]: https://github.com/vyncint/reconverge/releases/tag/v0.1.10
 [0.1.9]: https://github.com/vyncint/reconverge/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vyncint/reconverge/releases/tag/v0.1.8
