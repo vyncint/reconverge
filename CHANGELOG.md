@@ -10,6 +10,15 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.5] — 2026-08-18
+
+Dependency housekeeping; no behavior changes.
+
+- The termlens PTY test harness is now a crates.io dependency (0.3.0)
+  instead of a rev-pinned git dependency — the pinned rev was exactly the
+  v0.3.0 release commit, so the bits are identical. Dev-dependency only;
+  it never ships in the binaries.
+
 ## [0.1.4] — 2026-08-18
 
 Release-pipeline change only; the shipped code is identical to 0.1.3.
@@ -143,6 +152,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.5]: https://github.com/vyncint/reconverge/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vyncint/reconverge/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vyncint/reconverge/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vyncint/reconverge/releases/tag/v0.1.2
