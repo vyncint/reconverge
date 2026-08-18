@@ -27,7 +27,7 @@ use rustc_public::mir::{
     Body, Operand, Place, ProjectionElem, Statement, StatementKind, TerminatorKind,
     VarDebugInfoContents,
 };
-use rustc_public::ty::{RigidTy, Span, TyKind};
+use rustc_public::ty::{RigidTy, Span, TyKind, UintTy};
 use rustc_public::{CrateDef, CrateItem, ItemKind};
 
 use crate::emit;
@@ -107,6 +107,7 @@ fn adapt_fn(
         .map(|decl| Some(intern(spans, decl.span)))
         .collect();
 
+    let overflow_tuples = overflow_tuple_locals(body);
     let blocks = body
         .blocks
         .iter()
@@ -114,7 +115,7 @@ fn adapt_fn(
             let mut stmts: Vec<Stmt> = bb
                 .statements
                 .iter()
-                .filter_map(|s| adapt_stmt(s, spans))
+                .filter_map(|s| adapt_stmt(s, body, &overflow_tuples, spans))
                 .collect();
             let term = adapt_term(
                 &bb.terminator.kind,
@@ -140,14 +141,63 @@ fn adapt_fn(
     }
 }
 
-fn adapt_stmt(stmt: &Statement, spans: &mut Vec<SourceSpan>) -> Option<Stmt> {
+/// Locals that hold the `(value, overflowed)` pair of an overflow-checked
+/// arithmetic operation and nothing else, ever. Debug builds lower
+/// `n += 1` to `_t = CheckedBinaryOp(..); assert(!(_t.1)); _n = (_t.0)`,
+/// with the assert as a block terminator — so the pair's definition and its
+/// field reads span blocks, and the set must be computed function-wide.
+/// A local also assigned by anything else is excluded outright.
+fn overflow_tuple_locals(body: &Body) -> Vec<bool> {
+    use rustc_public::mir::{Rvalue, StatementKind};
+    let mut checked = vec![false; body.locals().len()];
+    let mut poisoned = vec![false; body.locals().len()];
+    for bb in &body.blocks {
+        for stmt in &bb.statements {
+            if let StatementKind::Assign(place, rvalue) = &stmt.kind {
+                if !place.projection.is_empty() {
+                    poisoned[place.local] = true;
+                } else if matches!(rvalue, Rvalue::CheckedBinaryOp(..)) {
+                    checked[place.local] = true;
+                } else {
+                    poisoned[place.local] = true;
+                }
+            }
+        }
+        // A terminator writing the local also disqualifies it.
+        match &bb.terminator.kind {
+            TerminatorKind::Call {
+                destination: place, ..
+            } => poisoned[place.local] = true,
+            TerminatorKind::InlineAsm { operands, .. } => {
+                for op in operands {
+                    if let Some(out) = &op.out_place {
+                        poisoned[out.local] = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    checked
+        .iter()
+        .zip(&poisoned)
+        .map(|(&c, &p)| c && !p)
+        .collect()
+}
+
+fn adapt_stmt(
+    stmt: &Statement,
+    body: &Body,
+    overflow_tuples: &[bool],
+    spans: &mut Vec<SourceSpan>,
+) -> Option<Stmt> {
     match &stmt.kind {
         StatementKind::Assign(place, rvalue) => {
             let (dest, mut uses) = write_target(place);
             uses.extend(rvalue_locals(rvalue));
             // Semantics only make sense for whole-local destinations.
             let eval = if place.projection.is_empty() {
-                rvalue_eval(rvalue)
+                rvalue_eval(rvalue, body, overflow_tuples)
             } else {
                 None
             };
@@ -396,10 +446,25 @@ fn model_operand(operand: &Operand) -> Option<model::Operand> {
 /// Evaluable semantics for simple right-hand sides (the witness
 /// interpreter's kernel subset). References to plain locals are
 /// value-transparent: the interpreter tracks scalars, not memory.
-fn rvalue_eval(rvalue: &rustc_public::mir::Rvalue) -> Option<Eval> {
+fn rvalue_eval(
+    rvalue: &rustc_public::mir::Rvalue,
+    body: &Body,
+    overflow_tuples: &[bool],
+) -> Option<Eval> {
     use rustc_public::mir::Rvalue;
     match rvalue {
-        Rvalue::Use(op) | Rvalue::Cast(_, op, _) => model_operand(op).map(Eval::Use),
+        Rvalue::Use(op) | Rvalue::Cast(_, op, _) => {
+            // Reading `.0` of an overflow-checked pair is reading the
+            // arithmetic result the interpreter stored in the pair's local.
+            if let rustc_public::mir::Operand::Copy(place) | rustc_public::mir::Operand::Move(place) =
+                op
+                && overflow_tuples.get(place.local) == Some(&true)
+                && let [ProjectionElem::Field(0, _)] = place.projection.as_slice()
+            {
+                return Some(Eval::Use(model::Operand::Local(place.local)));
+            }
+            model_operand(op).map(Eval::Use)
+        }
         Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) | Rvalue::CopyForDeref(place)
             if place.projection.is_empty() =>
         {
@@ -410,6 +475,29 @@ fn rvalue_eval(rvalue: &rustc_public::mir::Rvalue) -> Option<Eval> {
             model_operand(a)?,
             model_operand(b)?,
         )),
+        // Debug builds lower `+`/`-`/`*` to the overflow-checked form; the
+        // interpreter evaluates it exactly within the type's width and
+        // yields unknown past it (the real program panics there — a
+        // wrapped value must never be fabricated). Unsigned only: the
+        // store's u128 embedding has no signed semantics.
+        Rvalue::CheckedBinaryOp(op, a, b) => {
+            let bits = match a.ty(body.locals()).ok()?.kind() {
+                TyKind::RigidTy(RigidTy::Uint(u)) => match u {
+                    UintTy::U8 => 8,
+                    UintTy::U16 => 16,
+                    UintTy::U32 => 32,
+                    UintTy::U64 | UintTy::Usize => 64,
+                    UintTy::U128 => return None,
+                },
+                _ => return None,
+            };
+            Some(Eval::CheckedBinary(
+                model_binop(op)?,
+                model_operand(a)?,
+                model_operand(b)?,
+                bits,
+            ))
+        }
         Rvalue::UnaryOp(op, a) => Some(Eval::Unary(model_unop(op)?, model_operand(a)?)),
         _ => None,
     }

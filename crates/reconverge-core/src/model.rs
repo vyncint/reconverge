@@ -72,6 +72,12 @@ pub enum Eval {
     Use(Operand),
     Binary(BinOp, Operand, Operand),
     Unary(UnOp, Operand),
+    /// Overflow-checked arithmetic on an unsigned integer of the given
+    /// width in bits (debug builds lower `+`/`-`/`*` to this). The checked
+    /// form panics the thread on overflow, so past the width the result is
+    /// not a value the program ever sees: the interpreter yields the exact
+    /// in-range value or unknown, never a wrapped one.
+    CheckedBinary(BinOp, Operand, Operand, u32),
 }
 
 /// Integer/boolean operators the interpreter evaluates. Comparison results
