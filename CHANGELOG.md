@@ -10,6 +10,37 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.7] — 2026-08-18
+
+Fixes [#9](https://github.com/vyncint/reconverge/issues/9): witness
+promotion no longer stops at the first barrier it cannot see past, so a
+barrier added *above* a confirmable finding can no longer take it out of
+the CI gate silently.
+
+### Fixed
+
+- **Lanes split between the site and an upstream barrier are a mutual
+  deadlock, not an abort.** The site's arrived lanes wait forever (a
+  barrier site waits for the whole block; a collective site is only
+  emitted when its mask names an absent lane), so no upstream barrier can
+  ever be satisfied either — the parked lanes provably never arrive, and
+  the replay now concludes exactly that instead of declining. A divergent
+  barrier below another divergent barrier is witness-confirmed again.
+- **`warp_id()` and `live_lanes_1d()` evaluate in replays.** The replay
+  always runs one full warp (`block [32,1,1]`, the same shape under which
+  `blockDim_x` is already hardcoded), where those two are exactly 0 and
+  32\. A `warp_id()`-guarded barrier upstream now releases uniformly
+  instead of aborting the replay of everything below it — the issue's
+  headline case. Findings *under* such guards still never promote (the
+  guard is uniform across the replayed warp, so there is no divergence to
+  witness), which keeps the documented tier for lane-environment guards
+  intact.
+- The per-lane registers (`lanemask_*`, `active_mask`) remain deliberately
+  unevaluable — their 32-bit mask values would flow into evaluation that
+  is not width-typed, and a wrong value could fabricate a confirmation.
+  The Limitations section now also states the upstream-guard consequence,
+  as the issue requested for any residual ordering effect.
+
 ## [0.1.6] — 2026-08-18
 
 Two more coverage bugs from a second independent end-to-end review, plus
@@ -199,6 +230,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.7]: https://github.com/vyncint/reconverge/releases/tag/v0.1.7
 [0.1.6]: https://github.com/vyncint/reconverge/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vyncint/reconverge/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vyncint/reconverge/releases/tag/v0.1.4
