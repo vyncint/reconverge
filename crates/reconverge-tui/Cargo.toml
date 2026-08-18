@@ -24,7 +24,9 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 
 [dev-dependencies]
-# Headless PTY harness (docs/ARCHITECTURE.md). Pinned to an exact rev — git
-# dependency until termlens publishes to crates.io; upgrade deliberately,
-# never `*`. default-features off: no insta, goldens are plain files.
-termlens = { git = "https://github.com/vyncint/termlens", rev = "ecad6dacffff7605cd42cdeeca8631f223900479", default-features = false }
+# Headless PTY harness (docs/ARCHITECTURE.md), from crates.io since 0.3.0
+# (the old git pin ecad6dac IS the 0.3.0 release commit). Upgrade
+# deliberately via Cargo.lock, never `*` — the golden frames make any
+# behavior change visible. default-features off: no insta, goldens are
+# plain files.
+termlens = { version = "0.3.0", default-features = false }
