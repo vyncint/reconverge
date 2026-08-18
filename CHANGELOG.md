@@ -10,6 +10,24 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.10] — 2026-08-18
+
+Fixes [#12](https://github.com/vyncint/reconverge/issues/12):
+documentation only — a report about a stated *reason*, not a behavior,
+and the reason is what changes.
+
+### Changed
+
+- The Limitations entry for the lane-environment gap named "truncating
+  casts" as missing machinery, but casts on the thread index are
+  evaluated today and such guards promote to `confirmed` (the issue's
+  reproduction). The entry now says the precise thing: casts are
+  evaluated *as the identity* — exact for the small thread-index values
+  replays traffic in, wrong for full-width masks — and integer `!` is
+  modeled for booleans only; width-typed evaluation of those unchecked
+  operations is what `lanemask_*` promotion actually needs.
+  Overflow-checked arithmetic has been width-typed since 0.1.8.
+
 ## [0.1.9] — 2026-08-18
 
 Fixes [#11](https://github.com/vyncint/reconverge/issues/11):
@@ -270,6 +288,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.10]: https://github.com/vyncint/reconverge/releases/tag/v0.1.10
 [0.1.9]: https://github.com/vyncint/reconverge/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vyncint/reconverge/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vyncint/reconverge/releases/tag/v0.1.7
