@@ -10,6 +10,16 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.1.4] — 2026-08-18
+
+Release-pipeline change only; the shipped code is identical to 0.1.3.
+
+- Publishing now authenticates to crates.io with [Trusted
+  Publishing](https://crates.io/docs/trusted-publishing) (GitHub OIDC): the
+  release workflow exchanges a per-run identity token for a ~30-minute
+  crates.io token at publish time. No long-lived registry token exists
+  anywhere anymore — this release is the end-to-end proof.
+
 ## [0.1.3] — 2026-08-18
 
 Three bug fixes, from an independent end-to-end review of 0.1.1.
@@ -133,6 +143,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.1.4]: https://github.com/vyncint/reconverge/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vyncint/reconverge/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vyncint/reconverge/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vyncint/reconverge/releases/tag/v0.1.1
