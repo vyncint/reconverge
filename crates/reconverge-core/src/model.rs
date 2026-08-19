@@ -111,6 +111,7 @@ pub enum BinOp {
 pub enum UnOp {
     Not,
     Neg,
+    CountOnes,
 }
 
 #[derive(Debug, Clone)]

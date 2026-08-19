@@ -299,6 +299,7 @@ fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
                     u128::from(a == 0)
                 }
                 UnOp::Neg => a.wrapping_neg(),
+                UnOp::CountOnes => u128::from(a.count_ones()),
             })
         }
         Eval::CheckedBinary(op, a, b, bits) => {
@@ -568,6 +569,12 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                             .copied()
                             .flatten()
                             .and_then(|op| operand_value(&lane.store, op)),
+                        CallKind::CountOnes => arg_operands
+                            .first()
+                            .copied()
+                            .flatten()
+                            .and_then(|op| operand_value(&lane.store, op))
+                            .map(|v| u128::from(v.count_ones())),
                         _ => None,
                     }
                 };
@@ -765,7 +772,7 @@ fn build_replay(
     })
 }
 
-/// The pure-ASCII warp diagram for text diagnostics and SARIF (§7): lane
+/// The pure-ASCII warp diagram for text diagnostics and SARIF (7): lane
 /// states at the failure point, eight lanes per group, one row per warp.
 #[must_use]
 pub fn ascii_warp_diagram(

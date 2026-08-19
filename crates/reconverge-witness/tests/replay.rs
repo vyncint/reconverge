@@ -4,7 +4,7 @@
 use reconverge_artifacts::witness::VerdictKind;
 use reconverge_core::dialect::CallKind;
 use reconverge_core::model::{
-    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind,
+    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind, UnOp,
 };
 use reconverge_witness::{SiteKind, replay_hang};
 
@@ -1048,4 +1048,117 @@ fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
         .expect("even lanes of both warps diverge");
     assert_eq!(replay.arrived, 0x5555_5555_5555_5555_u128);
     assert_eq!(replay.never_arrives, 0xaaaa_aaaa_aaaa_aaaa_u128);
+}
+
+/// Issue #23: population count (`count_ones`) on exact values evaluates
+/// correctly in the witness interpreter.
+#[test]
+fn count_ones_evaluates_popcount() {
+    let f = kernel(
+        6,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    5,
+                    &[4],
+                    Eval::Unary(UnOp::CountOnes, Operand::Local(4)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 5,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 3, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0xffff_fffe_u128);
+    assert_eq!(replay.never_arrives, 0x1_u128);
+}
+
+/// Issue #23: CallKind::CountOnes evaluates the popcount of its operand call argument.
+#[test]
+fn count_ones_call_evaluates_popcount() {
+    let f = kernel(
+        6,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::CountOnes,
+                    "count_ones",
+                    vec![Some(Operand::Local(4))],
+                    Some(5),
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Branch {
+                    cond: 5,
+                    targets: vec![5, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 4, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0xffff_fffe_u128);
+    assert_eq!(replay.never_arrives, 0x1_u128);
 }

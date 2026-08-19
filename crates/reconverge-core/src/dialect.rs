@@ -44,6 +44,10 @@ pub enum CallKind {
     /// dataflow it joins its arguments like any call; for the witness
     /// interpreter it is the identity on its first argument.
     WitnessRead,
+    /// Bit population count (`count_ones`): for the dataflow it joins its
+    /// arguments like any call; for the witness interpreter it computes
+    /// the population count of its first argument.
+    CountOnes,
     /// Anything else: the result joins the arguments' uniformities.
     ///
     /// This is deliberately optimistic about *value* flow — a callee could
@@ -66,7 +70,7 @@ impl CallKind {
             | CallKind::WarpCollective
             | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
             CallKind::BlockUniform | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
-            CallKind::Barrier | CallKind::WitnessRead | CallKind::Other => None,
+            CallKind::Barrier | CallKind::WitnessRead | CallKind::CountOnes | CallKind::Other => None,
         }
     }
 }

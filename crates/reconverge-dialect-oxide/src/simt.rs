@@ -17,10 +17,13 @@ impl SimtDialect for CudaOxide {
 /// Classify a cuda-device callee (free function form; see [`CudaOxide`]).
 #[must_use]
 pub fn classify_call(def_path: &str) -> CallKind {
+    let last = def_path.rsplit("::").next().unwrap_or(def_path);
+    if last == "count_ones" {
+        return CallKind::CountOnes;
+    }
     if !def_path.starts_with("cuda_device::") {
         return CallKind::Other;
     }
-    let last = def_path.rsplit("::").next().unwrap_or(def_path);
     let in_internal = def_path.contains("::__internal::");
 
     match last {
@@ -147,6 +150,18 @@ mod tests {
         assert_eq!(
             classify_call("cuda_device::thread::index_1d"),
             CallKind::Other
+        );
+    }
+
+    #[test]
+    fn classifies_count_ones() {
+        assert_eq!(
+            classify_call("core::num::<impl u32>::count_ones"),
+            CallKind::CountOnes
+        );
+        assert_eq!(
+            classify_call("cuda_device::warp::lanemask_lt"),
+            CallKind::DivergentEnvRead
         );
     }
 
