@@ -385,6 +385,16 @@ one that does less.
   because a collective synchronizes within each warp and that per-warp
   choreography is not modeled. Blocks that are 2D, not whole warps, or
   wider than 128 threads stay at the one-warp replay.
+
+  A collective on a lane's path no longer stops that replay: collectives
+  are modeled per warp, so a warp whose still-running lanes are all at the
+  same collective passes it whatever the other warps are doing, while the
+  barrier remains the only construct that synchronizes across warps. A
+  configuration that would need warps to interact — a warp split between a
+  warp-scoped collective and a block-scoped barrier — is declined rather
+  than approximated. The *site* itself must still be a barrier beyond one
+  warp: a mask comparison is a per-warp question, and an error there would
+  produce a witness that looks exactly like a correct one.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and coverage is printed alongside findings so the
   tool declares its own confidence.

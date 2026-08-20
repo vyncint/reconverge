@@ -108,7 +108,12 @@ pub enum NoWitness {
 enum LaneStop {
     Arrived,
     NeverArrives,
+    /// Parked at a barrier, which synchronizes the whole block.
     AtBarrier(BlockId),
+    /// Parked at a warp collective, which synchronizes only its own warp.
+    /// The distinction is the whole of per-warp convergence: at one warp
+    /// the two are the same thing, and beyond one warp they are not.
+    AtCollective(BlockId),
     Bailed,
 }
 
@@ -154,10 +159,19 @@ pub fn replay_outcome(
 /// Like [`replay_hang`], under a block of `lanes` threads (`[lanes,1,1]`,
 /// grid `[1,1,1]`) — the shape a kernel's launch contract declares.
 ///
-/// `lanes` must be a multiple of 32 between 32 and 128. Beyond one warp,
-/// only barrier sites are replayed, and any warp collective on any lane's
-/// path aborts: a collective synchronizes *within* each warp, and modeling
-/// that per-warp release choreography wrongly could fabricate a witness.
+/// `lanes` must be a multiple of 32 between 32 and 128. A collective on a
+/// lane's path is modeled per warp: a warp whose still-running lanes are
+/// all at the same collective passes it whatever the other warps are
+/// doing, and a configuration that would need warps to interact is
+/// declined rather than approximated.
+///
+/// The *site* itself must still be a barrier beyond one warp. A mask
+/// comparison is a per-warp question and the witness artifact records a
+/// single warp's view, so promoting a collective site at a multi-warp
+/// block is a further step — and the one where a modeling error would
+/// fail invisibly, producing a witness that looks exactly like a correct
+/// one. It wants a computed oracle behind it, not a reading of the
+/// artifact it produced.
 #[must_use]
 pub fn replay_hang_at(
     f: &FnModel,
@@ -183,6 +197,8 @@ pub fn replay_outcome_at(
     if !(LANES..=128).contains(&lanes) || !lanes.is_multiple_of(LANES) {
         return Err(NoWitness::Indeterminate);
     }
+    // A collective on the *path* is modeled per warp below; a collective
+    // as the *site* is not replayed beyond one warp — see the note above.
     if lanes > LANES && !matches!(site, SiteKind::Barrier) {
         return Err(NoWitness::Indeterminate);
     }
@@ -246,6 +262,26 @@ pub fn replay_outcome_at(
         if lanes.iter().any(|l| l.stop == Some(LaneStop::Bailed)) {
             return Err(NoWitness::Indeterminate);
         }
+
+        // Warp-scoped releases first, because they are independent of what
+        // the other warps are doing. A collective waits for its own warp;
+        // only a barrier reaches across the block.
+        match release_collectives(&mut lanes, n_lanes) {
+            WarpRelease::Released => {
+                released_syncs += 1;
+                if released_syncs > 64 {
+                    return Err(NoWitness::Indeterminate);
+                }
+                continue;
+            }
+            // Warps would have to interact for this to resolve. Declining
+            // is the point: an approximation here still produces a witness
+            // artifact, with a lane diagram and a concrete launch, and it
+            // looks exactly like a correct one.
+            WarpRelease::Interacting => return Err(NoWitness::Indeterminate),
+            WarpRelease::Settled => {}
+        }
+
         let parked: Vec<BlockId> = lanes
             .iter()
             .filter_map(|l| match l.stop {
@@ -320,6 +356,78 @@ pub fn replay_outcome_at(
     }
 
     build_replay(f, site_block, site, cause_span, arrived, never, n_lanes)
+}
+
+/// What one round of warp-scoped release achieved.
+enum WarpRelease {
+    /// At least one warp passed its collective; run again.
+    Released,
+    /// No warp is waiting on a collective any more.
+    Settled,
+    /// A warp cannot resolve its collective without another warp moving
+    /// first, which the model does not describe.
+    Interacting,
+}
+
+/// Release each warp that has arrived at a collective together.
+///
+/// A collective synchronizes the lanes of one warp, so a warp whose
+/// still-running lanes are all at the same collective passes it whatever
+/// the other warps are doing. A warp that is split between a collective
+/// and the site deadlocks within itself, exactly as the block-wide rule
+/// says for barriers. Anything else — a warp split between a collective
+/// and a barrier, or across two different collectives — would need warps
+/// to interact, and is refused rather than guessed.
+fn release_collectives(lanes: &mut [Lane], n_lanes: u32) -> WarpRelease {
+    let mut released = false;
+    for warp in 0..n_lanes.div_ceil(LANES) {
+        let range = (warp * LANES) as usize..((warp + 1) * LANES).min(n_lanes) as usize;
+        let at_collective: Vec<usize> = range
+            .clone()
+            .filter(|&i| matches!(lanes[i].stop, Some(LaneStop::AtCollective(_))))
+            .collect();
+        if at_collective.is_empty() {
+            continue;
+        }
+        let block = match lanes[at_collective[0]].stop {
+            Some(LaneStop::AtCollective(b)) => b,
+            _ => unreachable!(),
+        };
+        let same_block = at_collective
+            .iter()
+            .all(|&i| matches!(lanes[i].stop, Some(LaneStop::AtCollective(b)) if b == block));
+        let others_running = range.clone().any(|i| {
+            !matches!(
+                lanes[i].stop,
+                Some(LaneStop::Arrived | LaneStop::NeverArrives | LaneStop::AtCollective(_))
+            )
+        });
+        let others_arrived = range
+            .clone()
+            .any(|i| lanes[i].stop == Some(LaneStop::Arrived));
+
+        if same_block && !others_running && !others_arrived {
+            for &i in &at_collective {
+                lanes[i].resume_past_terminator = true;
+                lanes[i].stop = Some(LaneStop::AtBarrier(usize::MAX)); // resume marker
+            }
+            released = true;
+        } else if same_block && !others_running && others_arrived {
+            // The rest of this warp is holding the site forever, so the
+            // lanes at the collective wait on them and never arrive.
+            for &i in &at_collective {
+                lanes[i].stop = Some(LaneStop::NeverArrives);
+            }
+            released = true;
+        } else {
+            return WarpRelease::Interacting;
+        }
+    }
+    if released {
+        WarpRelease::Released
+    } else {
+        WarpRelease::Settled
+    }
 }
 
 /// Blocks from which `site` is reachable (including the site itself).
@@ -631,18 +739,13 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                 } else {
                     match callee.kind {
                         CallKind::Barrier => return LaneStop::AtBarrier(lane.block),
-                        CallKind::WarpCollective { .. } if ctx.lanes > LANES => {
-                            // A collective synchronizes within each warp;
-                            // the multi-warp replay does not model that
-                            // per-warp choreography, and guessing it could
-                            // fabricate a witness.
-                            return LaneStop::Bailed;
-                        }
                         CallKind::WarpCollective { .. } => {
-                            // A non-site collective synchronizes too; treat
-                            // it like a barrier for the release logic.
+                            // A non-site collective synchronizes its own
+                            // warp. Parking it separately from a barrier is
+                            // what lets several warps reach collectives
+                            // independently.
                             let _ = ctx.site;
-                            return LaneStop::AtBarrier(lane.block);
+                            return LaneStop::AtCollective(lane.block);
                         }
                         CallKind::ThreadIndexWitness => {
                             thread_index_value(&callee.display, lane_id)
