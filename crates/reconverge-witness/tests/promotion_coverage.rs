@@ -271,3 +271,76 @@ fn an_unevaluable_guard_over_a_barrier_declines_the_later_site() {
         "lanes may never leave the upstream barrier; the site is not provable"
     );
 }
+
+/// `A, !A, A`: the third site is not promoted, and correctly so.
+///
+/// Found by the differential corpus in `vyncint/simt-diff`, which had this
+/// shape recorded and which the documentation written for #25 and #26 did
+/// not describe — it named only the unevaluable-branch case. All three
+/// guards here are evaluable. What stops the third site is that the first
+/// two already deadlock the block: the even lanes wait forever at barrier
+/// one and the odd lanes at barrier two, so nothing reaches barrier three.
+/// Unreachable in fact, not merely unproven.
+#[test]
+fn earlier_barriers_that_deadlock_the_block_stop_a_later_site() {
+    let mut blocks = Vec::new();
+    // Three guarded barriers: lane % 2 == 0, then != 0, then == 0 again.
+    for (i, want) in [0u128, 1, 0].into_iter().enumerate() {
+        let base = i * 4;
+        let (v, c) = (2 + i * 2, 3 + i * 2);
+        blocks.push(Block {
+            stmts: vec![],
+            term: term(call(
+                CallKind::ThreadIndexWitness,
+                "lane_id",
+                vec![],
+                Some(v),
+                base + 1,
+            )),
+        });
+        blocks.push(Block {
+            stmts: vec![stmt_eval(
+                c,
+                &[v],
+                Eval::Binary(BinOp::Rem, Operand::Local(v), Operand::Const(2)),
+            )],
+            term: term(TermKind::Branch {
+                cond: c,
+                targets: vec![base + 2, base + 3],
+                values: vec![Some(want), None],
+            }),
+        });
+        blocks.push(Block {
+            stmts: vec![],
+            term: term(call(
+                CallKind::Barrier,
+                "sync_threads",
+                vec![],
+                None,
+                base + 3,
+            )),
+        });
+        blocks.push(Block {
+            stmts: vec![],
+            term: term(TermKind::Goto { target: base + 4 }),
+        });
+    }
+    blocks.push(Block {
+        stmts: vec![],
+        term: term(TermKind::Return),
+    });
+    let f = kernel(2 + 6, blocks);
+
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_some(),
+        "the first site is witnessed"
+    );
+    assert!(
+        replay_hang(&f, 6, SiteKind::Barrier, 0).is_some(),
+        "so is the second: its complement guard is evaluable too"
+    );
+    assert!(
+        replay_hang(&f, 10, SiteKind::Barrier, 0).is_none(),
+        "the third is unreachable — both halves are already stuck above it"
+    );
+}
