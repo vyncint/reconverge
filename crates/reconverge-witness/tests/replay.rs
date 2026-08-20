@@ -980,10 +980,17 @@ fn whole_warp_divergence_is_witnessed_at_the_declared_block() {
     assert!(replay.verdict_message.contains("32 of 64 lanes"));
 }
 
-/// A collective anywhere on a lane's path aborts a multi-warp replay:
-/// its synchronization is per warp, which the replay does not model.
+/// Issue #30: a collective on the path no longer aborts a multi-warp
+/// replay. Here every lane reaches `ballot_sync`, so each warp passes it
+/// on its own, and the `warp_id == 0` guard below is a real hang: warp 0
+/// waits at the barrier, warp 1 never arrives.
+///
+/// This replaces a test asserting the whole attempt bails. Bailing was the
+/// safe placeholder while per-warp convergence was unmodeled; a collective
+/// synchronizes its own warp, and a warp that reaches one together passes
+/// it whatever the other warps are doing.
 #[test]
-fn multi_warp_replay_bails_on_any_collective() {
+fn a_uniform_collective_no_longer_aborts_the_multi_warp_replay() {
     let f = kernel(
         4,
         vec![
@@ -1031,7 +1038,77 @@ fn multi_warp_replay_bails_on_any_collective() {
             },
         ],
     );
-    assert!(reconverge_witness::replay_hang_at(&f, 3, SiteKind::Barrier, 0, 64).is_none());
+    let replay = reconverge_witness::replay_hang_at(&f, 3, SiteKind::Barrier, 0, 64)
+        .expect("the collective is uniform; the barrier below is not");
+    assert_eq!(replay.arrived, 0x0000_0000_ffff_ffff_u128, "warp 0");
+    assert_eq!(replay.never_arrives, 0xffff_ffff_0000_0000_u128, "warp 1");
+}
+
+/// Issue #30's first guard: decline when warps would have to interact.
+///
+/// Half of each warp parks at a collective and half at a block-wide
+/// barrier. The collective waits for its warp, the barrier for the whole
+/// block, and neither can proceed without the other — a choreography the
+/// model does not describe. Refusing is the point: an approximation here
+/// would still produce a witness artifact, with a lane diagram and a
+/// concrete launch, indistinguishable from a correct one.
+#[test]
+fn a_warp_split_between_a_collective_and_a_barrier_is_declined() {
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(2)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![2, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::WarpCollective {
+                        mask: MaskSource::FirstArgument,
+                    },
+                    "ballot_sync",
+                    vec![Some(Operand::Const(0xffff_ffff))],
+                    Some(0),
+                    4,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        reconverge_witness::replay_hang_at(&f, 4, SiteKind::Barrier, 0, 64).is_none(),
+        "a warp-scoped and a block-scoped wait cannot both be satisfied"
+    );
 }
 
 /// The thread-index witnesses evaluate per name: `threadIdx_y` is 0 under
