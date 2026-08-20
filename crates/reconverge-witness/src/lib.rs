@@ -640,17 +640,43 @@ fn thread_index_value(display: &str, idx: u32) -> Option<u128> {
 }
 
 /// Values of the divergent environment reads that are exact under the
-/// replay's launch shape: `warp_id` is the warp of the thread index and
-/// `live_lanes_1d` counts the warp's launched lanes. The per-lane
-/// registers (`lanemask_*`) and the path-dependent `active_mask` stay
-/// unknown — their 32-bit mask values would flow into evaluation that is
-/// not width-typed (integer `!` is modeled boolean-only), and a wrong
-/// value here could fabricate a confirmation.
+/// replay's launch shape: `warp_id` is the warp of the thread index,
+/// `live_lanes_1d` counts the warp's launched lanes, and the five
+/// `lanemask_*` registers are closed forms of the lane's own ordinal.
+///
+/// The positional masks are pure functions of where the lane sits in its
+/// warp — `lanemask_lt` is every lane below it, and so on — so they do not
+/// depend on which lanes are still running, and the replay knows the
+/// ordinal already. They were withheld while integer `!` was modeled
+/// boolean-only and casts were the identity, because a 32-bit mask flowing
+/// into that arithmetic could fabricate a confirmation; evaluation is
+/// width-typed now, so the reason has gone.
+///
+/// `active_mask` stays unknown, and not for the same reason: its value is
+/// the set of lanes still live at that point, which the replay tracks but
+/// which changes as lanes diverge. That is a path-dependent question, not
+/// a positional one.
 fn lane_env_value(display: &str, idx: u32, lanes: u32) -> Option<u128> {
+    // The lane's ordinal within its own warp, which is what every
+    // positional register is expressed in.
+    let lane = idx % LANES;
+    let below = (1u128 << lane) - 1;
+    let up_to = (1u128 << (lane + 1)) - 1;
+    let warp_wide = u128::from(u32::MAX);
     if display.contains("warp_id") {
         Some(u128::from(idx / LANES))
     } else if display.contains("live_lanes_1d") {
         Some(u128::from((lanes - (idx / LANES) * LANES).min(LANES)))
+    } else if display.contains("lanemask_lt") {
+        Some(below)
+    } else if display.contains("lanemask_le") {
+        Some(up_to)
+    } else if display.contains("lanemask_eq") {
+        Some(1u128 << lane)
+    } else if display.contains("lanemask_gt") {
+        Some(!up_to & warp_wide)
+    } else if display.contains("lanemask_ge") {
+        Some(!below & warp_wide)
     } else {
         None
     }

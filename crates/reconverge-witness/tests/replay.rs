@@ -638,22 +638,108 @@ fn warp_uniform_guard_upstream_does_not_ungate_the_site() {
     assert_eq!(replay.never_arrives, ODD_LANES);
 }
 
-/// The per-lane registers stay unevaluable by design: a `lanemask_*`
-/// guard whose diamond holds a barrier still aborts the replay (their
-/// 32-bit values would flow into evaluation that is not width-typed, and
-/// a wrong value could fabricate a confirmation).
+/// Issue #24: the positional lane masks are closed forms of the lane's
+/// own ordinal, so a guard on one replays. `lanemask_eq & 1` is 1 for
+/// lane 0 alone — a 1-of-32 split at the barrier.
 ///
-/// locals: 0 ret, 1 param, 2 mask, 3 mcond
+/// This replaces a test asserting the opposite. The masks were withheld
+/// while `!` was boolean-only and casts were the identity (#22); with
+/// evaluation width-typed, withholding them only costs recall.
 #[test]
-fn lanemask_guards_stay_unevaluable() {
+fn a_positional_lanemask_guard_is_witnessed() {
+    let f = lanemask_guard("lanemask_eq", BinOp::BitAnd, 1);
+    let replay = replay_hang(&f, 2, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0x1_u128, "lane 0 alone reaches it");
+    assert_eq!(replay.never_arrives, 0xffff_fffe_u128);
+}
+
+/// Issue #24: `active_mask` is deliberately *not* in that group. Its value
+/// is the set of lanes still live, which changes as lanes diverge — a
+/// path-dependent question rather than a positional one — so it stays
+/// unknown and the site is not witnessed.
+#[test]
+fn active_mask_stays_unevaluable() {
+    let f = lanemask_guard("active_mask", BinOp::BitAnd, 1);
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
+        "a path-dependent mask must not be given a value"
+    );
+}
+
+/// Issues #22, #23 and #24 together — the reproduction #23 was filed with:
+///
+/// ```ignore
+/// if warp::lanemask_lt().count_ones() > 4 { thread::sync_threads(); }
+/// ```
+///
+/// `lanemask_lt` is every lane below this one, so its population count is
+/// the lane's ordinal. Lanes 5..=31 take the branch and 0..=4 do not, so
+/// 27 lanes wait at a barrier 5 never reach. This needed all three: the
+/// mask's value, an exact popcount of it, and arithmetic that evaluates at
+/// 32 bits.
+#[test]
+fn the_lane_ordinal_idiom_replays() {
     let f = kernel(
+        5,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp::lanemask_lt",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::CountOnes { bits: 32 },
+                    "count_ones",
+                    vec![Some(Operand::Local(2))],
+                    Some(3),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    4,
+                    &[3],
+                    Eval::Binary(BinOp::Gt, Operand::Local(3), Operand::Const(4)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 4,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 3, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0xffff_ffe0_u128, "lanes 5..=31");
+    assert_eq!(replay.never_arrives, 0x1f_u128, "lanes 0..=4");
+}
+
+/// `if <register> <op> <k> { sync_threads(); }` — the shape both lanemask
+/// tests above use.
+fn lanemask_guard(register: &str, op: BinOp, k: u128) -> FnModel {
+    kernel(
         4,
         vec![
             Block {
                 stmts: vec![],
                 term: term(call(
                     CallKind::DivergentEnvRead,
-                    "lanemask_eq",
+                    register,
                     vec![],
                     Some(2),
                     1,
@@ -663,7 +749,7 @@ fn lanemask_guards_stay_unevaluable() {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::BitAnd, Operand::Local(2), Operand::Const(1)),
+                    Eval::Binary(op, Operand::Local(2), Operand::Const(k)),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -680,11 +766,7 @@ fn lanemask_guards_stay_unevaluable() {
                 term: term(TermKind::Return),
             },
         ],
-    );
-    assert!(
-        replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
-        "a lanemask-guarded site must not be witnessed"
-    );
+    )
 }
 
 /// Issue #10: a divergent guard *inside* a loop is promoted. The loop

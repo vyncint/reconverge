@@ -311,19 +311,25 @@ one that does less.
   lanes — the guarded partial-warp idiom — is never promoted and never
   gates. What the replay does *not* do is mask arithmetic against launch
   shapes other than the one it runs (one full warp).
-- **Guards built on the per-lane mask registers stay warnings.** The
-  `lanemask_*` registers and `active_mask` are recognized as divergence
-  sources, but their values are never fed into a replay, so findings under
-  such guards are never witness-promoted — and a finding *below* such a
-  guard with a barrier inside it stays at warning too. What is actually
-  missing is width-typed evaluation of the unchecked operations a 32-bit
-  mask would flow through: integer `!` is modeled for booleans only, and
-  casts are evaluated as the identity — exact for the small thread-index
-  values replays traffic in today (a truncating cast on the thread index
-  promotes normally), wrong for full-width masks, and a wrong mask value
-  could fabricate a confirmation. Overflow-checked arithmetic is already
-  width-typed. `warp_id` and `live_lanes_1d` are exact under the replayed
-  launch and do evaluate.
+- **`active_mask` guards stay warnings; the positional mask registers do
+  not.** The five `lanemask_*` registers are closed forms of the lane's own
+  ordinal — `lanemask_lt` is every lane below it, and so on — so they do
+  not depend on which lanes are still running, and the replay evaluates
+  them. The lane-ordinal idiom `warp::lanemask_lt().count_ones()` replays,
+  and a guard on it is witness-promoted like any other. `warp_id` and
+  `live_lanes_1d` are exact under the replayed launch too.
+
+  `active_mask` is the exception, and for a different reason: its value is
+  the set of lanes still live at that point, which changes as lanes
+  diverge. That is path-dependent rather than positional, so it stays
+  unknown, findings under such a guard are never witness-promoted, and a
+  finding *below* one with a barrier inside it stays at warning too.
+
+  The arithmetic a 32-bit mask flows through is width-typed: integer `!`
+  is the complement at the operand's own width, casts truncate to their
+  target width, and overflow-checked arithmetic was already width-typed.
+  Where a width is unavailable the interpreter yields unknown rather than
+  assuming one.
 - **Whole-warp divergence is witnessed at the declared block.** When the
   one-warp replay finds nothing and the kernel's `#[launch_contract]`
   declares a one-dimensional block of several whole warps (64, 96, or
