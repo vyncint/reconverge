@@ -370,11 +370,20 @@ one that does less.
   touching a synchronization point, the choice cannot change who arrives,
   so the replay skips it.
 
-  What does stop a later site is an unevaluable branch whose paths contain
-  a barrier or collective. Those lanes may be waiting there and may never
-  reach the site at all, so the replay declines rather than naming a lane
-  split it cannot stand behind — the finding stays at `warning`, and the
-  barrier inside the unknown region is itself reported.
+  Two things do stop a later site, and both are cases where no lane
+  reaches it rather than cases the replay gave up on:
+
+  - an **unevaluable branch whose paths contain** a barrier or collective —
+    those lanes may be waiting there and may never arrive, so the replay
+    declines rather than naming a lane split it cannot stand behind; and
+  - **earlier barriers that already deadlock the block** between them. If
+    one guard sends half the lanes to a barrier and its complement sends
+    the other half to a different one, both halves wait forever and
+    nothing continues past them. A third site below is unreachable in
+    fact, not merely unproven.
+
+  In both, the finding stays at `warning` and the upstream barrier is
+  itself reported — which is where the reader should be looking anyway.
 - **Whole-warp divergence is witnessed at the declared block.** When the
   one-warp replay finds nothing and the kernel's `#[launch_contract]`
   declares a one-dimensional block of several whole warps (64, 96, or
