@@ -296,6 +296,21 @@ fn width_mask(bits: u32) -> u128 {
     }
 }
 
+/// Population count of `v` read as a `bits`-wide integer, or `None` when
+/// `v` carries bits the source type cannot hold.
+///
+/// The store is an untyped `u128` and unchecked arithmetic wraps there
+/// rather than at the operand's width, so a wider value means the real
+/// one was lost: `0u32.wrapping_sub(1)` is `u32::MAX` in the program and
+/// `u128::MAX` in the store, 32 set bits against 128. Truncating cannot
+/// recover it either — division, shifts and comparisons have already run
+/// on the wide value — so an out-of-range operand yields no answer, and
+/// the lane that branches on it ends without a verdict.
+fn popcount_within(v: u128, bits: u32) -> Option<u128> {
+    let in_range = bits >= u128::BITS || v >> bits == 0;
+    in_range.then(|| u128::from(v.count_ones()))
+}
+
 fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
     match e {
         Eval::Use(op) => operand_value(store, op),
@@ -580,6 +595,12 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                             .copied()
                             .flatten()
                             .and_then(|op| operand_value(&lane.store, op)),
+                        CallKind::CountOnes { bits } => arg_operands
+                            .first()
+                            .copied()
+                            .flatten()
+                            .and_then(|op| operand_value(&lane.store, op))
+                            .and_then(|v| popcount_within(v, bits)),
                         _ => None,
                     }
                 };

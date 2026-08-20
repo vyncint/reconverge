@@ -17,6 +17,9 @@ impl SimtDialect for CudaOxide {
 /// Classify a cuda-device callee (free function form; see [`CudaOxide`]).
 #[must_use]
 pub fn classify_call(def_path: &str) -> CallKind {
+    if let Some(kind) = classify_int_intrinsic(def_path) {
+        return kind;
+    }
     if !def_path.starts_with("cuda_device::") {
         return CallKind::Other;
     }
@@ -127,6 +130,36 @@ pub fn classify_call(def_path: &str) -> CallKind {
     }
 }
 
+/// Primitive-integer intrinsics the witness interpreter can evaluate,
+/// recognized by their inherent-impl definition path and *only* there.
+///
+/// The shape is `core::num::<impl {int}>::{method}` — the width lives in
+/// the path, which is what makes the popcount evaluable at all. Matching
+/// on the bare final segment instead would claim every `count_ones` in
+/// the dependency graph (`bitvec`'s `BitSlice`, `roaring`'s bitmap, any
+/// inherent method a user writes), whose first argument is a receiver
+/// rather than the bits — a popcount of a pointer, reported as fact.
+///
+/// `usize`/`isize` are deliberately absent: their width is target-defined
+/// and not recoverable from the path, and an assumed width is exactly the
+/// confident wrong answer this function exists to avoid.
+fn classify_int_intrinsic(def_path: &str) -> Option<CallKind> {
+    let rest = def_path.strip_prefix("core::num::<impl ")?;
+    let (ty, method) = rest.split_once(">::")?;
+    if method != "count_ones" {
+        return None;
+    }
+    let bits = match ty {
+        "u8" | "i8" => 8,
+        "u16" | "i16" => 16,
+        "u32" | "i32" => 32,
+        "u64" | "i64" => 64,
+        "u128" | "i128" => 128,
+        _ => return None,
+    };
+    Some(CallKind::CountOnes { bits })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +181,41 @@ mod tests {
             classify_call("cuda_device::thread::index_1d"),
             CallKind::Other
         );
+    }
+
+    #[test]
+    fn classifies_count_ones_with_its_operand_width() {
+        for (path, bits) in [
+            ("core::num::<impl u8>::count_ones", 8),
+            ("core::num::<impl u32>::count_ones", 32),
+            ("core::num::<impl i32>::count_ones", 32),
+            ("core::num::<impl u64>::count_ones", 64),
+            ("core::num::<impl u128>::count_ones", 128),
+        ] {
+            assert_eq!(classify_call(path), CallKind::CountOnes { bits }, "{path}");
+        }
+        assert_eq!(
+            classify_call("cuda_device::warp::lanemask_lt"),
+            CallKind::DivergentEnvRead
+        );
+    }
+
+    /// `count_ones` is a method name, not a reserved word: only the
+    /// primitive-integer inherent impls are the intrinsic. Anything else
+    /// takes a receiver as its first argument, so evaluating it as a
+    /// popcount would count the bits of a pointer.
+    #[test]
+    fn count_ones_elsewhere_is_not_the_integer_intrinsic() {
+        for path in [
+            "bitvec::slice::BitSlice::<T, O>::count_ones",
+            "roaring::RoaringBitmap::count_ones",
+            "my_app::occupancy::Histogram::count_ones",
+            "core::num::<impl usize>::count_ones",
+            "core::num::<impl isize>::count_ones",
+            "core::num::<impl u32>::count_zeros",
+        ] {
+            assert_eq!(classify_call(path), CallKind::Other, "{path}");
+        }
     }
 
     #[test]

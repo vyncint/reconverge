@@ -44,6 +44,19 @@ pub enum CallKind {
     /// dataflow it joins its arguments like any call; for the witness
     /// interpreter it is the identity on its first argument.
     WitnessRead,
+    /// Bit population count on a primitive integer (`count_ones`), with
+    /// the operand's width in bits. For the dataflow it joins its
+    /// arguments like any call; for the witness interpreter it is the
+    /// population count of its first argument.
+    ///
+    /// The width is part of the classification because a popcount is
+    /// meaningless without it: the interpreter's store is an untyped
+    /// `u128`, and unchecked arithmetic wraps at 128 bits rather than at
+    /// the source type's width, so a value carrying bits above `bits` is
+    /// not one the program ever held. Counting those bits would be a
+    /// confident wrong answer, so the interpreter declines instead —
+    /// the same discipline as [`crate::model::Eval::CheckedBinary`].
+    CountOnes { bits: u32 },
     /// Anything else: the result joins the arguments' uniformities.
     ///
     /// This is deliberately optimistic about *value* flow — a callee could
@@ -66,7 +79,10 @@ impl CallKind {
             | CallKind::WarpCollective
             | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
             CallKind::BlockUniform | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
-            CallKind::Barrier | CallKind::WitnessRead | CallKind::Other => None,
+            CallKind::Barrier
+            | CallKind::WitnessRead
+            | CallKind::CountOnes { .. }
+            | CallKind::Other => None,
         }
     }
 }

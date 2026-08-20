@@ -1362,3 +1362,219 @@ fn a_narrowing_cast_truncates_rather_than_passing_the_value_through() {
     assert_eq!(replay.arrived, 0x0001_0001_u128, "lane 0 and lane 16");
     assert_eq!(replay.never_arrives, 0xfffe_fffe_u128);
 }
+
+/// Issue #23: `count_ones` on an operand that fits its declared width
+/// evaluates to the population count, so the branch on it replays.
+#[test]
+fn count_ones_evaluates_popcount_within_its_width() {
+    let f = kernel(
+        6,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::CountOnes { bits: 32 },
+                    "count_ones",
+                    vec![Some(Operand::Local(4))],
+                    Some(5),
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Branch {
+                    cond: 5,
+                    targets: vec![5, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 4, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0xffff_fffe_u128);
+    assert_eq!(replay.never_arrives, 0x1_u128);
+}
+
+/// A popcount is meaningless without the operand's width, and the store is
+/// an untyped `u128` whose unchecked arithmetic wraps at 128 bits rather
+/// than at 32. `0u32.wrapping_sub(lane).count_ones()` is 0 for lane 0 and
+/// 32 for the rest, so `> 40` is false for every lane and the barrier is
+/// never reached — there is no hang to witness.
+///
+/// Counting the store's 128 bits instead would make the guard true for 31
+/// lanes and mint a concrete witness for a kernel that cannot hang. The
+/// interpreter must decline: an operand carrying bits its type cannot hold
+/// is a value the program never had.
+#[test]
+fn count_ones_declines_an_operand_wider_than_its_type() {
+    let f = kernel(
+        8,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                // `0u32.wrapping_sub(lane)` — MIR `SubUnchecked`, which
+                // carries no width, so the store wraps at 128 bits.
+                stmts: vec![stmt_eval(
+                    5,
+                    &[4],
+                    Eval::Binary(BinOp::Sub, Operand::Const(0), Operand::Local(4)),
+                )],
+                term: term(call(
+                    CallKind::CountOnes { bits: 32 },
+                    "count_ones",
+                    vec![Some(Operand::Local(5))],
+                    Some(6),
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    7,
+                    &[6],
+                    Eval::Binary(BinOp::Gt, Operand::Local(6), Operand::Const(40)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 7,
+                    targets: vec![5, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        replay_hang(&f, 4, SiteKind::Barrier, 0).is_none(),
+        "a popcount of an out-of-range operand must not mint a witness"
+    );
+}
+
+/// #22 and #23 together: `(!lane).count_ones()` is 27..=32 for every lane,
+/// so `> 0` holds for all 32 and the barrier is uniform — there is nothing
+/// to witness.
+///
+/// This is the composition that made the ordering matter. A popcount is
+/// exact only if its operand is, and with `!` evaluated as boolean
+/// negation the operand was 1 for lane 0 and 0 elsewhere — narrow enough
+/// to pass the width check in `popcount_within`, and wrong. The guard
+/// against a *wide* operand cannot catch one that is the right width and
+/// simply wrong; only evaluating `!` at its own width can.
+#[test]
+fn not_feeding_popcount_does_not_fabricate_a_witness() {
+    let f = kernel(
+        8,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    5,
+                    &[4],
+                    Eval::Unary(UnOp::Not, Operand::Local(4), 32),
+                )],
+                term: term(call(
+                    CallKind::CountOnes { bits: 32 },
+                    "count_ones",
+                    vec![Some(Operand::Local(5))],
+                    Some(6),
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    7,
+                    &[6],
+                    Eval::Binary(BinOp::Gt, Operand::Local(6), Operand::Const(0)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 7,
+                    targets: vec![5, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 5)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert!(
+        replay_hang(&f, 4, SiteKind::Barrier, 0).is_none(),
+        "every lane reaches the barrier; there is no hang to witness"
+    );
+}
