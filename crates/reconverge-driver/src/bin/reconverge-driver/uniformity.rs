@@ -9,7 +9,7 @@ use reconverge_core::Uniformity;
 use reconverge_core::analysis::{self as engine, Analysis, ReasonKind, Summaries};
 use reconverge_core::dialect::CallKind;
 use reconverge_core::model::{FnId, FnModel, TermKind};
-use reconverge_witness::{Replay, SiteKind, ascii_warp_diagram, replay_hang};
+use reconverge_witness::{NoWitness, Replay, SiteKind, ascii_warp_diagram};
 
 use crate::adapt::CrateModels;
 
@@ -57,15 +57,53 @@ fn try_witness(
     // declares a one-dimensional block of several whole warps, replay the
     // declared block: whole-warp divergence (a `warp_id()` guard) has no
     // divergent pair inside 32 lanes and only exists at the declared size.
-    let replay = replay_hang(f, site.block, site.kind, site.cause_span).or_else(|| {
-        let [x, 1, 1] = f.declared_block? else {
-            return None;
+    let outcome =
+        match reconverge_witness::replay_outcome(f, site.block, site.kind, site.cause_span) {
+            Ok(replay) => Ok(replay),
+            Err(one_warp) => match f.declared_block {
+                // The declared shape is the launch this kernel claims, so when
+                // it is replayed its answer is the one to report.
+                Some([x, 1, 1]) if x > 32 => reconverge_witness::replay_outcome_at(
+                    f,
+                    site.block,
+                    site.kind,
+                    site.cause_span,
+                    x,
+                ),
+                _ => Err(one_warp),
+            },
         };
-        (x > 32).then_some(())?;
-        reconverge_witness::replay_hang_at(f, site.block, site.kind, site.cause_span, x)
-    });
-    let Some(replay) = replay else {
-        return;
+    let replay = match outcome {
+        Ok(replay) => replay,
+        // Two results that are not witnesses but are still knowledge. They
+        // used to be indistinguishable from "could not evaluate", which
+        // left a reader — and anything consuming findings.v1 — unable to
+        // tell a checked-and-correct idiom from an absence of knowledge.
+        // The `replay:` prefix and wording are meant to be matched on.
+        Err(NoWitness::UnreachableUnderLaunch) => {
+            finding.notes.push(
+                "replay: unreachable under the declared launch — no lane reaches this \
+                 construct, so there is nothing to confirm. This is a result, not a \
+                 failure to evaluate"
+                    .to_string(),
+            );
+            return;
+        }
+        Err(NoWitness::MaskMatchesArrivals { mask, arrived }) => {
+            // The generic note asks the reader to verify what the replay
+            // has just verified. Leaving both in is what made this result
+            // read as the weakest on this path rather than the strongest.
+            finding
+                .notes
+                .retain(|n| !n.contains("verify the branch admits exactly the lanes"));
+            finding.notes.push(format!(
+                "replay: the mask {mask:#010x} names exactly the lanes that arrive \
+                 ({arrived:#010x}) — the guarded partial-warp idiom, checked and correct \
+                 under this launch"
+            ));
+            return;
+        }
+        Err(NoWitness::Uniform | NoWitness::Indeterminate) => return,
     };
     finding.confidence = Confidence::Confirmed;
     let warps = replay.block[0].div_ceil(32);

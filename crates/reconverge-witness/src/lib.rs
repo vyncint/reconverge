@@ -81,6 +81,29 @@ pub struct Replay {
     pub never_arrives: u128,
 }
 
+/// Why a replay produced no witness.
+///
+/// The distinction matters to a reader and to anything consuming
+/// `findings.v1`: "the replay checked and agreed" and "the replay could
+/// not tell" are opposite results that otherwise look identical, because
+/// both simply leave the finding at `warning`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoWitness {
+    /// No lane reaches the site under this launch shape, so there is
+    /// nothing to confirm. Close to knowledge: under the declared shape
+    /// this code does not run.
+    UnreachableUnderLaunch,
+    /// Every lane reaches the site — nothing diverges here.
+    Uniform,
+    /// A collective whose mask names exactly the lanes that arrive: the
+    /// guarded partial-warp idiom, which is correct code. The replay
+    /// verified it rather than failing to evaluate it.
+    MaskMatchesArrivals { mask: u32, arrived: u32 },
+    /// The replay could not determine what happens. An absence of
+    /// knowledge, not a result.
+    Indeterminate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaneStop {
     Arrived,
@@ -112,7 +135,20 @@ pub fn replay_hang(
     site: SiteKind,
     cause_span: SpanRef,
 ) -> Option<Replay> {
-    replay_hang_at(f, site_block, site, cause_span, LANES)
+    replay_outcome(f, site_block, site, cause_span).ok()
+}
+
+/// As [`replay_hang`], reporting *why* when there is no witness.
+///
+/// # Errors
+/// Returns the [`NoWitness`] reason the replay produced no witness.
+pub fn replay_outcome(
+    f: &FnModel,
+    site_block: BlockId,
+    site: SiteKind,
+    cause_span: SpanRef,
+) -> Result<Replay, NoWitness> {
+    replay_outcome_at(f, site_block, site, cause_span, LANES)
 }
 
 /// Like [`replay_hang`], under a block of `lanes` threads (`[lanes,1,1]`,
@@ -130,16 +166,32 @@ pub fn replay_hang_at(
     cause_span: SpanRef,
     lanes: u32,
 ) -> Option<Replay> {
+    replay_outcome_at(f, site_block, site, cause_span, lanes).ok()
+}
+
+/// As [`replay_hang_at`], reporting *why* when there is no witness.
+///
+/// # Errors
+/// Returns the [`NoWitness`] reason the replay produced no witness.
+pub fn replay_outcome_at(
+    f: &FnModel,
+    site_block: BlockId,
+    site: SiteKind,
+    cause_span: SpanRef,
+    lanes: u32,
+) -> Result<Replay, NoWitness> {
     if !(LANES..=128).contains(&lanes) || !lanes.is_multiple_of(LANES) {
-        return None;
+        return Err(NoWitness::Indeterminate);
     }
     if lanes > LANES && !matches!(site, SiteKind::Barrier) {
-        return None;
+        return Err(NoWitness::Indeterminate);
     }
     let cfg = Cfg::build(f);
     let can_reach = reaches(&cfg, site_block);
     if !can_reach[0] {
-        return None; // the entry cannot reach the site at all
+        // The entry cannot reach the site at all: no lane arrives, which
+        // is the same thing a reader needs told as the launch-shaped case.
+        return Err(NoWitness::UnreachableUnderLaunch);
     }
     // Post-dominators with every escape counted as an exit — returns,
     // aborts, unmodeled jumps, and diverging calls alike. When the site
@@ -192,7 +244,7 @@ pub fn replay_hang_at(
             }
         }
         if lanes.iter().any(|l| l.stop == Some(LaneStop::Bailed)) {
-            return None;
+            return Err(NoWitness::Indeterminate);
         }
         let parked: Vec<BlockId> = lanes
             .iter()
@@ -235,12 +287,12 @@ pub fn replay_hang_at(
             // Lanes are parked across different barriers with none at the
             // site: everyone is stuck upstream and nobody arrives — nothing
             // for this site's replay to witness.
-            return None;
+            return Err(NoWitness::Indeterminate);
         }
         // Release: everyone passes the intervening barrier together.
         released_syncs += 1;
         if released_syncs > 64 {
-            return None;
+            return Err(NoWitness::Indeterminate);
         }
         for lane in &mut lanes {
             lane.resume_past_terminator = true;
@@ -254,11 +306,17 @@ pub fn replay_hang_at(
         match lane.stop {
             Some(LaneStop::Arrived) => arrived |= 1 << lane_id,
             Some(LaneStop::NeverArrives) => never |= 1 << lane_id,
-            _ => return None,
+            _ => return Err(NoWitness::Indeterminate),
         }
     }
-    if arrived == 0 || never == 0 {
-        return None; // uniform behavior: nothing to witness
+    // Not a witness, but not the same non-answer either: no lane reaching
+    // the site means the construct does not run under this shape, while
+    // every lane reaching it means nothing diverges here.
+    if arrived == 0 {
+        return Err(NoWitness::UnreachableUnderLaunch);
+    }
+    if never == 0 {
+        return Err(NoWitness::Uniform);
     }
 
     build_replay(f, site_block, site, cause_span, arrived, never, n_lanes)
@@ -708,11 +766,11 @@ fn build_replay(
     arrived: u128,
     never: u128,
     lanes: u32,
-) -> Option<Replay> {
+) -> Result<Replay, NoWitness> {
     let site_span = f.blocks[site_block].term.span;
     let site_display = match &f.blocks[site_block].term.kind {
         TermKind::Call { callee, .. } => callee.display.clone(),
-        _ => return None,
+        _ => return Err(NoWitness::Indeterminate),
     };
     let n_arrived = arrived.count_ones();
     let n_never = never.count_ones();
@@ -767,15 +825,18 @@ fn build_replay(
         SiteKind::Collective { mask } => {
             // Collectives are replayed under one warp only (the entry gate
             // guarantees it), so the lane set fits the 32-bit mask domain.
-            let arrived = u32::try_from(arrived).ok()?;
+            let arrived = u32::try_from(arrived).map_err(|_| NoWitness::Indeterminate)?;
             // Without a known constant mask there is nothing to check the
             // arrivals against — claiming a mismatch would overreach.
-            let mask = u32::try_from(mask?).ok()?;
+            let mask = mask.ok_or(NoWitness::Indeterminate)?;
+            let mask = u32::try_from(mask).map_err(|_| NoWitness::Indeterminate)?;
             let named_absent = mask & !arrived;
             if named_absent == 0 {
                 // The mask names only lanes that actually arrive: the
-                // guarded partial-warp idiom. No witness.
-                return None;
+                // guarded partial-warp idiom, which is correct code. This
+                // is a verified result, not a failure to evaluate, and the
+                // caller is told which so it can say so.
+                return Err(NoWitness::MaskMatchesArrivals { mask, arrived });
             }
             steps.push(ReplayStep {
                 statement: format!(
@@ -812,7 +873,7 @@ fn build_replay(
     };
 
     let verdict_step = steps.len() - 1;
-    Some(Replay {
+    Ok(Replay {
         block: [lanes, 1, 1],
         grid: [1, 1, 1],
         steps,

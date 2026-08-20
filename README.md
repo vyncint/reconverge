@@ -312,12 +312,17 @@ one that does less.
   contract is a declaration, not a proof, and a kernel launched outside
   its declared shape would otherwise lose the diagnostic entirely — while
   the replay finds no lane that arrives and so has nothing to confirm.
-  Such findings never gate.
+  Such findings never gate, and they carry a `replay:` note naming that
+  outcome — "unreachable under the declared launch" is close to knowledge,
+  and is now distinguishable, by a reader and by anything consuming
+  `findings.v1`, from a construct the replay simply could not evaluate.
 - **RC002's replay compares the mask against the lanes present.** A
   literal mask at a divergent call promotes to `confirmed` exactly when it
   names a lane the replay proves absent; a mask naming exactly the arriving
   lanes — the guarded partial-warp idiom — is never promoted and never
-  gates. What the replay does *not* do is mask arithmetic against launch
+  gates, and now says so: the finding carries a `replay:` note recording
+  that the mask was checked against the lanes present and matched, so a
+  verified idiom no longer reads like a mask the tool could not evaluate. What the replay does *not* do is mask arithmetic against launch
   shapes other than the one it runs (one full warp).
 - **`active_mask` guards stay warnings; the positional mask registers do
   not.** The five `lanemask_*` registers are closed forms of the lane's own
