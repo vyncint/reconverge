@@ -241,6 +241,14 @@ $ rustup toolchain install nightly-2026-04-03 --profile minimal --component rust
 $ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
+`rustc-dev` is the component that matters: the driver links rustc's own
+crates, and without it the build fails with four `E0463`s naming
+`rustc_driver`, `rustc_interface`, `rustc_middle` and `rustc_public`
+rather than the one missing argument. A git checkout inherits the
+components from this repository's `rust-toolchain.toml`; a crates.io
+install carries no toolchain file, so it has to be asked for. The
+driver's build script checks for it and says so directly.
+
 ## Using it
 
 ```console
