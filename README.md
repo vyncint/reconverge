@@ -338,6 +338,20 @@ one that does less.
   target width, and overflow-checked arithmetic was already width-typed.
   Where a width is unavailable the interpreter yields unknown rather than
   assuming one.
+
+- **Every site is attempted, but an unknown branch over a barrier stops the
+  ones below it.** Promotion is per site, so a function with several
+  divergent sites can carry several witnesses, whatever mix of divergence
+  sources they use. An unevaluable guard upstream does not by itself cost
+  the sites below it either: when the branch's paths rejoin without
+  touching a synchronization point, the choice cannot change who arrives,
+  so the replay skips it.
+
+  What does stop a later site is an unevaluable branch whose paths contain
+  a barrier or collective. Those lanes may be waiting there and may never
+  reach the site at all, so the replay declines rather than naming a lane
+  split it cannot stand behind — the finding stays at `warning`, and the
+  barrier inside the unknown region is itself reported.
 - **Whole-warp divergence is witnessed at the declared block.** When the
   one-warp replay finds nothing and the kernel's `#[launch_contract]`
   declares a one-dimensional block of several whole warps (64, 96, or
