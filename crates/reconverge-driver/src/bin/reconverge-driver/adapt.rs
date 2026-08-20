@@ -463,12 +463,22 @@ fn const_scalar(operand: &Operand) -> Option<u128> {
     }
     // Known limitation: a *named* const operand (`ballot_sync(FULL_MASK,
     // …)`) reaches analysis MIR as `ConstantKind::Unevaluated` and stays
-    // unknown. There is no evaluation path through rustc_public at this
-    // pin: literal-initialized consts are "trivial consts" whose value the
-    // compiler stores instead of MIR, `has_body` excludes them by design,
-    // and no unevaluated-const eval API is exposed. Downstream this is why
-    // an RC002 with a named-const mask reports the mask as not evaluable
-    // and is never witness-promoted.
+    // unknown, while the same mask spelled as a literal arrives as
+    // `Allocated` and evaluates. Re-tested at the pin (#32), against the
+    // driver rather than from memory:
+    //
+    //   - `ConstDef` exposes no `body`, `has_body`, `eval`, `const_value`
+    //     or `ty` — there is nothing to read the initializer from.
+    //   - `MirConst` exposes exactly one evaluation entry point,
+    //     `eval_target_usize()`. It is not a door for a mask: on a `u32`
+    //     const it ICEs the compiler with "expected int of size 8, but got
+    //     size 4". The assertion fires *after* the value is resolved, so
+    //     the value is reachable in principle — what is missing is an API
+    //     that returns it at its own width.
+    //
+    // So the boundary is the exposed surface, not the compiler's ability.
+    // Downstream this is why an RC002 with a named-const mask reports the
+    // mask as not evaluable and is never witness-promoted.
     if let rustc_public::ty::ConstantKind::Allocated(allocation) = constant.const_.kind()
         && allocation.provenance.ptrs.is_empty()
         && !allocation.bytes.is_empty()
