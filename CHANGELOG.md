@@ -10,6 +10,125 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [0.2.0] — 2026-08-20
+
+The milestone that made the witness interpreter tell the truth about full-width
+values, and then used that to reach the constructs it had been declining: the
+lane-ordinal idiom, the ergonomic collective API, and a barrier behind a helper.
+
+Thirteen issues, and the three-part chain in the middle of them had to land in
+order. [#22](https://github.com/vyncint/reconverge/issues/22) made evaluation
+width-typed, [#23](https://github.com/vyncint/reconverge/issues/23) added an
+exact population count, and
+[#24](https://github.com/vyncint/reconverge/issues/24) gave the positional lane
+masks their values. Taken out of order the last of those routes exact 32-bit
+masks through arithmetic that was wrong at full width — measured, not assumed:
+before #22, `(!lane).count_ones() > 0` is true for all 32 lanes and the replay
+called it a 1-of-32 hang.
+
+### Numbers
+
+Self-made, on this project's own corpus: conformance holds at zero false
+positives with gating findings matching the baseline exactly; the mutation
+corpus reports **precision 1.000 across 466 gating findings**, up from 443, with
+the `wrapcol` family going from 14 mutants and none detected at the gating tier
+to 42 with 23 detected.
+
+Independent, from [simt-diff](https://github.com/vyncint/simt-diff) — 147
+generated kernels whose convergence property is known *by construction*, with
+oracles computed rather than inherited:
+
+| | |
+|---|---|
+| safe-by-construction cases | 34 |
+| of those gated (false positives) | **0** |
+| unsafe-by-construction cases | 113 |
+| of those gated | **107** |
+| precision at the gating tier | **1.000** |
+| recall at the gating tier | **0.947** |
+| cases classified as worth a human's attention | **0** |
+
+The six remaining recall gaps are all in the mask family and all documented:
+three are the named-`const` mask boundary re-tested in
+[#32](https://github.com/vyncint/reconverge/issues/32), and four of the six are
+reported at `warning` rather than silent.
+
+Still no findings from real code — the true-north number remains unearned.
+
+### Added
+
+- **The unmasked warp wrappers are analyzed**
+  ([#21](https://github.com/vyncint/reconverge/issues/21)). A kernel written
+  entirely against the ergonomic API used to be analyzed as though it held no
+  collectives at all — silence, not a warning. `MaskSource` records where a
+  collective's mask comes from: the first argument for the `*_sync` surface, an
+  implicit `u32::MAX` for the 27 wrappers that delegate with one, and unknown
+  for the `reduce_*_partial` helpers, which build theirs from a runtime
+  `live_lanes` argument and would be a confident wrong answer called full.
+- **Bounded inlining** ([#29](https://github.com/vyncint/reconverge/issues/29)).
+  An interprocedural finding is witness-promoted when the callee can be spliced
+  into the caller — non-recursive, at most two frames — which replaces "the
+  summary says this may reach a barrier" with an actual path. Nothing is
+  promoted on a summary bit; the bit raises the finding and a trace confirms it.
+- **The replay says why it produced no witness**
+  ([#27](https://github.com/vyncint/reconverge/issues/27),
+  [#28](https://github.com/vyncint/reconverge/issues/28)). "Unreachable under
+  the declared launch" and "a mask naming exactly the arriving lanes" are
+  results, not failures to evaluate, and each now carries a matchable `replay:`
+  note instead of being indistinguishable from an absence of knowledge.
+- **The driver names the missing `rustup` component**
+  ([#33](https://github.com/vyncint/reconverge/issues/33)) instead of failing
+  with four `E0463`s.
+
+### Changed
+
+- **Unchecked operations evaluate at their operand's width**
+  ([#22](https://github.com/vyncint/reconverge/issues/22)). Integer `!` is the
+  complement at the operand's own width — which is boolean negation at width 1,
+  so conditions fall out of the general rule — and casts truncate to their
+  target width rather than being the identity. Where a width is unavailable the
+  interpreter yields unknown: exact or unknown, never approximate.
+- **`count_ones` is modeled with its operand's width**
+  ([#23](https://github.com/vyncint/reconverge/issues/23)), recognized only on
+  the primitive-integer impls, and declining an operand carrying bits its type
+  cannot hold.
+- **The positional lane masks evaluate**
+  ([#24](https://github.com/vyncint/reconverge/issues/24)). `lanemask_lt/le/eq/
+  ge/gt` are closed forms of the lane's own ordinal, so
+  `warp::lanemask_lt().count_ones()` replays. `active_mask` stays unknown: its
+  value depends on which lanes are still live, a path-dependent question rather
+  than a positional one.
+- **Per-warp convergence in the multi-warp replay**
+  ([#30](https://github.com/vyncint/reconverge/issues/30)). A collective on a
+  lane's path no longer aborts the attempt; a warp whose still-running lanes are
+  all at the same collective passes it whatever the other warps are doing, and a
+  configuration that would need warps to interact is declined rather than
+  approximated. The site itself must still be a barrier beyond one warp.
+- **The GitHub Action installs from crates.io** rather than building the
+  analyzer from the materialized repo, and caches nothing.
+
+### Fixed
+
+- **`main` did not build.** The launch-matrix helpers merged with `i128`
+  constants where `Operand::Const` holds a `u128`.
+- **The commit-policy gate's guidance never reached fork contributors** — a fork
+  PR gets a read-only token whatever the workflow asks for, so the step that
+  explained the failure failed silently. It goes to the job summary now.
+
+### Documented
+
+- Promotion covers every site, not a prefix
+  ([#25](https://github.com/vyncint/reconverge/issues/25),
+  [#26](https://github.com/vyncint/reconverge/issues/26)). The prefix rule was
+  measured at 0.1.11 and the chain above dissolved it; what remains are two
+  cases where no lane reaches the later site at all, both correct. The second of
+  those was found by simt-diff after the first documentation of this landed.
+- The named-`const` mask boundary, with the APIs actually tried
+  ([#32](https://github.com/vyncint/reconverge/issues/32)). `ConstDef` exposes
+  no way to read the initializer, and `MirConst::eval_target_usize()` — the one
+  evaluation entry point — ICEs on a `u32` const *after* resolving the value. The
+  boundary is the exposed surface, not the compiler's ability.
+
 ## [0.1.12] — 2026-08-18
 
 Fixes [#14](https://github.com/vyncint/reconverge/issues/14): whole-warp
@@ -333,6 +452,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.2.0]: https://github.com/vyncint/reconverge/releases/tag/v0.2.0
 [0.1.12]: https://github.com/vyncint/reconverge/releases/tag/v0.1.12
 [0.1.11]: https://github.com/vyncint/reconverge/releases/tag/v0.1.11
 [0.1.10]: https://github.com/vyncint/reconverge/releases/tag/v0.1.10
