@@ -58,7 +58,11 @@ requires a reason for every entry. Points that matter in review:
   subject ≤ 72 chars. Scopes: `core:` `dialect:` `driver:` `witness:`
   `artifacts:` `schemas:` `tui:` `cli:` `ci:` `docs:` `repo:`.
 - **DCO**: sign off every commit (`git commit -s`); the `Signed-off-by:`
-  trailer must match the author identity.
+  trailer must match the author identity. Squash-merging rewrites the landed
+  commit's author to your account's commit email, so the trailer has to use
+  *that* address rather than whatever your local `git config` holds — if you
+  keep your address private, `ID+username@users.noreply.github.com`. Set it
+  per-repo and the gate stays green after the merge, not just on the PR.
 - **AI assistance is welcome; AI attribution is not. Remove the trailer and
   recommit — you are the author of record.**
 

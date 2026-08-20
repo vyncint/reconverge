@@ -45,8 +45,32 @@ jobs:
         if: success() || failure()
         run: ./scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.range }}"
 
+      # The guidance has to survive a fork PR, where GITHUB_TOKEN is
+      # read-only no matter what `permissions:` above asks for — so it
+      # goes to the job summary, which needs no token at all. Posting a
+      # comment is the nicer surface when it works, so it is still tried,
+      # but it can no longer turn a clean report into a failed step.
+      - name: Explain the policy in the job summary
+        if: failure()
+        run: |
+          {
+            echo '## The commit-policy gate failed'
+            echo
+            echo '- Every commit must be signed off (`git commit -s`); the `Signed-off-by:`'
+            echo '  trailer must match the commit author (DCO).'
+            echo '- Because pull requests here are squash-merged, GitHub rewrites the author'
+            echo '  to your account'"'"'s commit email. If you keep your address private that is'
+            echo '  `ID+username@users.noreply.github.com`, so sign off with that same address'
+            echo '  or the trailer will not match once the commit lands on `main`.'
+            echo '- AI assistance is welcome; AI attribution is not. Remove the trailer and'
+            echo '  recommit — you are the author of record.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post the policy comment on the PR (once)
         if: failure() && github.event_name == 'pull_request'
+        # A fork PR cannot be commented on with this token; the summary
+        # above already carries the guidance, so never fail the job here.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -62,6 +86,7 @@ jobs:
             echo "The commit-policy gate failed on this PR."
             echo
             echo '- Every commit must be signed off (`git commit -s`); the `Signed-off-by:` trailer must match the author identity (DCO).'
+            echo '- Pull requests are squash-merged, so GitHub rewrites the author to your account commit email; sign off with that same address.'
             echo '- AI assistance is welcome; AI attribution is not. Remove the trailer and recommit — you are the author of record.'
           } > /tmp/policy-comment.md
           gh pr comment "$PR" --body-file /tmp/policy-comment.md
