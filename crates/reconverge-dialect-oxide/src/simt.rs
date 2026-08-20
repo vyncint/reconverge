@@ -2,7 +2,7 @@
 //! definition path, verified against cuda-device at the pinned rev.
 //! Path matching only — no upstream code is vendored.
 
-use reconverge_core::dialect::{CallKind, SimtDialect};
+use reconverge_core::dialect::{CallKind, MaskSource, SimtDialect};
 
 /// The cuda-oxide dialect.
 #[derive(Debug, Clone, Copy, Default)]
@@ -60,6 +60,44 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // an implicit full mask — inside cuda-device, where the analysis
         // cannot see the mask argument; they are a documented v1 recall gap
         // (explain/RC002.md), never misread as mask-first calls.
+        // The partial-warp reducers build their mask from a runtime
+        // `live_lanes` argument, so it is neither full nor the first
+        // argument. Classified anyway: a warning naming an unevaluable
+        // mask is worth more than silence, and calling it full would be
+        // a confident wrong answer.
+        "reduce_sum_f32_partial"
+        | "reduce_sum_f64_partial"
+        | "reduce_max_f32_partial"
+        | "reduce_max_f64_partial"
+        | "reduce_min_f32_partial"
+        | "reduce_min_f64_partial"
+            if def_path.contains("::warp::") =>
+        {
+            CallKind::WarpCollective {
+                mask: MaskSource::Unknown,
+            }
+        }
+
+        // The unmasked convenience wrappers. Each one delegates to its
+        // `*_sync` counterpart with `u32::MAX`, verified against
+        // cuda-device at the pinned rev, so the participation mask is
+        // known from the call: the wrapper supplies it. Treating these
+        // as ordinary calls made a kernel written entirely against the
+        // ergonomic API analyze as though it held no collectives —
+        // silence rather than a warning, which is the worse failure.
+        "all" | "any" | "ballot" | "popc" | "shuffle" | "shuffle_xor" | "shuffle_down"
+        | "shuffle_up" | "shuffle_f32" | "shuffle_xor_f32" | "shuffle_down_f32"
+        | "shuffle_up_f32" | "shuffle_u64" | "shuffle_xor_u64" | "shuffle_down_u64"
+        | "shuffle_up_u64" | "shuffle_f64" | "shuffle_xor_f64" | "shuffle_down_f64"
+        | "shuffle_up_f64" | "reduce_sum_f32" | "reduce_max_f32" | "reduce_min_f32"
+        | "reduce_sum_f64" | "reduce_max_f64" | "reduce_min_f64" | "warp_reduce_sum"
+            if def_path.contains("::warp::") =>
+        {
+            CallKind::WarpCollective {
+                mask: MaskSource::ImplicitFull,
+            }
+        }
+
         "ballot_sync"
         | "any_sync"
         | "all_sync"
@@ -93,7 +131,9 @@ pub fn classify_call(def_path: &str) -> CallKind {
         | "redux_sync_max_i32"
         | "elect_sync"
         | "is_elected_sync"
-        | "sync_mask" => CallKind::WarpCollective,
+        | "sync_mask" => CallKind::WarpCollective {
+            mask: MaskSource::FirstArgument,
+        },
 
         // Per-lane and per-warp environment reads: divergent by definition
         // (the lanemask registers differ on every lane; `warp_id` and
@@ -242,7 +282,9 @@ mod tests {
     fn classifies_warp_collectives_and_atomics() {
         assert_eq!(
             classify_call("cuda_device::warp::ballot_sync"),
-            CallKind::WarpCollective
+            CallKind::WarpCollective {
+                mask: MaskSource::FirstArgument
+            }
         );
         assert_eq!(
             classify_call("cuda_device::atomic::atomic_add"),
@@ -293,7 +335,9 @@ mod tests {
         ] {
             assert_eq!(
                 classify_call(&format!("cuda_device::warp::{name}")),
-                CallKind::WarpCollective,
+                CallKind::WarpCollective {
+                    mask: MaskSource::FirstArgument
+                },
                 "{name} must be a warp collective"
             );
         }
@@ -358,13 +402,18 @@ mod tests {
         }
     }
 
+    /// The unmasked wrappers are collectives whose mask is known from the
+    /// call. Each delegates to its `*_sync` counterpart with `u32::MAX`,
+    /// verified against cuda-device at the pinned rev, so the wrapper — not
+    /// a callee the analysis cannot see — is what supplies the mask.
+    ///
+    /// This replaces a test asserting they were `Other`. Its reasoning was
+    /// that their first argument is not a mask, so classifying them would
+    /// corrupt mask reasoning, and they should stay out "until the dialect
+    /// can carry an implicit-mask convention". `implicit_full_mask` is that
+    /// convention.
     #[test]
-    fn unmasked_wrappers_are_the_documented_v1_gap() {
-        // `shuffle`/`ballot`/`all`/`any` (and the typed non-`_sync`
-        // variants) pass an implicit full mask inside cuda-device. Their
-        // first argument is NOT a mask, so classifying them as collectives
-        // would corrupt mask reasoning; they stay Other until the dialect
-        // can carry an implicit-mask convention.
+    fn unmasked_wrappers_carry_an_implicit_full_mask() {
         for name in [
             "shuffle",
             "shuffle_down",
@@ -372,12 +421,31 @@ mod tests {
             "ballot",
             "all",
             "any",
+            "popc",
+            "reduce_sum_f32",
+            "warp_reduce_sum",
         ] {
             assert_eq!(
                 classify_call(&format!("cuda_device::warp::{name}")),
-                CallKind::Other,
-                "{name} is outside the v1 surface"
+                CallKind::WarpCollective {
+                    mask: MaskSource::ImplicitFull
+                },
+                "{name} is a collective with a full mask"
             );
+        }
+    }
+
+    /// The wrapper names are only collectives under `::warp::`. `all` and
+    /// `any` are ordinary words, and a false positive here would invent a
+    /// collective where the program has none.
+    #[test]
+    fn wrapper_names_outside_warp_are_not_collectives() {
+        for path in [
+            "cuda_device::cooperative::all",
+            "my_app::iter::any",
+            "core::slice::<impl [T]>::all",
+        ] {
+            assert_eq!(classify_call(path), CallKind::Other, "{path}");
         }
     }
 
@@ -392,5 +460,36 @@ mod tests {
             classify_call("cuda_device::__internal::make_kernel_scope"),
             CallKind::UniformMarker
         );
+    }
+}
+
+#[cfg(test)]
+mod partial_reducer_tests {
+    use super::*;
+
+    /// The partial-warp reducers are collectives, but their mask is built
+    /// from a runtime `live_lanes` argument — neither full nor the first
+    /// argument. Calling them full would claim every lane participates in
+    /// a reduction deliberately scoped to fewer, so the mask is unknown
+    /// and RC002 reports it as such instead of guessing.
+    #[test]
+    fn partial_reducers_are_collectives_with_an_unknown_mask() {
+        for name in [
+            "reduce_sum_f32_partial",
+            "reduce_sum_f64_partial",
+            "reduce_max_f32_partial",
+            "reduce_min_f64_partial",
+        ] {
+            let kind = classify_call(&format!("cuda_device::warp::{name}"));
+            assert_eq!(
+                kind,
+                CallKind::WarpCollective {
+                    mask: MaskSource::Unknown
+                },
+                "{name}"
+            );
+            assert!(kind.mask_is_unknown(), "{name} must not claim a mask");
+            assert_eq!(kind.implicit_mask(), None, "{name}");
+        }
     }
 }

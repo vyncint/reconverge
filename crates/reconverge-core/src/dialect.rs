@@ -12,6 +12,28 @@ pub trait SimtDialect {
     fn classify_call(&self, def_path: &str) -> CallKind;
 }
 
+/// Where a warp collective's participation mask comes from.
+///
+/// cuda-device offers the same collective three ways, and they are not
+/// interchangeable for RC002: reading the first argument of a call that
+/// has no mask argument would check the wrong value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MaskSource {
+    /// The mask is the call's first argument — the `*_sync` surface.
+    FirstArgument,
+    /// The call supplies `u32::MAX` itself: the unmasked convenience
+    /// wrappers (`ballot`, `shuffle*`, `all`, `any`, `popc`, `reduce_*`),
+    /// each of which delegates to its `*_sync` counterpart with a full
+    /// mask. Known from the call rather than inferred from the callee.
+    ImplicitFull,
+    /// A collective whose mask the call does not reveal — the
+    /// `reduce_*_partial` helpers, which build one from a runtime
+    /// `live_lanes` argument. Still worth classifying: a warning that says
+    /// "found, mask not evaluable" beats silence, and assuming a full mask
+    /// here would be a confident wrong answer.
+    Unknown,
+}
+
 /// What a call means to the uniformity engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -33,7 +55,11 @@ pub enum CallKind {
     /// subject. Results are treated as divergent (they are at most
     /// warp-uniform, and the lattice does not distinguish warp- from
     /// block-uniformity).
-    WarpCollective,
+    WarpCollective {
+        /// Where the participation mask comes from. It is a property of
+        /// the *call*, not of a callee the analysis can see inside.
+        mask: MaskSource,
+    },
     /// Reads the per-lane execution environment (`active_mask`): the
     /// result depends on which lanes are active, so it is divergent for
     /// the lattice — but the call takes no participation mask and
@@ -69,6 +95,35 @@ pub enum CallKind {
 }
 
 impl CallKind {
+    /// Whether this call is a warp collective, whichever way its
+    /// participation mask is supplied.
+    #[must_use]
+    pub fn is_warp_collective(self) -> bool {
+        matches!(self, CallKind::WarpCollective { .. })
+    }
+
+    /// The mask this call supplies by construction, when it supplies one.
+    #[must_use]
+    pub fn implicit_mask(self) -> Option<u64> {
+        match self {
+            CallKind::WarpCollective {
+                mask: MaskSource::ImplicitFull,
+            } => Some(u64::from(u32::MAX)),
+            _ => None,
+        }
+    }
+
+    /// True when the mask cannot be read off the call at all.
+    #[must_use]
+    pub fn mask_is_unknown(self) -> bool {
+        matches!(
+            self,
+            CallKind::WarpCollective {
+                mask: MaskSource::Unknown
+            }
+        )
+    }
+
     /// The uniformity contributed by the call itself, before joining
     /// argument uniformities. `None` means "just join the arguments".
     #[must_use]
@@ -76,7 +131,7 @@ impl CallKind {
         match self {
             CallKind::ThreadIndexWitness
             | CallKind::AtomicRmw
-            | CallKind::WarpCollective
+            | CallKind::WarpCollective { .. }
             | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
             CallKind::BlockUniform | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
             CallKind::Barrier
