@@ -354,7 +354,13 @@ one that does less.
 - **Masks that are not literals** — a named `const`, or anything computed —
   cannot be evaluated through `rustc_public` at the pinned toolchain, so
   RC002 reports convergence and says the mask was not evaluable rather than
-  guessing at it.
+  guessing at it. The boundary is the exposed surface rather than the
+  compiler's ability: a named `const` arrives as `ConstantKind::Unevaluated`
+  where a literal arrives as `Allocated`, `ConstDef` offers no way to read
+  the initializer, and the one evaluation entry point on `MirConst`,
+  `eval_target_usize()`, assumes a `usize` and ICEs on a `u32` mask
+  ("expected int of size 8, but got size 4") — after resolving the value,
+  so what is missing is an API that returns it at its own width.
 - **The pinned nightly is not optional.** A rustc-driver tool and the rustc
   it wraps must be the same build; the pin matches upstream cuda-oxide's own.
 
