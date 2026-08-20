@@ -1049,3 +1049,192 @@ fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
     assert_eq!(replay.arrived, 0x5555_5555_5555_5555_u128);
     assert_eq!(replay.never_arrives, 0xaaaa_aaaa_aaaa_aaaa_u128);
 }
+
+/// Helper to construct a kernel model with a `warp_id` comparison guard:
+/// `if warp_id OP const_val { sync_threads(); }`
+fn warp_id_guard_model(op: BinOp, const_val: i128) -> FnModel {
+    kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(op, Operand::Local(2), Operand::Const(const_val)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    )
+}
+
+/// Helper to construct a kernel model with a `warp_id % modulus == target` guard.
+fn warp_id_rem_eq_model(modulus: i128, target: i128) -> FnModel {
+    kernel(
+        5,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::DivergentEnvRead,
+                    "warp_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        3,
+                        &[2],
+                        Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(modulus)),
+                    ),
+                    stmt_eval(
+                        4,
+                        &[3],
+                        Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(target)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 4,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    )
+}
+
+/// Differential launch matrix test for multi-warp replay across block sizes 32, 64, and 128.
+/// Records evidence that `warp_id`-guarded barriers that are uniform at 1 warp (block 32)
+/// correctly promote to confirmed findings at multi-warp declared blocks (64 and 128)
+/// when the warp configuration causes divergence.
+#[test]
+fn multi_warp_replay_differential_launch_matrix_warp_id() {
+    use reconverge_witness::replay_hang_at;
+
+    // 1. `warp_id == 0`:
+    let eq_zero = warp_id_guard_model(BinOp::Eq, 0);
+    // Block 32 (1 warp): warp 0 arrives -> uniform -> no witness.
+    assert!(replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 32).is_none());
+    // Block 64 (2 warps): warp 0 arrives (32 lanes), warp 1 never does (32 lanes) -> hang witnessed.
+    let replay_64 = replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 64)
+        .expect("warp_id == 0 must witness divergence at 64 threads");
+    assert_eq!(replay_64.arrived, 0x0000_0000_ffff_ffff_u128);
+    assert_eq!(replay_64.never_arrives, 0xffff_ffff_0000_0000_u128);
+    assert_eq!(replay_64.block, [64, 1, 1]);
+    assert!(replay_64.verdict_message.contains("32 of 64 lanes"));
+
+    // Block 128 (4 warps): warp 0 arrives (32 lanes), warps 1..3 never do (96 lanes) -> hang witnessed.
+    let replay_128 = replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 128)
+        .expect("warp_id == 0 must witness divergence at 128 threads");
+    assert_eq!(replay_128.arrived, 0xffff_ffff_u128);
+    assert_eq!(
+        replay_128.never_arrives,
+        0xffff_ffff_ffff_ffff_ffff_ffff_0000_0000_u128
+    );
+    assert_eq!(replay_128.block, [128, 1, 1]);
+    assert!(replay_128.verdict_message.contains("32 of 128 lanes"));
+
+    // 2. `warp_id < 2`:
+    let lt_two = warp_id_guard_model(BinOp::Lt, 2);
+    // Block 32 (1 warp): warp 0 < 2 -> true for all 32 lanes -> uniform -> no witness.
+    assert!(replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 32).is_none());
+    // Block 64 (2 warps): warps 0, 1 < 2 -> true for all 64 lanes -> uniform -> no witness (SAFE at block 64).
+    assert!(replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 64).is_none());
+    // Block 128 (4 warps): warps 0, 1 arrive (64 lanes), warps 2, 3 never do (64 lanes) -> hang witnessed.
+    let replay_lt2_128 = replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 128)
+        .expect("warp_id < 2 must witness divergence at 128 threads");
+    assert_eq!(replay_lt2_128.arrived, 0xffff_ffff_ffff_ffff_u128);
+    assert_eq!(
+        replay_lt2_128.never_arrives,
+        0xffff_ffff_ffff_ffff_0000_0000_0000_0000_u128
+    );
+    assert_eq!(replay_lt2_128.block, [128, 1, 1]);
+    assert!(replay_lt2_128.verdict_message.contains("64 of 128 lanes"));
+
+    // 3. `warp_id % 2 == 0`:
+    let rem_even = warp_id_rem_eq_model(2, 0);
+    // Block 32 (1 warp): warp 0 % 2 == 0 -> uniform -> no witness.
+    assert!(replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 32).is_none());
+    // Block 64 (2 warps): warp 0 arrives (32 lanes), warp 1 never does (32 lanes) -> hang witnessed.
+    let replay_rem_64 = replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 64)
+        .expect("warp_id % 2 == 0 must witness divergence at 64 threads");
+    assert_eq!(replay_rem_64.arrived, 0x0000_0000_ffff_ffff_u128);
+    assert_eq!(replay_rem_64.never_arrives, 0xffff_ffff_0000_0000_u128);
+    // Block 128 (4 warps): warps 0, 2 arrive (64 lanes), warps 1, 3 never do (64 lanes) -> hang witnessed.
+    let replay_rem_128 = replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 128)
+        .expect("warp_id % 2 == 0 must witness divergence at 128 threads");
+    assert_eq!(
+        replay_rem_128.arrived,
+        0x0000_0000_ffff_ffff_0000_0000_ffff_ffff_u128
+    );
+    assert_eq!(
+        replay_rem_128.never_arrives,
+        0xffff_ffff_0000_0000_ffff_ffff_0000_0000_u128
+    );
+    assert_eq!(replay_rem_128.block, [128, 1, 1]);
+    assert!(replay_rem_128.verdict_message.contains("64 of 128 lanes"));
+}
+
+/// Differential check verifying that safe launches (where every warp in the declared
+/// block shape evaluates the guard uniformly) never produce a witness / finding.
+#[test]
+fn multi_warp_replay_safe_launches_produce_no_findings() {
+    use reconverge_witness::replay_hang_at;
+
+    // `warp_id < 4` is uniform for block 32 (1 warp), block 64 (2 warps), and block 128 (4 warps).
+    let lt_four = warp_id_guard_model(BinOp::Lt, 4);
+    assert!(
+        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 32).is_none(),
+        "block 32 safe launch must not produce a witness"
+    );
+    assert!(
+        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 64).is_none(),
+        "block 64 safe launch must not produce a witness"
+    );
+    assert!(
+        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 128).is_none(),
+        "block 128 safe launch must not produce a witness"
+    );
+
+    // `warp_id < 128` is uniform across block sizes 32, 64, and 128.
+    let lt_large = warp_id_guard_model(BinOp::Lt, 128);
+    for &threads in &[32, 64, 128] {
+        assert!(
+            replay_hang_at(&lt_large, 2, SiteKind::Barrier, 0, threads).is_none(),
+            "block {threads} uniform warp_id guard must produce no finding"
+        );
+    }
+}
