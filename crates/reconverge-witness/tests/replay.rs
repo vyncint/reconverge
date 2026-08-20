@@ -1052,7 +1052,7 @@ fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
 
 /// Helper to construct a kernel model with a `warp_id` comparison guard:
 /// `if warp_id OP const_val { sync_threads(); }`
-fn warp_id_guard_model(op: BinOp, const_val: i128) -> FnModel {
+fn warp_id_guard_model(op: BinOp, const_val: u128) -> FnModel {
     kernel(
         4,
         vec![
@@ -1091,7 +1091,7 @@ fn warp_id_guard_model(op: BinOp, const_val: i128) -> FnModel {
 }
 
 /// Helper to construct a kernel model with a `warp_id % modulus == target` guard.
-fn warp_id_rem_eq_model(modulus: i128, target: i128) -> FnModel {
+fn warp_id_rem_eq_model(modulus: u128, target: u128) -> FnModel {
     kernel(
         5,
         vec![
