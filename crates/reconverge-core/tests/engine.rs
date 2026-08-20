@@ -5,7 +5,7 @@
 
 use reconverge_core::Uniformity;
 use reconverge_core::analysis::{self, ReasonKind, Summaries};
-use reconverge_core::dialect::CallKind;
+use reconverge_core::dialect::{CallKind, MaskSource};
 use reconverge_core::model::{Block, Callee, FnModel, Local, Stmt, Term, TermKind};
 
 fn stmt(dest: Local, uses: &[Local]) -> Stmt {
@@ -438,7 +438,9 @@ fn warp_collectives_and_masks_are_collected() {
     fn masked_call(display: &str, mask: u64, dest: Local, target: usize) -> TermKind {
         TermKind::Call {
             callee: Callee {
-                kind: CallKind::WarpCollective,
+                kind: CallKind::WarpCollective {
+                    mask: MaskSource::FirstArgument,
+                },
                 display: display.to_string(),
                 local_fn: None,
             },
@@ -512,7 +514,14 @@ fn call_to_collective_helper_under_divergence_is_flagged() {
         blocks: vec![
             Block {
                 stmts: vec![],
-                term: term(call(CallKind::WarpCollective, "all_sync", Some(0), 1)),
+                term: term(call(
+                    CallKind::WarpCollective {
+                        mask: MaskSource::FirstArgument,
+                    },
+                    "all_sync",
+                    Some(0),
+                    1,
+                )),
             },
             Block {
                 stmts: vec![],

@@ -44,7 +44,7 @@ impl Summaries {
                     if let TermKind::Call { callee, .. } = &block.term.kind {
                         let (b, w) = match callee.kind {
                             CallKind::Barrier => (true, false),
-                            CallKind::WarpCollective => (false, true),
+                            CallKind::WarpCollective { .. } => (false, true),
                             _ => callee
                                 .local_fn
                                 .map_or((false, false), |c| (barrier[c], warp[c])),
@@ -408,7 +408,7 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
         }
 
         let warp = match callee.kind {
-            CallKind::WarpCollective => Some(false),
+            CallKind::WarpCollective { .. } => Some(false),
             _ => callee
                 .local_fn
                 .filter(|&c| summaries.may_contain_warp_op[c])
@@ -421,10 +421,18 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 callee_display: callee.display.clone(),
                 interprocedural,
                 divergent_cause,
-                // By the dialect convention, the participation mask is the
-                // collective's first argument.
-                mask: if interprocedural {
+                // By the dialect convention the participation mask is
+                // the collective's first argument — except for the
+                // unmasked wrappers, which take no mask argument at all
+                // and supply a full one themselves, so it is known from
+                // the call rather than read off it.
+                mask: if interprocedural || callee.kind.mask_is_unknown() {
                     None
+                } else if let Some(implicit) = callee.kind.implicit_mask() {
+                    implicit
+                        // A wrapper supplies the mask itself; its first
+                        // argument is a value, not a mask.
+                        .into()
                 } else {
                     const_args.first().copied().flatten()
                 },
@@ -449,7 +457,9 @@ fn source_detail(kind: CallKind, display: &str) -> String {
     match kind {
         CallKind::ThreadIndexWitness => format!("thread-index witness `{display}()`"),
         CallKind::AtomicRmw => format!("atomic return value of `{display}()`"),
-        CallKind::WarpCollective => format!("warp-collective result of `{display}()`"),
+        CallKind::WarpCollective { .. } => {
+            format!("warp-collective result of `{display}()`")
+        }
         CallKind::DivergentEnvRead => format!("per-lane environment read `{display}()`"),
         _ => format!("result of `{display}()`"),
     }

@@ -302,11 +302,21 @@ one that does less.
   family (`barrier::Barrier`) is deliberately out: it is a phase-counted
   split barrier where partial participation is the designed use, so
   divergence at the wait is not by itself a bug.
-- **RC002 covers the masked collective surface** — every `*_sync` function
-  of cuda-device's `warp` module (mask-first by convention) plus
-  `sync_mask`. The unmasked convenience wrappers (`warp::shuffle`,
-  `warp::ballot`, the `reduce_*` helpers) hide an implicit full mask inside
-  cuda-device and are not yet analyzed.
+- **RC002 covers the whole collective surface** — every `*_sync` function
+  of cuda-device's `warp` module (mask-first by convention), plus
+  `sync_mask`, plus the unmasked convenience wrappers (`warp::shuffle`,
+  `warp::ballot`, `all`, `any`, `popc`, the `reduce_*` helpers). The
+  wrappers take no mask argument, but they are the thing that supplies
+  one — each delegates to its `*_sync` counterpart with `u32::MAX` — so
+  the mask is known from the call rather than inferred from a callee the
+  analysis cannot see, and `warp::ballot(x)` under divergence is treated
+  exactly like `warp::ballot_sync(0xffff_ffff, x)`.
+
+  The `reduce_*_partial` helpers are the one collective whose mask is
+  neither full nor an argument: they build it from a runtime `live_lanes`
+  value. They are still reported, with the mask named as not evaluable —
+  a warning that says "found this, cannot check the mask" rather than the
+  silence of not looking at all.
 - **A construct the declared launch cannot reach is reported at `warning`
   and never promoted.** The syntactic recognizer speaks — a launch
   contract is a declaration, not a proof, and a kernel launched outside

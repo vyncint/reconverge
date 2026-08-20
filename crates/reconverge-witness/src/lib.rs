@@ -465,7 +465,10 @@ fn skip_unknowable_diamond(
         ipdom[b]?;
         match &f.blocks[b].term.kind {
             TermKind::Call { callee, .. }
-                if matches!(callee.kind, CallKind::Barrier | CallKind::WarpCollective) =>
+                if matches!(
+                    callee.kind,
+                    CallKind::Barrier | CallKind::WarpCollective { .. }
+                ) =>
             {
                 return None;
             }
@@ -628,14 +631,14 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                 } else {
                     match callee.kind {
                         CallKind::Barrier => return LaneStop::AtBarrier(lane.block),
-                        CallKind::WarpCollective if ctx.lanes > LANES => {
+                        CallKind::WarpCollective { .. } if ctx.lanes > LANES => {
                             // A collective synchronizes within each warp;
                             // the multi-warp replay does not model that
                             // per-warp choreography, and guessing it could
                             // fabricate a witness.
                             return LaneStop::Bailed;
                         }
-                        CallKind::WarpCollective => {
+                        CallKind::WarpCollective { .. } => {
                             // A non-site collective synchronizes too; treat
                             // it like a barrier for the release logic.
                             let _ = ctx.site;

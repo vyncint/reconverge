@@ -82,18 +82,25 @@ pub struct Mutant {
 /// the corpus silently skipped every real shuffle site.)
 fn is_classified_collective(name: &str) -> bool {
     reconverge_dialect_oxide::simt::classify_call(&format!("cuda_device::warp::{name}"))
-        == reconverge_core::dialect::CallKind::WarpCollective
+        .is_warp_collective()
 }
 
-/// Warp-collective-backed helpers the dialect does not classify: the
-/// unmasked convenience wrappers, which hide the collective (and an
-/// implicit full mask) inside `cuda_device` where the analysis cannot see
-/// the mask. Sites using them are skipped *and counted*, so the published
-/// table names the gap. (`active_mask` is deliberately absent from both
-/// lists: it takes no mask and is legal under divergence, so a site using
-/// it is not a maskable hazard at all.)
+/// A drift detector, kept deliberately after it stopped firing.
+///
+/// These names — the unmasked convenience wrappers — used to be the gap
+/// this counter published: the dialect did not classify them, so sites
+/// using them were skipped *and counted*. The dialect now carries an
+/// implicit-full-mask convention and classifies them, so
+/// `is_classified_collective` claims them first and this predicate is
+/// reached only if that ever stops being true. The published count should
+/// read zero; a non-zero one means the dialect and this list have drifted
+/// apart again, which is exactly the failure the comment above records.
+///
+/// (`active_mask` is deliberately absent from both lists: it takes no mask
+/// and is legal under divergence, so a site using it is not a maskable
+/// hazard at all.)
 fn is_unclassified_collective(name: &str) -> bool {
-    matches!(name, "shuffle" | "ballot" | "all" | "any")
+    matches!(name, "shuffle" | "ballot" | "all" | "any" | "popc")
         || (name.starts_with("shuffle_") && !name.ends_with("_sync"))
         || name.starts_with("reduce_")
 }

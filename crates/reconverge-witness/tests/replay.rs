@@ -2,7 +2,7 @@
 //! gate's shapes: replay a concrete hang for an injected RC001 and RC002.
 
 use reconverge_artifacts::witness::VerdictKind;
-use reconverge_core::dialect::CallKind;
+use reconverge_core::dialect::{CallKind, MaskSource};
 use reconverge_core::model::{
     BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind, UnOp,
 };
@@ -148,7 +148,9 @@ fn rc001_hang_replays_concretely() {
 #[test]
 fn rc002_mask_mismatch_replays_concretely() {
     let f = canonical(call(
-        CallKind::WarpCollective,
+        CallKind::WarpCollective {
+            mask: MaskSource::FirstArgument,
+        },
         "ballot_sync",
         vec![Some(Operand::Const(0xffff_ffff)), Some(Operand::Const(1))],
         Some(0),
@@ -181,7 +183,9 @@ fn rc002_mask_mismatch_replays_concretely() {
 #[test]
 fn matching_partial_mask_produces_no_witness() {
     let f = canonical(call(
-        CallKind::WarpCollective,
+        CallKind::WarpCollective {
+            mask: MaskSource::FirstArgument,
+        },
         "ballot_sync",
         vec![Some(Operand::Const(EVEN_LANES))],
         Some(0),
@@ -986,7 +990,9 @@ fn multi_warp_replay_bails_on_any_collective() {
             Block {
                 stmts: vec![],
                 term: term(call(
-                    CallKind::WarpCollective,
+                    CallKind::WarpCollective {
+                        mask: MaskSource::FirstArgument,
+                    },
                     "ballot_sync",
                     vec![Some(Operand::Const(0xffff_ffff))],
                     Some(2),
@@ -1667,7 +1673,9 @@ fn not_feeding_popcount_does_not_fabricate_a_witness() {
 #[test]
 fn a_matching_partial_mask_is_reported_as_checked_not_unknown() {
     let f = canonical(call(
-        CallKind::WarpCollective,
+        CallKind::WarpCollective {
+            mask: MaskSource::FirstArgument,
+        },
         "ballot_sync",
         vec![Some(Operand::Const(EVEN_LANES))],
         Some(0),
