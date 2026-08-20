@@ -2,9 +2,14 @@
 #
 # The action ships inside the reconverge repository itself: when a workflow
 # says `uses: vyncint/reconverge/action@<ref>`, the runner materializes the
-# whole repo at that ref, so the analyzer is built from the exact sources
-# the ref pins — no published binaries, no registry, nothing to fetch
-# beyond the action itself and the pinned Rust toolchain.
+# whole repo at that ref. The analyzer is installed from crates.io at the
+# version that ref declares, so the ref still decides exactly which analyzer
+# runs — it is fetched as a released version rather than compiled from the
+# working tree.
+#
+# Nothing is cached. Every run installs the pinned toolchain and the pinned
+# version from scratch, so a run can never inherit a stale binary from an
+# earlier one, and what CI checks is always a published release.
 #
 # The analyzed project is compiled with reconverge's pinned nightly
 # (exported as RUSTUP_TOOLCHAIN, overriding any toolchain file in the
@@ -58,27 +63,30 @@ runs:
         toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "${reconverge_root}/rust-toolchain.toml")"
         echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
 
-    - name: Cache the analyzer build
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.action_path }}/../target
-        # The ref key goes stale when a branch ref moves; the build step
-        # below always runs, so a stale hit only means an incremental
-        # rebuild instead of a cold one.
-        key: reconverge-action-${{ runner.os }}-${{ github.action_ref }}
-        restore-keys: |
-          reconverge-action-${{ runner.os }}-
-
-    - name: Build the analyzer
+    - name: Install the analyzer
       shell: bash
-      run: cargo build --release -p reconverge-driver -p cargo-reconverge
-      working-directory: ${{ github.action_path }}/..
+      run: |
+        # The version comes from the ref's own workspace manifest, so
+        # `@<ref>` still chooses the analyzer; it is now resolved to a
+        # released version instead of a build of the working tree.
+        version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "${RECONVERGE_ROOT}/Cargo.toml" | head -n 1)"
+        if [ -z "${version}" ]; then
+          echo "could not read the workspace version from ${RECONVERGE_ROOT}/Cargo.toml" >&2
+          exit 1
+        fi
+        echo "installing reconverge ${version} from crates.io"
+        # --locked: both crates publish a Cargo.lock, so the dependency
+        # graph is the one that release was tested against. Both binaries
+        # land in the same directory, which is how `cargo-reconverge`
+        # finds the driver — it looks for a sibling of its own executable.
+        cargo install --locked \
+          "cargo-reconverge@${version}" \
+          "reconverge-driver@${version}"
 
     - name: cargo reconverge check
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        RECONVERGE_DRIVER: ${{ github.action_path }}/../target/release/reconverge-driver
         INPUT_CC: ${{ inputs.cc }}
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_SARIF: ${{ inputs.sarif }}
@@ -87,4 +95,4 @@ runs:
         if [ -n "${INPUT_CC}" ]; then args+=(--cc "${INPUT_CC}"); fi
         if [ "${INPUT_STRICT}" = "true" ]; then args+=(--strict); fi
         if [ -n "${INPUT_SARIF}" ]; then args+=(--sarif "${INPUT_SARIF}"); fi
-        "${RECONVERGE_ROOT}/target/release/cargo-reconverge" reconverge check "${args[@]}"
+        cargo-reconverge reconverge check "${args[@]}"

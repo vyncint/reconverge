@@ -38,8 +38,11 @@ Notes:
   exports `RUSTUP_TOOLCHAIN`, overriding any toolchain file in your repo) —
   a rustc-driver tool must match the rustc it wraps, and cuda-oxide already
   requires the same pin.
-- The analyzer is built from the action's own ref on first use and cached;
-  a cold run adds a few minutes, warm runs seconds.
+- The analyzer is installed from crates.io with `cargo install`, at the
+  version the pinned ref declares. Nothing is cached: every run installs the
+  toolchain and that version from scratch, so a run cannot inherit a stale
+  binary and what CI checks is always a published release. Expect the install
+  to cost a few minutes on every run.
 - The action is built from this repository, so it tracks whichever ref you
   pin (`@main`, a tag, or a SHA). Pin a tag or SHA if you want the
   analyzer to change only when you say so.
