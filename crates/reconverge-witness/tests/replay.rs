@@ -1660,3 +1660,104 @@ fn not_feeding_popcount_does_not_fabricate_a_witness() {
         "every lane reaches the barrier; there is no hang to witness"
     );
 }
+
+/// Issue #28: a mask naming exactly the arriving lanes is the tool's
+/// strongest result on this path — it checked a correct idiom — and used
+/// to be reported the same way as "could not evaluate".
+#[test]
+fn a_matching_partial_mask_is_reported_as_checked_not_unknown() {
+    let f = canonical(call(
+        CallKind::WarpCollective,
+        "ballot_sync",
+        vec![Some(Operand::Const(EVEN_LANES))],
+        Some(0),
+        4,
+    ));
+    let outcome = reconverge_witness::replay_outcome(
+        &f,
+        3,
+        SiteKind::Collective {
+            mask: Some(EVEN_LANES as u64),
+        },
+        0,
+    );
+    assert_eq!(
+        outcome.err(),
+        Some(reconverge_witness::NoWitness::MaskMatchesArrivals {
+            mask: EVEN_LANES as u32,
+            arrived: EVEN_LANES as u32,
+        }),
+        "the replay verified the idiom; it did not fail to evaluate it"
+    );
+}
+
+/// Issue #27: a construct no lane reaches under this launch is close to
+/// knowledge — under the declared shape it does not run — and must not
+/// read like an absence of it.
+#[test]
+fn a_site_no_lane_reaches_is_reported_as_unreachable_not_unknown() {
+    // The site sits behind a branch every lane declines: `lane_id` is
+    // never 99, so nothing arrives.
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(99)),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert_eq!(
+        reconverge_witness::replay_outcome(&f, 2, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::UnreachableUnderLaunch)
+    );
+}
+
+/// The third non-witness, kept distinct from both: every lane arrives, so
+/// nothing diverges.
+#[test]
+fn uniform_arrival_is_reported_as_uniform() {
+    let f = kernel(
+        2,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 1)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert_eq!(
+        reconverge_witness::replay_outcome(&f, 0, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::Uniform)
+    );
+}
