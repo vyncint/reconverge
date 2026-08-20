@@ -287,20 +287,32 @@ fn operand_value(store: &[Option<u128>], operand: Operand) -> Option<u128> {
     }
 }
 
+/// Low `bits` set, saturating at the store's own width.
+fn width_mask(bits: u32) -> u128 {
+    if bits >= u128::BITS {
+        u128::MAX
+    } else {
+        (1u128 << bits) - 1
+    }
+}
+
 fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
     match e {
         Eval::Use(op) => operand_value(store, op),
-        Eval::Unary(op, a) => {
+        Eval::Unary(op, a, bits) => {
             let a = operand_value(store, a)?;
+            // Both operations are exact at a known width: the store holds
+            // an `n`-bit value zero-extended, so complementing or negating
+            // within `n` bits and masking back is the value the program
+            // itself holds. At `n` = 1 the complement is boolean negation,
+            // which is what a condition needs.
+            let mask = width_mask(bits);
             Some(match op {
-                UnOp::Not => {
-                    // Booleans are 0/1 in the store; !0 = 1, !1 = 0 covers
-                    // the branching cases the interpreter meets.
-                    u128::from(a == 0)
-                }
-                UnOp::Neg => a.wrapping_neg(),
+                UnOp::Not => !a & mask,
+                UnOp::Neg => a.wrapping_neg() & mask,
             })
         }
+        Eval::Cast(a, bits) => Some(operand_value(store, a)? & width_mask(bits)),
         Eval::CheckedBinary(op, a, b, bits) => {
             // The checked form panics the thread on overflow: a value past
             // the width never exists in the real program, so the result is
