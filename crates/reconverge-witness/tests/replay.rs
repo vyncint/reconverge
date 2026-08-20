@@ -4,7 +4,7 @@
 use reconverge_artifacts::witness::VerdictKind;
 use reconverge_core::dialect::CallKind;
 use reconverge_core::model::{
-    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind,
+    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind, UnOp,
 };
 use reconverge_witness::{SiteKind, replay_hang};
 
@@ -1237,4 +1237,128 @@ fn multi_warp_replay_safe_launches_produce_no_findings() {
             "block {threads} uniform warp_id guard must produce no finding"
         );
     }
+}
+
+/// Issue #22: `!x` is the complement of `x`'s own type. `(!lane) & 1` is 1
+/// on the even lanes, because `!lane` is odd exactly when `lane` is even —
+/// so the barrier is reached by 16 lanes and skipped by 16.
+///
+/// Evaluated as a *boolean* negation, `!lane` would be 1 for lane 0 alone
+/// and 0 everywhere else, making this look like a 1-of-32 split. The
+/// masks below are what tells the two apart.
+#[test]
+fn bitwise_not_evaluates_at_the_operand_width() {
+    let f = kernel(
+        7,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(5, &[4], Eval::Unary(UnOp::Not, Operand::Local(4), 32)),
+                    stmt_eval(
+                        6,
+                        &[5],
+                        Eval::Binary(BinOp::BitAnd, Operand::Local(5), Operand::Const(1)),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 6,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 3, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0x5555_5555_u128, "the even lanes reach it");
+    assert_eq!(replay.never_arrives, 0xaaaa_aaaa_u128);
+}
+
+/// Issue #22: a narrowing cast truncates. `(lane * 16) as u8` is zero for
+/// lane 0 and lane 16, because 256 is discarded by the cast — two lanes
+/// reach the barrier, thirty do not.
+///
+/// Treated as the identity, only lane 0 would be zero. Widening is the
+/// identity on the store's zero-extended embedding, which is why the old
+/// behaviour looked correct on thread-index values and fails here.
+#[test]
+fn a_narrowing_cast_truncates_rather_than_passing_the_value_through() {
+    let f = kernel(
+        7,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "index_1d",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(3, &[2], Eval::Use(Operand::Local(2)))],
+                term: term(call(
+                    CallKind::WitnessRead,
+                    "ThreadIndex::get",
+                    vec![Some(Operand::Local(3))],
+                    Some(4),
+                    2,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(BinOp::Mul, Operand::Local(4), Operand::Const(16)),
+                    ),
+                    stmt_eval(6, &[5], Eval::Cast(Operand::Local(5), 8)),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 6,
+                    targets: vec![3, 4],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 3, SiteKind::Barrier, 0).expect("must produce a witness");
+    assert_eq!(replay.arrived, 0x0001_0001_u128, "lane 0 and lane 16");
+    assert_eq!(replay.never_arrives, 0xfffe_fffe_u128);
 }

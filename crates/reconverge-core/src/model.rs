@@ -75,7 +75,24 @@ pub enum Eval {
     /// Plain copy, reference-to-scalar, or literal.
     Use(Operand),
     Binary(BinOp, Operand, Operand),
-    Unary(UnOp, Operand),
+    /// Unary operation evaluated at the operand's own width in bits.
+    ///
+    /// The width is the whole point: the store is an untyped `u128`, so a
+    /// width-less `!x` has to guess which type's complement it is taking.
+    /// It used to guess "boolean", which is exact for a condition and
+    /// wrong for every mask. At width `n`, `Not` is the bitwise complement
+    /// within `n` bits — which *is* boolean negation when `n` is 1, so the
+    /// condition case falls out rather than being special-cased.
+    Unary(UnOp, Operand, u32),
+    /// An integer cast to a target of the given width: the operand
+    /// truncated to `bits`.
+    ///
+    /// Widening is the identity on the store's zero-extended embedding,
+    /// which is why treating every cast as the identity looked correct on
+    /// the small thread-index values replays used to traffic in. Narrowing
+    /// is a real truncation, and a mask narrowed by the identity keeps
+    /// high bits the program has already discarded.
+    Cast(Operand, u32),
     /// Overflow-checked arithmetic on an unsigned integer of the given
     /// width in bits (debug builds lower `+`/`-`/`*` to this). The checked
     /// form panics the thread on overflow, so past the width the result is
@@ -86,7 +103,9 @@ pub enum Eval {
 
 /// Integer/boolean operators the interpreter evaluates. Comparison results
 /// are 0/1; arithmetic wraps at 128 bits (kernels index with unsigned
-/// values far below that).
+/// values far below that). Width-sensitive operations do not live here —
+/// see [`Eval::Unary`], [`Eval::Cast`] and [`Eval::CheckedBinary`], which
+/// carry the width they need.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,

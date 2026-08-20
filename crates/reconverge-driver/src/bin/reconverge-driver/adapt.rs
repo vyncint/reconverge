@@ -27,7 +27,7 @@ use rustc_public::mir::{
     Body, Operand, Place, ProjectionElem, Statement, StatementKind, TerminatorKind,
     VarDebugInfoContents,
 };
-use rustc_public::ty::{RigidTy, Span, TyKind, UintTy};
+use rustc_public::ty::{IntTy, RigidTy, Span, Ty, TyKind, UintTy};
 use rustc_public::{CrateDef, CrateItem, ItemKind};
 
 use crate::emit;
@@ -490,6 +490,54 @@ fn model_operand(operand: &Operand) -> Option<model::Operand> {
     }
 }
 
+/// An operand for the interpreter, seeing through the `.0` of an
+/// overflow-checked pair — reading it is reading the arithmetic result
+/// the interpreter stored in the pair's local.
+fn scalar_operand(operand: &Operand, overflow_tuples: &[bool]) -> Option<model::Operand> {
+    if let Operand::Copy(place) | Operand::Move(place) = operand
+        && overflow_tuples.get(place.local) == Some(&true)
+        && let [ProjectionElem::Field(0, _)] = place.projection.as_slice()
+    {
+        return Some(model::Operand::Local(place.local));
+    }
+    model_operand(operand)
+}
+
+/// Width in bits of a scalar as the interpreter's store embeds it, and
+/// whether it is signed. Everything the store holds is zero-extended from
+/// this many bits, `bool` included at one bit. A type with no such width —
+/// a float, a pointer, an aggregate — has no answer, and the caller must
+/// yield unknown rather than assume one.
+///
+/// `usize`/`isize` are taken as 64, matching the assumption the
+/// overflow-checked form already makes.
+fn scalar_width(ty: &Ty) -> Option<(u32, bool)> {
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Bool) => Some((1, false)),
+        TyKind::RigidTy(RigidTy::Uint(u)) => Some((
+            match u {
+                UintTy::U8 => 8,
+                UintTy::U16 => 16,
+                UintTy::U32 => 32,
+                UintTy::U64 | UintTy::Usize => 64,
+                UintTy::U128 => 128,
+            },
+            false,
+        )),
+        TyKind::RigidTy(RigidTy::Int(i)) => Some((
+            match i {
+                IntTy::I8 => 8,
+                IntTy::I16 => 16,
+                IntTy::I32 => 32,
+                IntTy::I64 | IntTy::Isize => 64,
+                IntTy::I128 => 128,
+            },
+            true,
+        )),
+        _ => None,
+    }
+}
+
 /// Evaluable semantics for simple right-hand sides (the witness
 /// interpreter's kernel subset). References to plain locals are
 /// value-transparent: the interpreter tracks scalars, not memory.
@@ -500,17 +548,21 @@ fn rvalue_eval(
 ) -> Option<Eval> {
     use rustc_public::mir::Rvalue;
     match rvalue {
-        Rvalue::Use(op) | Rvalue::Cast(_, op, _) => {
-            // Reading `.0` of an overflow-checked pair is reading the
-            // arithmetic result the interpreter stored in the pair's local.
-            if let rustc_public::mir::Operand::Copy(place) | rustc_public::mir::Operand::Move(place) =
-                op
-                && overflow_tuples.get(place.local) == Some(&true)
-                && let [ProjectionElem::Field(0, _)] = place.projection.as_slice()
-            {
-                return Some(Eval::Use(model::Operand::Local(place.local)));
+        Rvalue::Use(op) => Some(Eval::Use(scalar_operand(op, overflow_tuples)?)),
+        // A cast is not the identity. Widening is, on the store's
+        // zero-extended embedding — which is why this used to look right
+        // on thread-index values — but narrowing discards high bits the
+        // program has already discarded, and a mask is exactly where that
+        // shows. A signed source would need sign extension, which the
+        // unsigned embedding cannot express, so it stays unknown rather
+        // than being approximated.
+        Rvalue::Cast(_, op, target) => {
+            let (_, from_signed) = scalar_width(&op.ty(body.locals()).ok()?)?;
+            if from_signed {
+                return None;
             }
-            model_operand(op).map(Eval::Use)
+            let (to_bits, _) = scalar_width(target)?;
+            Some(Eval::Cast(scalar_operand(op, overflow_tuples)?, to_bits))
         }
         Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) | Rvalue::CopyForDeref(place)
             if place.projection.is_empty() =>
@@ -545,7 +597,15 @@ fn rvalue_eval(
                 bits,
             ))
         }
-        Rvalue::UnaryOp(op, a) => Some(Eval::Unary(model_unop(op)?, model_operand(a)?)),
+        // Width-typed: `!x` is the complement of `x`'s own type, not of
+        // the 128-bit store. Exact for signed operands too — the store
+        // holds two's complement zero-extended from the type's width, so
+        // complement and negation within that width are the program's own
+        // bit patterns.
+        Rvalue::UnaryOp(op, a) => {
+            let (bits, _) = scalar_width(&a.ty(body.locals()).ok()?)?;
+            Some(Eval::Unary(model_unop(op)?, model_operand(a)?, bits))
+        }
         _ => None,
     }
 }
