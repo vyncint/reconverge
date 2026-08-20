@@ -8,6 +8,7 @@ use reconverge_artifacts::witness::{
 use reconverge_core::Uniformity;
 use reconverge_core::analysis::{self as engine, Analysis, ReasonKind, Summaries};
 use reconverge_core::dialect::CallKind;
+use reconverge_core::inline::{MAX_DEPTH, inline_calls};
 use reconverge_core::model::{FnId, FnModel, TermKind};
 use reconverge_witness::{NoWitness, Replay, SiteKind, ascii_warp_diagram};
 
@@ -105,6 +106,19 @@ fn try_witness(
         }
         Err(NoWitness::Uniform | NoWitness::Indeterminate) => return,
     };
+    promote(models, f, finding, &replay, site.arrived_glyph, witnesses);
+}
+
+/// Promote a finding on a concrete replay: the launch, the verdict, the
+/// ASCII warp diagram, and the `witness.v1` artifact.
+fn promote(
+    models: &CrateModels,
+    f: &FnModel,
+    finding: &mut Finding,
+    replay: &Replay,
+    arrived_glyph: char,
+    witnesses: &mut Vec<WitnessArtifact>,
+) {
     finding.confidence = Confidence::Confirmed;
     let warps = replay.block[0].div_ceil(32);
     finding.notes.push(format!(
@@ -126,9 +140,74 @@ fn try_witness(
         replay.arrived,
         replay.never_arrives,
         replay.block[0],
-        site.arrived_glyph,
+        arrived_glyph,
     ));
-    witnesses.push(witness_artifact(models, f, finding, &replay));
+    witnesses.push(witness_artifact(models, f, finding, replay));
+}
+
+/// Replay an interprocedural site by splicing the callee in (#29).
+///
+/// The summary tier is unchanged and still the fallback: this does not
+/// promote on "the callee *may* reach a barrier", it removes the call so
+/// there is an actual path to replay. Anything the inliner refuses —
+/// recursion, too many frames, too many blocks — leaves the finding
+/// exactly where it was.
+fn try_witness_through_inlining(
+    models: &CrateModels,
+    f: &FnModel,
+    finding: &mut Finding,
+    call_block: usize,
+    cause_span: usize,
+    arrived_glyph: char,
+    witnesses: &mut Vec<WitnessArtifact>,
+) {
+    let Some(inlined) = inline_calls(&models.fns, f, MAX_DEPTH) else {
+        return;
+    };
+    let Some((_, sites)) = inlined.exposed.iter().find(|(b, _)| *b == call_block) else {
+        return;
+    };
+    for &block in sites {
+        let Some(kind) = site_kind_of(&inlined.model.blocks[block]) else {
+            continue;
+        };
+        if let Ok(replay) =
+            reconverge_witness::replay_outcome(&inlined.model, block, kind, cause_span)
+        {
+            finding.notes.push(
+                "witness: the callee was inlined at the call site, so this is a \
+                 concrete path rather than a summary bit"
+                    .to_string(),
+            );
+            promote(models, f, finding, &replay, arrived_glyph, witnesses);
+            return;
+        }
+    }
+}
+
+/// The site a spliced-in block represents, with its mask where the call
+/// carries one.
+fn site_kind_of(block: &reconverge_core::model::Block) -> Option<SiteKind> {
+    let TermKind::Call {
+        callee, const_args, ..
+    } = &block.term.kind
+    else {
+        return None;
+    };
+    match callee.kind {
+        CallKind::Barrier => Some(SiteKind::Barrier),
+        CallKind::WarpCollective { .. } => Some(SiteKind::Collective {
+            mask: if callee.kind.mask_is_unknown() {
+                None
+            } else {
+                callee
+                    .kind
+                    .implicit_mask()
+                    .or_else(|| const_args.first().copied().flatten())
+            },
+        }),
+        _ => None,
+    }
 }
 
 fn witness_artifact(
@@ -265,7 +344,17 @@ pub fn rc001_divergent_barriers(
                 explain: "RC001".to_string(),
                 provenance,
             };
-            if !site.interprocedural {
+            if site.interprocedural {
+                try_witness_through_inlining(
+                    models,
+                    f,
+                    &mut finding,
+                    site.block,
+                    cause.span,
+                    'W',
+                    witnesses,
+                );
+            } else {
                 try_witness(
                     models,
                     f,
@@ -380,7 +469,17 @@ pub fn rc002_nonconvergent_warp_ops(
                 explain: "RC002".to_string(),
                 provenance,
             };
-            if !site.interprocedural {
+            if site.interprocedural {
+                try_witness_through_inlining(
+                    models,
+                    f,
+                    &mut finding,
+                    site.block,
+                    cause.span,
+                    'A',
+                    witnesses,
+                );
+            } else {
                 try_witness(
                     models,
                     f,

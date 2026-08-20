@@ -197,10 +197,20 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         by("RC002", "rc002_divergent_collective")["confidence"],
         "confirmed"
     );
-    // Interprocedural sites are never witness-promoted: the summary bit is
-    // not a concrete trace.
-    assert_eq!(by("RC001", "rc001_divergent_call")["confidence"], "warning");
-    assert_eq!(by("RC002", "rc002_divergent_call")["confidence"], "warning");
+    // An interprocedural site is promoted when the callee can be inlined,
+    // which turns "the summary says it may reach a barrier" into an actual
+    // path. Both helpers here reach their site unconditionally and are
+    // called under a divergent guard, so both are real hangs — the sample
+    // comments have always called them true positives, and they now carry
+    // the witness to prove it.
+    assert_eq!(
+        by("RC001", "rc001_divergent_call")["confidence"],
+        "confirmed"
+    );
+    assert_eq!(
+        by("RC002", "rc002_divergent_call")["confidence"],
+        "confirmed"
+    );
 
     // The witness artifacts themselves parse as witness.v1 with concrete
     // undefined-behavior verdicts.
@@ -223,7 +233,9 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         );
         witness_count += 1;
     }
-    assert_eq!(witness_count, 2, "one witness per confirmed finding");
+    // Four: the two direct sites, plus the two interprocedural ones that
+    // inlining turned into concrete paths.
+    assert_eq!(witness_count, 4, "one witness per confirmed finding");
 
     // --- SARIF: the full registry of rules, twenty results.
     let sarif: serde_json::Value =

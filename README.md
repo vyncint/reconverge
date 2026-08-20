@@ -295,7 +295,15 @@ one that does less.
   pretending otherwise.
 - **Interprocedural analysis is summary-based in v1** — per-function
   `may_contain_barrier` / `may_contain_warp_op` bits, no context sensitivity.
-  Call-site findings stay at `warning` and are never witness-promoted.
+  A call-site finding is still raised from those bits alone.
+
+  It is witness-promoted only when the callee can be *inlined*, which
+  replaces "the summary says this may reach a barrier" with an actual
+  path: non-recursive callees, at most two frames, and a ceiling on the
+  spliced result. Anything outside those bounds — recursion, a deeper
+  chain, a callee whose body was not modeled — keeps the summary tier and
+  stays at `warning`. Nothing is promoted on a summary bit; the bit raises
+  the finding, a trace confirms it.
 - **RC001 covers the all-threads barriers** — `thread::sync_threads`,
   `cluster::cluster_sync`, and `grid::sync`, whose shared contract is that
   every thread of the scope must reach the call. The mbarrier arrive/wait

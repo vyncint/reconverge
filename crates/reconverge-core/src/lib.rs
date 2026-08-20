@@ -18,6 +18,7 @@
 pub mod analysis;
 pub mod dialect;
 pub mod graph;
+pub mod inline;
 pub mod model;
 
 /// The uniformity lattice: `Uniform ⊑ Divergent`, per SSA value.
