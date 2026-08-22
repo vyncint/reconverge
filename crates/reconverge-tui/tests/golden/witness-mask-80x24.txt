@@ -12,14 +12,14 @@ size: 80x24  cursor: hidden
 │_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)         │
 │at lib.rs:33                                                                  │
 │ballot_sync — named in the mask but not active: 0xaaaaaaaa                    │
+│   0  launch                                                                  │
+│   1  _3 = cuda_device::__internal::index_1d(&_2)                             │
+│   2  switchInt(i.get() % 2 == 0) — lanes disagree: 16 take the branch, 16 sk…│
+│▸  3  _5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)   │
 │                                                                              │
 │verdict: undefined behavior (at step 3)                                       │
 │ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are    │
 │active at the call — the named-but-absent lanes make the collective undefined;│
-│on hardware this usually never completes                                      │
-│                                                                              │
-│                                                                              │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

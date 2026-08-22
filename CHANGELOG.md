@@ -12,7 +12,28 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **The witness view shows the whole run, not one step at a time.** Below the
+  event block, every step is listed with the current one marked and a delta
+  column saying how many lanes changed state and to what — the artifact's own
+  `lane_changes`, counted. The entire bug is now legible without pressing a
+  key: the modulo splits the warp at step 3, sixteen lanes wait at the barrier
+  at step 4, sixteen leave at step 5.
+
+  `h`/`l` previously answered "what does this run do?" only by paging blindly
+  and remembering, and remembering is what a reader of a divergence bug has
+  least to spare.
+
 ### Changed
+
+- **The witness view fills the terminal it was given.** The verdict block was
+  `Min(2)` and drew two or three lines into a region a dozen rows tall, so on
+  an ordinary terminal half the screen said nothing. The timeline takes that
+  space; the verdict follows it directly and any slack now falls off the
+  bottom rather than sitting in the middle of the screen. On a terminal too
+  short for both, the timeline collapses and the verdict survives — the
+  conclusion is never the thing that scrolls away.
 
 - **termlens 0.3 → 0.6** for the TUI test harness, across `reconverge-tui`
   and `cargo-reconverge`. Three releases of breaking change, of which one
