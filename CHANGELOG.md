@@ -10,6 +10,26 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [Unreleased]
+
+### Changed
+
+- **termlens 0.3 → 0.6** for the TUI test harness, across `reconverge-tui`
+  and `cargo-reconverge`. Three releases of breaking change, of which one
+  reached this suite: since 0.5 `send` returns `Result`, so the sixty
+  keystrokes the flow tests type are now checked rather than discarded. A
+  send that fails means the application stopped reading — precisely the
+  failure a TUI test exists to catch, and until now it was dropped on the
+  floor and the test failed later, somewhere else, as a timeout.
+
+  Each site names its key, because knowing *which* keystroke was lost is
+  most of the diagnosis.
+
+  The upgrade also brings the `openpty` retry from 0.6: macOS recycles PTY
+  devices through `revoke()` and refuses a suite that asks faster than the
+  kernel returns them, which is what `cargo test` does by default on a
+  many-core machine. This suite spawns a PTY per flow test.
+
 ## [0.2.0] — 2026-08-20
 
 The milestone that made the witness interpreter tell the truth about full-width

@@ -108,7 +108,7 @@ fn witness_subcommand_replays_the_real_rc001_artifact() {
 
     // v: the verdict moment — the even lanes wait forever, the diagnostics'
     // warp diagram appears as the live lane strip.
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| {
         s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
             && s.contains("verdict: undefined behavior")
@@ -116,7 +116,7 @@ fn witness_subcommand_replays_the_real_rc001_artifact() {
     })
     .expect("the replay reaches its calibrated verdict");
 
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("debugger did not exit after q");
     assert!(
         status.success(),
@@ -146,19 +146,19 @@ fn witness_subcommand_replays_the_real_rc001_artifact() {
         .expect("failed to spawn the RC002 witness in a PTY");
     t.wait_until(|s| s.contains("kernel `rc002_divergent_collective`") && s.contains("RC002"))
         .expect("the RC002 artifact opens");
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| s.contains("verdict: undefined behavior") && s.contains("never finishes"))
         .expect("the RC002 verdict lands");
     // h: back one event to the collective itself, where the mask panel
     // shows the full mask against the arriving lanes.
-    t.send(Key::Char('h'));
+    t.send(Key::Char('h')).expect("send Key::Char('h')");
     t.wait_until(|s| {
         s.contains("0xffffffff")
             && s.contains("0x55555555")
             && s.contains("named in the mask but not active: 0xaaaaaaaa")
     })
     .expect("the RC002 mask panel shows the real mismatch");
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("debugger did not exit after q");
     assert!(status.success(), "RC002 witness exited with {status:?}");
 

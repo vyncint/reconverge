@@ -245,19 +245,20 @@ fn the_review_loop_gates_accepts_and_reports() {
 
     t.wait_until(|s| s.contains("reconverge triage") && s.contains("0 suppressed"))
         .expect("triage opens on this run's findings");
-    t.send(Key::Char('s'));
+    t.send(Key::Char('s')).expect("send Key::Char('s')");
     t.wait_until(|s| s.contains("why is this acceptable?"))
         .expect("reason editor");
     for c in "accepted from the CLI".chars() {
-        t.send(Key::Char(c));
+        t.send(Key::Char(c))
+            .unwrap_or_else(|e| panic!("could not type {c:?}: {e}"));
     }
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("1 suppressed"))
         .expect("accepted");
-    t.send(Key::Char('w'));
+    t.send(Key::Char('w')).expect("send Key::Char('w')");
     t.wait_until(|s| s.contains("baseline written"))
         .expect("written");
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     assert!(t.wait_exit().expect("triage did not exit").success());
 
     let written: BaselineArtifact =

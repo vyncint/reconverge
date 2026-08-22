@@ -64,7 +64,7 @@ fn assert_golden(name: &str, screen: &str, context: &str) {
 }
 
 fn quit(mut t: Terminal, context: &str) {
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("inspector did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
 }
@@ -84,29 +84,29 @@ fn inspector_flow_journey() {
     );
 
     // j: select `i`, the thread-index witness.
-    t.send(Key::Char('j'));
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
     t.wait_until(|s| s.contains("provenance of `i`"))
         .expect("selection moved to `i`");
 
     // j: select `e`.
-    t.send(Key::Char('j'));
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
     t.wait_until(|s| s.contains("provenance of `e`"))
         .expect("selection moved to `e`");
 
     // p: one hop toward the source.
-    t.send(Key::Char('p'));
+    t.send(Key::Char('p')).expect("send Key::Char('p')");
     t.wait_until(|s| s.contains("provenance of _11"))
         .expect("walked one hop to _11");
 
     // u: back to `e`.
-    t.send(Key::Char('u'));
+    t.send(Key::Char('u')).expect("send Key::Char('u')");
     t.wait_until(|s| s.contains("provenance of `e`"))
         .expect("walked back to `e`");
 
     // n ×3: land on the RC001 finding; selection jumps to the branch
     // condition and the source pane focuses its line.
     for _ in 0..3 {
-        t.send(Key::Char('n'));
+        t.send(Key::Char('n')).expect("send Key::Char('n')");
     }
     t.wait_until(|s| s.contains("finding 3/3 [RC001]"))
         .expect("RC001 finding selected");

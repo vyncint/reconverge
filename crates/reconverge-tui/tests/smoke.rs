@@ -81,7 +81,7 @@ fn spawn_shell(size: (u16, u16), extra_env: &[(&str, &str)], args: &[&str]) -> T
 }
 
 fn quit(mut t: Terminal, context: &str) {
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("shell did not exit after q");
     assert!(status.success(), "{context}: shell exited with {status:?}");
 }
