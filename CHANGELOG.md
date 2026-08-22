@@ -12,6 +12,8 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-22
+
 ### Added
 
 - **The witness view shows the whole run, not one step at a time.** Below the
@@ -50,6 +52,25 @@ the corpus; found-in-the-wild is the true north.
   devices through `revoke()` and refuses a suite that asks faster than the
   kernel returns them, which is what `cargo test` does by default on a
   many-core machine. This suite spawns a PTY per flow test.
+
+### CI
+
+- **A stress workflow, which did not exist.** `ci.yml` runs the suite once,
+  which is the gate; this asks whether it passes *reliably*. The PTY suite
+  runs many times over, split across five machines that each use a different
+  `--test-threads`, on dispatch or weekly. Five machines because a race that
+  only loses on a slow runner gets five rolls rather than one; five
+  concurrencies because that is the axis these faults live on — at one thread
+  nothing contends, at sixteen the PTYs open and close on top of each other.
+- **A published-package check**, at release and weekly: `cargo install
+  cargo-reconverge` into a clean directory from crates.io, then the shape that
+  actually matters for a cargo subcommand — that `cargo reconverge` finds the
+  binary on PATH, which a `--version` call would not have shown. It runs on
+  **stable**, which pins a property worth pinning: this workspace needs a
+  nightly for the rustc-driver crates, but the CLI does not depend on them, so
+  a user installs it with whatever they have. If that ever stops being true,
+  `cargo install` starts demanding a pinned nightly and nothing else would
+  notice.
 
 ## [0.2.0] — 2026-08-20
 
@@ -493,6 +514,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.3.0]: https://github.com/vyncint/reconverge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vyncint/reconverge/releases/tag/v0.2.0
 [0.1.12]: https://github.com/vyncint/reconverge/releases/tag/v0.1.12
 [0.1.11]: https://github.com/vyncint/reconverge/releases/tag/v0.1.11
