@@ -66,7 +66,7 @@ fn assert_golden(name: &str, screen: &str, context: &str) {
 }
 
 fn quit(mut t: Terminal, context: &str) {
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("debugger did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
 }
@@ -92,7 +92,7 @@ fn witness_flow_journey() {
     // l ×4: to the barrier event — 16 lanes park, the strip becomes the
     // diagnostics' warp diagram.
     for step in 1..=4 {
-        t.send(Key::Char('l'));
+        t.send(Key::Char('l')).expect("send Key::Char('l')");
         t.wait_until(move |s| s.contains(&format!("step {step}/5")))
             .expect("stepped forward");
     }
@@ -111,7 +111,7 @@ fn witness_flow_journey() {
 
     // l: the odd lanes exit — the strip becomes the diagnostics' warp
     // diagram — and the verdict lands.
-    t.send(Key::Char('l'));
+    t.send(Key::Char('l')).expect("send Key::Char('l')");
     t.wait_until(|s| {
         s.contains("step 5/5")
             && s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
@@ -120,24 +120,24 @@ fn witness_flow_journey() {
     .expect("verdict reached");
 
     // h, h: scrub back in time.
-    t.send(Key::Char('h'));
+    t.send(Key::Char('h')).expect("send Key::Char('h')");
     t.wait_until(|s| s.contains("step 4/5")).expect("back to 4");
-    t.send(Key::Char('h'));
+    t.send(Key::Char('h')).expect("send Key::Char('h')");
     t.wait_until(|s| s.contains("step 3/5")).expect("back to 3");
 
     // g then d: launch instant, then straight to the divergence moment.
-    t.send(Key::Char('g'));
+    t.send(Key::Char('g')).expect("send Key::Char('g')");
     t.wait_until(|s| s.contains("step 0/5")).expect("rewound");
-    t.send(Key::Char('d'));
+    t.send(Key::Char('d')).expect("send Key::Char('d')");
     t.wait_until(|s| s.contains("step 4/5"))
         .expect("d jumps to the first warp split");
 
     // n: the RC002 witness; v: its verdict, where the mask panel shows the
     // named-but-inactive lanes.
-    t.send(Key::Char('n'));
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("witness 2/2") && s.contains("rc002_divergent_collective"))
         .expect("switched witness");
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| {
         s.contains("step 3/3")
             && s.contains("0xffffffff")
@@ -160,7 +160,7 @@ fn witness_ascii_mode_is_pure_ascii() {
     let mut t = spawn((80, 24), &[], &["--ascii"]);
     t.wait_until(|s| s.contains("reconverge witness"))
         .expect("initial frame");
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| s.contains("step 5/5")).expect("verdict");
     t.wait_idle(QUIET).expect("paint settles");
     let screen = t.screen().to_string();
@@ -181,7 +181,7 @@ fn matrix_leg(size: (u16, u16)) {
         let mut t = spawn(size, extra_env, &[]);
         t.wait_until(|s| s.contains("step 0/5"))
             .expect("initial frame");
-        t.send(Key::Char('v'));
+        t.send(Key::Char('v')).expect("send Key::Char('v')");
         t.wait_until(|s| {
             s.contains("step 5/5")
                 && s.contains("verdict")

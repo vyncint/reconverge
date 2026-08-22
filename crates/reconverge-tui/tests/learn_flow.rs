@@ -73,7 +73,7 @@ fn assert_golden(name: &str, screen: &str, context: &str) {
 }
 
 fn quit(mut t: Terminal, context: &str) {
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("learn mode did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
 }
@@ -90,18 +90,18 @@ fn learn_flow_journey() {
     assert_golden("learn-list-80x24.txt", &t.screen().to_string(), "list");
 
     // j, Enter: open the barriers lesson.
-    t.send(Key::Char('j'));
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
     t.wait_until(|s| s.contains("> 2. barriers"))
         .expect("selected");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 2/4") && s.contains("page 1/3"))
         .expect("lesson opened");
 
     // n: the interactive page; v: the hang verdict on the embedded replay.
-    t.send(Key::Char('n'));
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
         .expect("interactive page");
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| {
         s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
             && s.contains("verdict: undefined behavior")
@@ -115,23 +115,23 @@ fn learn_flow_journey() {
     );
 
     // n, then Esc: last page, back to the list.
-    t.send(Key::Char('n'));
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("page 3/3")).expect("last page");
-    t.send(Key::Esc);
+    t.send(Key::Esc).expect("send Key::Esc");
     t.wait_until(|s| s.contains("1. divergence"))
         .expect("back to list");
 
     // The reconvergence lesson: the fixed kernel completes.
-    t.send(Key::Char('j'));
-    t.send(Key::Char('j'));
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
     t.wait_until(|s| s.contains("> 4. reconvergence"))
         .expect("selected");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 4/4")).expect("opened");
-    t.send(Key::Char('n'));
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
         .expect("interactive page");
-    t.send(Key::Char('v'));
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
     t.wait_until(|s| s.contains("verdict: completed") && s.contains("cannot hang"))
         .expect("the fix completes");
     t.wait_idle(QUIET).expect("completed paint settles");
@@ -150,9 +150,9 @@ fn learn_ascii_mode_is_pure_ascii() {
     let mut t = spawn((80, 24), &[], &["--ascii"], "ascii");
     t.wait_until(|s| s.contains("reconverge learn"))
         .expect("list");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 1/4")).expect("opened");
-    t.send(Key::Char('n'));
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("page 2/3"))
         .expect("interactive page");
     t.wait_idle(QUIET).expect("paint settles");
@@ -175,17 +175,17 @@ fn matrix_leg(size: (u16, u16)) {
         let mut t = spawn(size, extra_env, &[], &tag);
         t.wait_until(|s| s.contains("reconverge learn"))
             .expect("list");
-        t.send(Key::Char('j'));
-        t.send(Key::Char('j'));
+        t.send(Key::Char('j')).expect("send Key::Char('j')");
+        t.send(Key::Char('j')).expect("send Key::Char('j')");
         t.wait_until(|s| s.contains("> 3."))
             .expect("masks selected");
-        t.send(Key::Enter);
-        t.send(Key::Char('n'));
+        t.send(Key::Enter).expect("send Key::Enter");
+        t.send(Key::Char('n')).expect("send Key::Char('n')");
         t.wait_until(|s| s.contains("page 2/3"))
             .expect("interactive page");
         // v: in this witness the collective IS the verdict step, so one
         // jump shows the mask against the active lanes and the verdict.
-        t.send(Key::Char('v'));
+        t.send(Key::Char('v')).expect("send Key::Char('v')");
         t.wait_until(|s| {
             s.contains("verdict")
                 && s.contains("######## ######## ######## ########")

@@ -59,11 +59,11 @@ fn learn_opens_offline_in_an_empty_directory() {
     })
     .expect("the lesson list opens with nothing on disk");
 
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 1/4") && s.contains("SIMT"))
         .expect("the divergence lesson opens");
 
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("learn did not exit after q");
     assert!(status.success(), "learn subcommand exited with {status:?}");
 }

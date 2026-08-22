@@ -10,6 +10,47 @@ figures this project generates for itself, and the findings that came from
 real code. Self-made numbers are a proxy and can be gamed by whoever writes
 the corpus; found-in-the-wild is the true north.
 
+## [Unreleased]
+
+### Added
+
+- **The witness view shows the whole run, not one step at a time.** Below the
+  event block, every step is listed with the current one marked and a delta
+  column saying how many lanes changed state and to what — the artifact's own
+  `lane_changes`, counted. The entire bug is now legible without pressing a
+  key: the modulo splits the warp at step 3, sixteen lanes wait at the barrier
+  at step 4, sixteen leave at step 5.
+
+  `h`/`l` previously answered "what does this run do?" only by paging blindly
+  and remembering, and remembering is what a reader of a divergence bug has
+  least to spare.
+
+### Changed
+
+- **The witness view fills the terminal it was given.** The verdict block was
+  `Min(2)` and drew two or three lines into a region a dozen rows tall, so on
+  an ordinary terminal half the screen said nothing. The timeline takes that
+  space; the verdict follows it directly and any slack now falls off the
+  bottom rather than sitting in the middle of the screen. On a terminal too
+  short for both, the timeline collapses and the verdict survives — the
+  conclusion is never the thing that scrolls away.
+
+- **termlens 0.3 → 0.6** for the TUI test harness, across `reconverge-tui`
+  and `cargo-reconverge`. Three releases of breaking change, of which one
+  reached this suite: since 0.5 `send` returns `Result`, so the sixty
+  keystrokes the flow tests type are now checked rather than discarded. A
+  send that fails means the application stopped reading — precisely the
+  failure a TUI test exists to catch, and until now it was dropped on the
+  floor and the test failed later, somewhere else, as a timeout.
+
+  Each site names its key, because knowing *which* keystroke was lost is
+  most of the diagnosis.
+
+  The upgrade also brings the `openpty` retry from 0.6: macOS recycles PTY
+  devices through `revoke()` and refuses a suite that asks faster than the
+  kernel returns them, which is what `cargo test` does by default on a
+  many-core machine. This suite spawns a PTY per flow test.
+
 ## [0.2.0] — 2026-08-20
 
 The milestone that made the witness interpreter tell the truth about full-width

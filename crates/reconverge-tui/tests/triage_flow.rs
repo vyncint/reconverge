@@ -81,12 +81,13 @@ fn assert_golden(name: &str, screen: &str, context: &str) {
 
 fn type_text(t: &mut Terminal, text: &str) {
     for c in text.chars() {
-        t.send(Key::Char(c));
+        t.send(Key::Char(c))
+            .unwrap_or_else(|e| panic!("could not type {c:?}: {e}"));
     }
 }
 
 fn quit(mut t: Terminal, context: &str) {
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("triage did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
 }
@@ -111,10 +112,10 @@ fn triage_flow_journey() {
 
     // s: accept the selected finding; the editor asks for a reason and
     // refuses to record an empty one.
-    t.send(Key::Char('s'));
+    t.send(Key::Char('s')).expect("send Key::Char('s')");
     t.wait_until(|s| s.contains("why is this acceptable?"))
         .expect("reason editor");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("a reason is required"))
         .expect("empty reasons are refused");
 
@@ -123,7 +124,7 @@ fn triage_flow_journey() {
     type_text(&mut t, "reviewed \u{2014} host owns it");
     t.wait_until(|s| s.contains("reviewed \u{2014} host owns it"))
         .expect("reason echoes as typed");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("2 finding(s) — 1 suppressed") && s.contains("(unsaved)"))
         .expect("acceptance recorded, not yet written");
     t.wait_idle(QUIET).expect("accept paint settles");
@@ -134,7 +135,7 @@ fn triage_flow_journey() {
     );
 
     // w: write, and check the bytes that landed.
-    t.send(Key::Char('w'));
+    t.send(Key::Char('w')).expect("send Key::Char('w')");
     t.wait_until(|s| s.contains("baseline written — 1 entry(ies)") && !s.contains("(unsaved)"))
         .expect("baseline written");
     let written: BaselineArtifact =
@@ -147,10 +148,10 @@ fn triage_flow_journey() {
     assert_eq!(written.entries[0].reason, "reviewed \u{2014} host owns it");
 
     // u: withdraw the acceptance — an edit again, so q asks before losing it.
-    t.send(Key::Char('u'));
+    t.send(Key::Char('u')).expect("send Key::Char('u')");
     t.wait_until(|s| s.contains("2 finding(s) — 0 suppressed") && s.contains("(unsaved)"))
         .expect("acceptance withdrawn");
-    t.send(Key::Char('q'));
+    t.send(Key::Char('q')).expect("send Key::Char('q')");
     t.wait_until(|s| s.contains("unsaved edits — press w to write"))
         .expect("quitting asks once");
     // The file on disk is untouched by the withdrawal we never wrote.
@@ -175,14 +176,14 @@ fn force_quit_discards_without_writing() {
     t.wait_until(|s| s.contains("reconverge triage"))
         .expect("initial frame");
 
-    t.send(Key::Char('s'));
+    t.send(Key::Char('s')).expect("send Key::Char('s')");
     t.wait_until(|s| s.contains("why is this acceptable?"))
         .expect("reason editor");
     type_text(&mut t, "typed but discarded");
-    t.send(Key::Enter);
+    t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("(unsaved)")).expect("edited");
 
-    t.send(Key::Char('Q'));
+    t.send(Key::Char('Q')).expect("send Key::Char('Q')");
     let status = t.wait_exit().expect("Q did not exit");
     assert!(status.success());
     assert!(!baseline.exists(), "Q must never write the baseline");

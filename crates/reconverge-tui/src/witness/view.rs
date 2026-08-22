@@ -37,6 +37,9 @@ const ASCII_BORDER: border::Set = border::Set {
     horizontal_bottom: "-",
 };
 
+/// Rows the verdict occupies before its message: a blank and the heading.
+const VERDICT_CHROME: u16 = 2;
+
 /// Width of the row-label column, so the lane strips line up under it.
 const LABEL_WIDTH: usize = 10;
 
@@ -192,6 +195,18 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
     // The lane strip is one row per warp; a one-warp witness keeps the
     // historical five-row block exactly.
     let warp_rows = u16::from(witness.lanes.max(1)).div_ceil(32);
+    // The verdict is sized from what it has to say, and the timeline gets
+    // what is left — never the other way round. `render_verdict` truncates
+    // its message to the rows it is given, so any fixed height silently cuts
+    // the longest verdicts in half, and the conclusion is the one thing on
+    // this screen that must arrive whole.
+    let verdict_rows = verdict_height(view, witness, inner.width);
+    // One row per step plus the launch, clamped to whatever the fixed blocks
+    // and the verdict have not already claimed.
+    let fixed = 2 + (4 + warp_rows) + 5 + verdict_rows;
+    let timeline_rows = u16::try_from(witness.steps.len() + 1)
+        .unwrap_or(u16::MAX)
+        .min(inner.height.saturating_sub(fixed));
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -199,14 +214,27 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
             // lanes: indices, one strip per warp, mask, active, legend
             Constraint::Length(4 + warp_rows),
             Constraint::Length(5), // event: blank, step, statement, at, event line
-            Constraint::Min(2),    // verdict
+            // The timeline takes as much as it has to say and no more, so the
+            // verdict follows it directly and any slack falls off the bottom.
+            // Sized here rather than by a `Min`, because a `Min` would leave
+            // the gap in the middle of the screen — which reads worse than a
+            // short page, and was half the reason this area looked unfinished.
+            Constraint::Length(timeline_rows),
+            // `Min`, not `Length`: `render_verdict` truncates its message to
+            // the rows it is given, so a fixed height silently cuts the
+            // longest verdicts in half — RC002's ends mid-sentence at four
+            // rows. The conclusion takes whatever is left, which is what the
+            // layout did before the timeline existed and the one part of it
+            // that was load-bearing.
+            Constraint::Min(verdict_rows),
         ])
         .split(inner);
 
     render_header(frame, view, witness, rows[0]);
     render_lanes(frame, view, witness, rows[1]);
     render_event(frame, view, witness, rows[2]);
-    render_verdict(frame, view, witness, rows[3]);
+    render_timeline(frame, view, witness, rows[3]);
+    render_verdict(frame, view, witness, rows[4]);
 }
 
 /// The step the current position has just executed, if any.
@@ -427,6 +455,165 @@ fn render_event(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+/// Every step at once, with the current one marked.
+///
+/// The block above says what is happening *now*. This says what the whole run
+/// does, which `h`/`l` otherwise answer only by paging blindly and
+/// remembering — and remembering is the thing a reader of a divergence bug has
+/// least to spare. Seeing that step 3 splits the warp and step 4 is the
+/// barrier those lanes never reach is the entire explanation, and it fits on
+/// one screen.
+///
+/// The lane column is a delta, exactly as the artifact stores it: how many
+/// lanes changed state at that step and to what. That is the fact the prose
+/// on the event line summarises, stated per step so the shape of the run is
+/// visible without reading six sentences.
+fn render_timeline(
+    frame: &mut Frame<'_>,
+    view: &WitnessView<'_>,
+    witness: &WitnessArtifact,
+    area: Rect,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let width = area.width as usize;
+    let position = view.state.position;
+    let total = witness.steps.len();
+
+    // Step 0 is the launch, so there are `total + 1` positions to show.
+    let rows = area.height as usize;
+    let first = window_start(position, total + 1, rows);
+    let mut lines = Vec::with_capacity(rows);
+
+    for index in first..(first + rows).min(total + 1) {
+        let current = index == position;
+        let marker = if current {
+            if view.ascii { "> " } else { "\u{25b8} " }
+        } else {
+            "  "
+        };
+        let (statement, change) = match index.checked_sub(1).and_then(|i| witness.steps.get(i)) {
+            None => ("launch".to_string(), String::new()),
+            Some(step) => (step.statement.clone(), lane_delta(step)),
+        };
+
+        // The change column is right-aligned against the width so the shape of
+        // the run reads down the edge; a narrow terminal drops it rather than
+        // wrapping, since a wrapped timeline is no longer a timeline.
+        let left = format!("{marker}{index:>2}  {statement}");
+        let text = match width.checked_sub(change.chars().count() + 2) {
+            Some(room) if !change.is_empty() && left.chars().count() < room => {
+                let pad = room - left.chars().count();
+                format!("{left}{}{change}", " ".repeat(pad))
+            }
+            _ => left,
+        };
+
+        let style = if current {
+            view.accent(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            view.accent(Style::default().add_modifier(Modifier::DIM))
+        };
+        lines.push(Line::from(Span::styled(
+            fit(&text, width, view.ascii),
+            style,
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// How many rows the verdict needs to be read in full.
+///
+/// The blank and the heading, plus however many lines the message wraps to.
+/// A verdict that has not been reached yet prints no message and needs only
+/// the chrome — but it is still given room for one line, so the block does
+/// not jump when stepping onto the verdict's own step.
+fn verdict_height(view: &WitnessView<'_>, witness: &WitnessArtifact, width: u16) -> u16 {
+    let verdict = &witness.verdict;
+    let reached = verdict
+        .step
+        .is_none_or(|s| view.state.position > s.min(witness.steps.len().saturating_sub(1)));
+    let message = if reached {
+        wrapped_rows(&verdict.message, width)
+    } else {
+        1
+    };
+    VERDICT_CHROME.saturating_add(message)
+}
+
+/// Lines `text` wraps to at `width`, counted the way the paragraph wraps it:
+/// greedily, breaking between words, and never splitting a word that fits on
+/// a line of its own.
+fn wrapped_rows(text: &str, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let mut rows = 1usize;
+    let mut used = 0usize;
+    for word in text.split_whitespace() {
+        let word_width = word.chars().count();
+        let needed = if used == 0 {
+            word_width
+        } else {
+            used + 1 + word_width
+        };
+        if needed <= width {
+            used = needed;
+            continue;
+        }
+        // Break to a new line — unless nothing is on this one yet, in which
+        // case the word starts here and counting a break would add a line
+        // that is never drawn.
+        if used > 0 {
+            rows += 1;
+        }
+        if word_width > width {
+            // A word too long for a line spills onto further ones.
+            let spill = (word_width - 1) / width;
+            rows += spill;
+            used = word_width - spill * width;
+        } else {
+            used = word_width;
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
+/// Which slice of the timeline to show, keeping the current step visible and
+/// the window still whenever the whole run already fits.
+fn window_start(position: usize, count: usize, rows: usize) -> usize {
+    if count <= rows {
+        return 0;
+    }
+    // Centre the current step, then clamp so the last screen is full rather
+    // than trailing off into blank rows.
+    position.saturating_sub(rows / 2).min(count - rows)
+}
+
+/// How many lanes changed state at this step, and to what — the artifact's
+/// own delta, counted.
+fn lane_delta(step: &Step) -> String {
+    let (mut active, mut waiting, mut exited) = (0usize, 0usize, 0usize);
+    for change in &step.lane_changes {
+        match change.state {
+            LaneState::Active => active += 1,
+            LaneState::Waiting => waiting += 1,
+            LaneState::Exited => exited += 1,
+        }
+    }
+    let mut parts = Vec::new();
+    for (count, name) in [(waiting, "waiting"), (exited, "exited"), (active, "active")] {
+        if count > 0 {
+            parts.push(format!("{count} {name}"));
+        }
+    }
+    parts.join(", ")
+}
+
 fn render_verdict(
     frame: &mut Frame<'_>,
     view: &WitnessView<'_>,
@@ -509,5 +696,80 @@ mod tests {
         for label in ["lanes", "mask", "active"] {
             assert!(label.width() < LABEL_WIDTH, "{label:?} does not fit");
         }
+    }
+
+    /// The window keeps the current step on screen without moving when it
+    /// does not have to — a timeline that scrolls under a reader who pressed
+    /// `l` once is harder to follow than one that does not move at all.
+    #[test]
+    fn the_timeline_window_holds_still_until_it_must_scroll() {
+        // Everything fits: never scroll, wherever the cursor is.
+        for position in 0..6 {
+            assert_eq!(window_start(position, 6, 10), 0, "position {position}");
+        }
+        // Exactly fits is still no scroll.
+        assert_eq!(window_start(5, 6, 6), 0);
+
+        // Longer than the window: centre the cursor…
+        assert_eq!(window_start(10, 40, 6), 7);
+        // …but never scroll past the end, so the last page is full rather
+        // than trailing off into blank rows.
+        assert_eq!(window_start(39, 40, 6), 34);
+        assert_eq!(window_start(0, 40, 6), 0);
+    }
+
+    /// The delta column counts the artifact's own `lane_changes`, and says
+    /// nothing when a step changed nothing — an empty column is quieter than
+    /// "0 lanes" and means the same.
+    #[test]
+    fn the_delta_column_counts_what_the_step_changed() {
+        use reconverge_artifacts::witness::LaneChange;
+
+        let step = |changes: Vec<LaneChange>| Step {
+            index: 0,
+            statement: String::new(),
+            span: None,
+            lane_changes: changes,
+            barrier: None,
+            warp_op: None,
+        };
+        let change = |lane, state| LaneChange { lane, state };
+
+        assert_eq!(lane_delta(&step(vec![])), "");
+        assert_eq!(
+            lane_delta(&step(vec![
+                change(0, LaneState::Waiting),
+                change(2, LaneState::Waiting),
+            ])),
+            "2 waiting"
+        );
+        // Order is fixed rather than following the artifact, so two runs of
+        // the same shape read the same way.
+        assert_eq!(
+            lane_delta(&step(vec![
+                change(1, LaneState::Exited),
+                change(0, LaneState::Waiting),
+            ])),
+            "1 waiting, 1 exited"
+        );
+    }
+
+    /// The verdict is sized from its message, so the count has to be right or
+    /// the conclusion is silently cut — which is exactly what a fixed height
+    /// did to RC002, ending it mid-sentence at "undefined;".
+    #[test]
+    fn wrapped_rows_counts_the_lines_a_message_takes() {
+        assert_eq!(wrapped_rows("", 20), 1, "nothing still occupies its line");
+        assert_eq!(wrapped_rows("short", 20), 1);
+        // Exactly the width is one line, not two.
+        assert_eq!(wrapped_rows("12345 789", 9), 1);
+        assert_eq!(wrapped_rows("12345 7890", 9), 2);
+        // A word longer than the line takes the lines it takes rather than
+        // being counted as one: twenty characters at width five is four
+        // lines, and the first of them is the line already open.
+        assert_eq!(wrapped_rows("aaaaaaaaaaaaaaaaaaaa", 5), 4);
+        assert_eq!(wrapped_rows("aaaaaaaaaaaaaaaaaaaaa", 5), 5);
+        // Width zero cannot divide by zero.
+        assert!(wrapped_rows("anything at all", 0) >= 1);
     }
 }
