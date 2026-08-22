@@ -12,7 +12,6 @@ size: 80x24  cursor: hidden
 │return — the odd lanes leave the kernel without ever reaching the barrier     │
 │at lib.rs:27                                                                  │
 │                                                                              │
-│   0  launch                                                                  │
 │   1  _4 = cuda_device::__internal::index_1d(&_3)                             │
 │   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                 │
 │   3  switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it          │
@@ -21,5 +20,6 @@ size: 80x24  cursor: hidden
 │                                                                              │
 │verdict: undefined behavior (at step 5)                                       │
 │16 of 32 lanes wait at the barrier while the other 16 have exited; the barrier│
-│can never be satisfied — undefined behavior on hardware, usually a permanent… │
+│can never be satisfied — undefined behavior on hardware, usually a permanent  │
+│hang                                                                          │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

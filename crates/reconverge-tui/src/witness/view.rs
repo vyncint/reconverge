@@ -37,9 +37,8 @@ const ASCII_BORDER: border::Set = border::Set {
     horizontal_bottom: "-",
 };
 
-/// Rows reserved for the verdict, pinned to the bottom: its heading plus two
-/// wrapped lines of explanation, which is what the longest verdict needs.
-const VERDICT_ROWS: u16 = 4;
+/// Rows the verdict occupies before its message: a blank and the heading.
+const VERDICT_CHROME: u16 = 2;
 
 /// Width of the row-label column, so the lane strips line up under it.
 const LABEL_WIDTH: usize = 10;
@@ -196,10 +195,15 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
     // The lane strip is one row per warp; a one-warp witness keeps the
     // historical five-row block exactly.
     let warp_rows = u16::from(witness.lanes.max(1)).div_ceil(32);
-    // One row per step plus the launch, clamped to what is left once the
-    // fixed blocks and the verdict have taken theirs — the verdict is the
-    // conclusion and must never be the thing that scrolls away.
-    let fixed = 2 + (4 + warp_rows) + 5 + VERDICT_ROWS;
+    // The verdict is sized from what it has to say, and the timeline gets
+    // what is left — never the other way round. `render_verdict` truncates
+    // its message to the rows it is given, so any fixed height silently cuts
+    // the longest verdicts in half, and the conclusion is the one thing on
+    // this screen that must arrive whole.
+    let verdict_rows = verdict_height(view, witness, inner.width);
+    // One row per step plus the launch, clamped to whatever the fixed blocks
+    // and the verdict have not already claimed.
+    let fixed = 2 + (4 + warp_rows) + 5 + verdict_rows;
     let timeline_rows = u16::try_from(witness.steps.len() + 1)
         .unwrap_or(u16::MAX)
         .min(inner.height.saturating_sub(fixed));
@@ -216,8 +220,13 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
             // the gap in the middle of the screen — which reads worse than a
             // short page, and was half the reason this area looked unfinished.
             Constraint::Length(timeline_rows),
-            Constraint::Length(VERDICT_ROWS),
-            Constraint::Min(0),
+            // `Min`, not `Length`: `render_verdict` truncates its message to
+            // the rows it is given, so a fixed height silently cuts the
+            // longest verdicts in half — RC002's ends mid-sentence at four
+            // rows. The conclusion takes whatever is left, which is what the
+            // layout did before the timeline existed and the one part of it
+            // that was load-bearing.
+            Constraint::Min(verdict_rows),
         ])
         .split(inner);
 
@@ -519,6 +528,61 @@ fn render_timeline(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+/// How many rows the verdict needs to be read in full.
+///
+/// The blank and the heading, plus however many lines the message wraps to.
+/// A verdict that has not been reached yet prints no message and needs only
+/// the chrome — but it is still given room for one line, so the block does
+/// not jump when stepping onto the verdict's own step.
+fn verdict_height(view: &WitnessView<'_>, witness: &WitnessArtifact, width: u16) -> u16 {
+    let verdict = &witness.verdict;
+    let reached = verdict
+        .step
+        .is_none_or(|s| view.state.position > s.min(witness.steps.len().saturating_sub(1)));
+    let message = if reached {
+        wrapped_rows(&verdict.message, width)
+    } else {
+        1
+    };
+    VERDICT_CHROME.saturating_add(message)
+}
+
+/// Lines `text` wraps to at `width`, counted the way the paragraph wraps it:
+/// greedily, breaking between words, and never splitting a word that fits on
+/// a line of its own.
+fn wrapped_rows(text: &str, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let mut rows = 1usize;
+    let mut used = 0usize;
+    for word in text.split_whitespace() {
+        let word_width = word.chars().count();
+        let needed = if used == 0 {
+            word_width
+        } else {
+            used + 1 + word_width
+        };
+        if needed <= width {
+            used = needed;
+            continue;
+        }
+        // Break to a new line — unless nothing is on this one yet, in which
+        // case the word starts here and counting a break would add a line
+        // that is never drawn.
+        if used > 0 {
+            rows += 1;
+        }
+        if word_width > width {
+            // A word too long for a line spills onto further ones.
+            let spill = (word_width - 1) / width;
+            rows += spill;
+            used = word_width - spill * width;
+        } else {
+            used = word_width;
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
 /// Which slice of the timeline to show, keeping the current step visible and
 /// the window still whenever the whole run already fits.
 fn window_start(position: usize, count: usize, rows: usize) -> usize {
@@ -688,5 +752,24 @@ mod tests {
             ])),
             "1 waiting, 1 exited"
         );
+    }
+
+    /// The verdict is sized from its message, so the count has to be right or
+    /// the conclusion is silently cut — which is exactly what a fixed height
+    /// did to RC002, ending it mid-sentence at "undefined;".
+    #[test]
+    fn wrapped_rows_counts_the_lines_a_message_takes() {
+        assert_eq!(wrapped_rows("", 20), 1, "nothing still occupies its line");
+        assert_eq!(wrapped_rows("short", 20), 1);
+        // Exactly the width is one line, not two.
+        assert_eq!(wrapped_rows("12345 789", 9), 1);
+        assert_eq!(wrapped_rows("12345 7890", 9), 2);
+        // A word longer than the line takes the lines it takes rather than
+        // being counted as one: twenty characters at width five is four
+        // lines, and the first of them is the line already open.
+        assert_eq!(wrapped_rows("aaaaaaaaaaaaaaaaaaaa", 5), 4);
+        assert_eq!(wrapped_rows("aaaaaaaaaaaaaaaaaaaaa", 5), 5);
+        // Width zero cannot divide by zero.
+        assert!(wrapped_rows("anything at all", 0) >= 1);
     }
 }

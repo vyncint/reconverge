@@ -20,6 +20,6 @@ size: 80x24  cursor: hidden
 │verdict: undefined behavior (at step 3)                                       │
 │ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are    │
 │active at the call — the named-but-absent lanes make the collective undefined;│
-│                                                                              │
+│on hardware this usually never completes                                      │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
