@@ -38,12 +38,12 @@ jobs:
           echo "inspecting commits in: $range"
 
       - name: DCO sign-off on every commit
-        run: ./scripts/check-dco.sh "${{ steps.range.outputs.range }}"
+        run: .github/scripts/check-dco.sh "${{ steps.range.outputs.range }}"
 
       - name: No AI attribution on any commit
         # run even when the DCO step failed, so both reports land at once
         if: success() || failure()
-        run: ./scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.range }}"
+        run: .github/scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.range }}"
 
       # The guidance has to survive a fork PR, where GITHUB_TOKEN is
       # read-only no matter what `permissions:` above asks for — so it
