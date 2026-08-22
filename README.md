@@ -194,10 +194,12 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 
 ```
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 1/2 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
+│witness 1/1 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo                                 │
+│mask      (not at a warp collective)                                          │
+│                                                                              │
 │          o active   W waiting   . exited                                     │
 │                                                                              │
 │step 4/5  [===>.]                                                             │
@@ -205,14 +207,22 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │at lib.rs:22                                                                  │
 │barrier: 16 of 32 threads arrived                                             │
 │                                                                              │
+│   0  launch                                                                  │
+│   1  _4 = cuda_device::__internal::index_1d(&_3)                             │
+│   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                 │
+│   3  switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it          │
+│▸  4  _8 = cuda_device::sync_threads()                            16 waiting  │
+│   5  return — the odd lanes leave the kernel without ever reaching the barri…│
+│                                                                              │
 │verdict: undefined behavior (at step 5)                                       │
+│                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
 ```
 
 | View | Command | What it is for |
 |---|---|---|
 | **inspect** | `cargo reconverge inspect` | browse source with uniformity labels; walk a value's provenance to its divergence source |
-| **witness** | `cargo reconverge witness` | step one warp through the replay: 32 lanes, barrier arrivals, mask vs. active |
+| **witness** | `cargo reconverge witness` | step one warp through the replay: 32 lanes, barrier arrivals, mask vs. active — with the whole run listed beside it, so the shape of the bug is legible without stepping |
 | **learn** | `cargo reconverge learn` | four lessons — divergence, barriers, masks, reconvergence — driving the same replay engine over shipped recordings, fully offline |
 | **triage** | `cargo reconverge triage` | review findings and record the accepted ones, with reasons, in the baseline |
 

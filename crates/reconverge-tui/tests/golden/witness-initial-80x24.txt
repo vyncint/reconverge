@@ -12,6 +12,7 @@ size: 80x24  cursor: hidden
 │launch — before the first event                                               │
 │                                                                              │
 │                                                                              │
+│                                                                              │
 │▸  0  launch                                                                  │
 │   1  _4 = cuda_device::__internal::index_1d(&_3)                             │
 │   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                 │
@@ -20,6 +21,5 @@ size: 80x24  cursor: hidden
 │   5  return — the odd lanes leave the kernel without ever reaching the barri…│
 │                                                                              │
 │verdict: undefined behavior (at step 5)                                       │
-│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

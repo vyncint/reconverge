@@ -204,7 +204,11 @@ pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
     // One row per step plus the launch, clamped to whatever the fixed blocks
     // and the verdict have not already claimed.
     let fixed = 2 + (4 + warp_rows) + 5 + verdict_rows;
-    let timeline_rows = u16::try_from(witness.steps.len() + 1)
+    // One row per step plus the launch, and one more for the blank that
+    // separates the block from the event above it: at a step where the event
+    // block uses all five of its rows, the two ran together and the timeline
+    // read as more event text.
+    let timeline_rows = u16::try_from(witness.steps.len() + 2)
         .unwrap_or(u16::MAX)
         .min(inner.height.saturating_sub(fixed));
     let rows = Layout::default()
@@ -481,10 +485,15 @@ fn render_timeline(
     let position = view.state.position;
     let total = witness.steps.len();
 
-    // Step 0 is the launch, so there are `total + 1` positions to show.
-    let rows = area.height as usize;
+    // Step 0 is the launch, so there are `total + 1` positions to show — in
+    // whatever is left after the separating blank.
+    let rows = (area.height as usize).saturating_sub(1);
+    if rows == 0 {
+        return;
+    }
     let first = window_start(position, total + 1, rows);
-    let mut lines = Vec::with_capacity(rows);
+    let mut lines = Vec::with_capacity(rows + 1);
+    lines.push(Line::default());
 
     for index in first..(first + rows).min(total + 1) {
         let current = index == position;
