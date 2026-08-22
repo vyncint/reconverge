@@ -1,0 +1,102 @@
+# Flake hunter: the PTY suite many times over, on both OSes.
+#
+# `ci.yml` runs the suite once, which is the gate. This asks the other
+# question: does it pass *reliably*? The TUI tests drive real pseudo-terminals,
+# and a PTY suite is asynchronous by construction — its faults are the
+# once-in-fifty kind that a single green run says nothing about. A flaky
+# harness is worse than none, because it teaches contributors to re-run CI
+# rather than to read it.
+#
+# The iterations are split across five machines rather than run end to end on
+# one. A hundred independent trials are a hundred independent trials however
+# they are distributed, so the odds of catching a flake are unchanged — and
+# the shards land on different runners, so a race that only loses on a slow
+# machine gets five rolls at one instead of one.
+#
+# The five do not run the same thing. Each takes a different `--test-threads`,
+# because concurrency is the axis these faults live on and sampling one point
+# five times only samples that point harder:
+#
+#   * 1 thread is the *fast* end, not the safe one. Nothing contends, so every
+#     child starts and exits as quickly as the machine allows.
+#   * 16 is the crowded end: sixteen PTYs opening and closing on top of each
+#     other, which is where device exhaustion and teardown races show up.
+#   * 2, 4 and 8 are the middle, where real suites actually run.
+#
+# The count is in the job name and in the failure, so a flake arrives half
+# diagnosed: at 1 thread it is a speed race, at 16 a contention one.
+name: stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Suite iterations per OS, split across the shards
+        required: false
+        default: "100"
+  schedule:
+    - cron: "31 6 * * 1" # Mondays
+
+permissions:
+  contents: read
+
+# One run per ref at a time: a second dispatch queues rather than cancelling a
+# half-finished measurement, which would tell nobody anything.
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  hunt:
+    name: hunt (${{ matrix.os }}, ${{ matrix.threads }} threads)
+    strategy:
+      # Never cancel a sibling: which OS and which concurrency a flake landed
+      # on is most of the diagnosis, and a cancelled shard reports nothing.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        threads: [1, 2, 4, 8, 16]
+        # Weighted by wall time rather than split evenly: a serial iteration
+        # costs several times a parallel one, and an even split would leave
+        # four machines idle while the first finished. Percentages of
+        # `iterations`, summing to 100.
+        include:
+          - threads: 1
+            weight: 10
+          - threads: 2
+            weight: 15
+          - threads: 4
+            weight: 25
+          - threads: 8
+            weight: 25
+          - threads: 16
+            weight: 25
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      # Built once, outside the loop: compiling inside it would fold the
+      # compiler's own variance into the measurement, and on a cold runner it
+      # would blow the first iteration's deadlines.
+      - run: cargo build -p reconverge-tui --release --all-targets
+      - name: Run the suite repeatedly
+        env:
+          ITERS: ${{ inputs.iterations || '100' }}
+          THREADS: ${{ matrix.threads }}
+          WEIGHT: ${{ matrix.weight }}
+        run: |
+          per=$(( WEIGHT * ITERS / 100 ))
+          # A small `iterations` must still exercise every concurrency, or a
+          # quick ten-iteration check would silently skip the serial shard.
+          if [ "$per" -lt 1 ]; then per=1; fi
+          echo "${THREADS} thread(s): ${per} iterations of ${ITERS}"
+          for i in $(seq "$per"); do
+            echo "::group::${THREADS} threads, iteration ${i}/${per}"
+            cargo test -p reconverge-tui --release -- --test-threads="$THREADS" \
+              || { echo "::error::suite flaked at ${THREADS} thread(s), iteration ${i}/${per}"; exit 1; }
+            echo "::endgroup::"
+          done

@@ -1,0 +1,145 @@
+# What crates.io actually serves, installed the way a user installs it.
+#
+# `ci.yml` tests the working tree and `release.yml` checks that each archive
+# builds. Neither answers the question a user asks: does
+# `cargo install cargo-reconverge` work for somebody who has only cargo?
+# Three failures live in that gap and nowhere else.
+#
+#   * A file the build needs that never reached the archive. The workspace
+#     still compiles; the package does not, and no test here can see it
+#     because every test here has the workspace.
+#   * A **fresh dependency resolution**. CI resolves against the committed
+#     lockfile; `cargo install` does not, so a dependency's own release can
+#     break the published crate days later with nothing changed here. That is
+#     why this runs weekly and not only at publish.
+#   * The crates publishing out of order, or one depending on a version of a
+#     sibling that is not on crates.io yet. `release.yml` publishes seven
+#     crates in dependency order; whether that order actually resolves from
+#     the registry is invisible until somebody resolves it from the registry.
+#
+# **On stable, deliberately.** This workspace pins a nightly because the
+# driver is a rustc-driver tool — but `cargo-reconverge` itself depends on
+# `reconverge-artifacts` and `reconverge-dialect-oxide` and not on the driver,
+# so a user installs it with whatever they have. That it builds on stable is a
+# property worth pinning: if a future change drags the driver into the CLI's
+# dependency graph, `cargo install` starts requiring a pinned nightly and
+# nothing else here would notice.
+#
+# Nothing checks the repository out. The version comes from the registry,
+# because the registry is what a user gets.
+name: install
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to verify (default: the newest published)"
+        required: false
+  schedule:
+    - cron: "43 7 * * 1" # Mondays
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.event.release.tag_name || inputs.version || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  install:
+    name: install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Ask the registry what was published
+        id: crate
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          WANTED: ${{ inputs.version }}
+        run: |
+          api="https://crates.io/api/v1/crates/cargo-reconverge"
+          agent="reconverge-install-check (github actions)"
+          version="${WANTED:-${TAG#v}}"
+          if [ -z "$version" ]; then
+            version=$(curl -sSf -H "User-Agent: $agent" "$api" | jq -r .crate.max_stable_version)
+          fi
+
+          # The release event fires the moment publishing finishes, and the
+          # index can trail it. Wait rather than fail: a flaky gate teaches
+          # people to ignore it.
+          for attempt in $(seq 30); do
+            body=$(curl -sS -H "User-Agent: $agent" "$api/$version") || body=""
+            if [ "$(printf '%s' "$body" | jq -r '.version.num // empty')" = "$version" ]; then
+              break
+            fi
+            echo "waiting for $version to appear on crates.io (${attempt}/30)"
+            sleep 10
+          done
+
+          num=$(printf '%s' "$body" | jq -r '.version.num // empty')
+          if [ "$num" != "$version" ]; then
+            echo "::error::$version never appeared on crates.io"
+            exit 1
+          fi
+          if [ "$(printf '%s' "$body" | jq -r .version.yanked)" != "false" ]; then
+            echo "::error::$version is yanked"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "verifying cargo-reconverge $version"
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+      - name: cargo install, from an empty directory
+        env:
+          VERSION: ${{ steps.crate.outputs.version }}
+        run: |
+          # An empty directory on purpose: `cargo install` from inside a
+          # checkout is a different code path from the one a user takes, and
+          # this workspace would satisfy dependencies the registry has to
+          # satisfy on its own.
+          mkdir -p "$RUNNER_TEMP/clean-room"
+          cd "$RUNNER_TEMP/clean-room"
+          cargo install cargo-reconverge --version "$VERSION" --root "$RUNNER_TEMP/installed"
+          echo "$RUNNER_TEMP/installed/bin" >> "$GITHUB_PATH"
+      - name: Run what it installed
+        env:
+          VERSION: ${{ steps.crate.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/clean-room"
+
+          # The version the binary reports is what proves the archive under
+          # test is the archive that was published.
+          got=$(cargo-reconverge --version)
+          echo "cargo-reconverge: $got"
+          case "$got" in
+            "cargo-reconverge $VERSION") ;;
+            *) echo "::error::reports '$got', expected 'cargo-reconverge $VERSION'"; exit 1 ;;
+          esac
+
+          # It is a *cargo subcommand*, so the shape that matters is `cargo
+          # reconverge` finding it on PATH — a binary that runs when invoked
+          # directly and cannot be reached through cargo is broken in the only
+          # way anybody will actually meet it, and `--version` above would not
+          # have shown it.
+          cargo reconverge --help | tee help.txt
+
+          # Every subcommand the README promises, still there.
+          for command in setup check inspect witness learn; do
+            grep -qE "cargo reconverge $command" help.txt || {
+              echo "::error::the published CLI has no '$command' subcommand"; exit 1; }
+          done
+
+          # Bad flags are a tool error, not a crash and not a silent success:
+          # the exit code is part of the contract CI integrations rely on.
+          if cargo reconverge check --definitely-not-a-flag > /dev/null 2>&1; then
+            echo "::error::an unknown flag was accepted"
+            exit 1
+          fi
