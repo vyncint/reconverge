@@ -5,7 +5,11 @@
 //! view that touches the filesystem, so the test follows the bytes all the
 //! way to disk and back through the schema binding.
 //!
-//! Sync policy: content-based `wait_until` after every key — never sleep.
+//! Sync policy: `wait_frame` after every key, and the frame it returns is
+//! the one asserted on — never `wait_idle`, never sleep. The shell brackets
+//! repaints in DEC 2026 synchronized updates, so a frame is only ever
+//! observed whole. Waiting for a 150ms quiet period instead was a guess at
+//! how long a repaint takes, and on a loaded macOS runner it was wrong.
 //! Regenerate goldens after an intentional UI change with
 //! `RECONVERGE_BLESS=1 cargo test -p reconverge-tui --test triage_flow`.
 
@@ -17,7 +21,6 @@ use reconverge_artifacts::baseline::BaselineArtifact;
 use termlens::{Key, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-const QUIET: Duration = Duration::from_millis(150);
 
 fn fixture(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -101,14 +104,12 @@ fn triage_flow_journey() {
     let baseline = dir.join("reconverge-baseline.json");
     let mut t = spawn((80, 24), &[], &[], &baseline);
 
-    t.wait_until(|s| s.contains("reconverge triage") && s.contains("2 finding(s) — 0 suppressed"))
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("reconverge triage") && s.contains("2 finding(s) — 0 suppressed")
+        })
         .expect("initial frame");
-    t.wait_idle(QUIET).expect("initial paint settles");
-    assert_golden(
-        "triage-initial-80x24.txt",
-        &t.screen().to_string(),
-        "initial",
-    );
+    assert_golden("triage-initial-80x24.txt", &frame.to_string(), "initial");
 
     // s: accept the selected finding; the editor asks for a reason and
     // refuses to record an empty one.
@@ -125,14 +126,10 @@ fn triage_flow_journey() {
     t.wait_until(|s| s.contains("reviewed \u{2014} host owns it"))
         .expect("reason echoes as typed");
     t.send(Key::Enter).expect("send Key::Enter");
-    t.wait_until(|s| s.contains("2 finding(s) — 1 suppressed") && s.contains("(unsaved)"))
+    let frame = t
+        .wait_frame(|s| s.contains("2 finding(s) — 1 suppressed") && s.contains("(unsaved)"))
         .expect("acceptance recorded, not yet written");
-    t.wait_idle(QUIET).expect("accept paint settles");
-    assert_golden(
-        "triage-accepted-80x24.txt",
-        &t.screen().to_string(),
-        "accepted",
-    );
+    assert_golden("triage-accepted-80x24.txt", &frame.to_string(), "accepted");
 
     // w: write, and check the bytes that landed.
     t.send(Key::Char('w')).expect("send Key::Char('w')");
@@ -199,10 +196,10 @@ fn triage_ascii_mode_is_pure_ascii() {
         &["--ascii"],
         &fixture("baseline/minimal.json"),
     );
-    t.wait_until(|s| s.contains("reconverge triage") && s.contains("1 suppressed"))
+    let frame = t
+        .wait_frame(|s| s.contains("reconverge triage") && s.contains("1 suppressed"))
         .expect("initial frame");
-    t.wait_idle(QUIET).expect("paint settles");
-    let screen = t.screen().to_string();
+    let screen = frame.to_string();
     assert_golden("triage-reviewed-80x24-ascii.txt", &screen, "--ascii");
     for line in normalize(&screen).lines() {
         assert!(line.is_ascii(), "non-ASCII glyph in --ascii mode: {line:?}");
@@ -221,10 +218,10 @@ fn matrix_leg(size: (u16, u16)) {
         t.wait_until(|s| s.contains("1 suppressed"))
             .expect("initial frame");
         // The accepted finding shows its recorded reason.
-        t.wait_until(|s| s.contains("reason: reviewed:"))
+        let frame = t
+            .wait_frame(|s| s.contains("reason: reviewed:"))
             .expect("reason shown for the accepted finding");
-        t.wait_idle(QUIET).expect("paint settles");
-        screens.push(normalize(&t.screen().to_string()));
+        screens.push(normalize(&frame.to_string()));
         quit(t, "matrix leg");
     }
 

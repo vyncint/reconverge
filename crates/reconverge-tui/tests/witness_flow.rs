@@ -2,7 +2,11 @@
 //! real PTY on the canonical RC001/RC002 fixtures, plus the size and color
 //! matrix — {80×24, 120×40} × {color, NO_COLOR}.
 //!
-//! Sync policy: content-based `wait_until` after every key — never sleep.
+//! Sync policy: `wait_frame` after every key, and the frame it returns is
+//! the one asserted on — never `wait_idle`, never sleep. The shell brackets
+//! repaints in DEC 2026 synchronized updates, so a frame is only ever
+//! observed whole. Waiting for a 150ms quiet period instead was a guess at
+//! how long a repaint takes, and on a loaded macOS runner it was wrong.
 //! Regenerate goldens after an intentional UI change with
 //! `RECONVERGE_BLESS=1 cargo test -p reconverge-tui --test witness_flow`.
 
@@ -13,7 +17,6 @@ use std::{env, fs};
 use termlens::{Key, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-const QUIET: Duration = Duration::from_millis(150);
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/witness")
@@ -78,16 +81,14 @@ fn quit(mut t: Terminal, context: &str) {
 #[test]
 fn witness_flow_journey() {
     let mut t = spawn((80, 24), &[], &[]);
-    t.wait_until(|s| {
-        s.contains("witness 1/2") && s.contains("kernel `divergent_barrier`") && s.contains("0/5")
-    })
-    .expect("initial frame");
-    t.wait_idle(QUIET).expect("initial paint settles");
-    assert_golden(
-        "witness-initial-80x24.txt",
-        &t.screen().to_string(),
-        "initial",
-    );
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("witness 1/2")
+                && s.contains("kernel `divergent_barrier`")
+                && s.contains("0/5")
+        })
+        .expect("initial frame");
+    assert_golden("witness-initial-80x24.txt", &frame.to_string(), "initial");
 
     // l ×4: to the barrier event — 16 lanes park, the strip becomes the
     // diagnostics' warp diagram.
@@ -97,15 +98,15 @@ fn witness_flow_journey() {
             .expect("stepped forward");
     }
     // 16 even lanes park at the barrier while the odd 16 are still running.
-    t.wait_until(|s| {
-        s.contains("WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo")
-            && s.contains("barrier: 16 of 32 threads arrived")
-    })
-    .expect("the barrier moment");
-    t.wait_idle(QUIET).expect("barrier paint settles");
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo")
+                && s.contains("barrier: 16 of 32 threads arrived")
+        })
+        .expect("the barrier moment");
     assert_golden(
         "witness-barrier-80x24.txt",
-        &t.screen().to_string(),
+        &frame.to_string(),
         "barrier moment",
     );
 
@@ -138,18 +139,14 @@ fn witness_flow_journey() {
     t.wait_until(|s| s.contains("witness 2/2") && s.contains("rc002_divergent_collective"))
         .expect("switched witness");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    t.wait_until(|s| {
-        s.contains("step 3/3")
-            && s.contains("0xffffffff")
-            && s.contains("named in the mask but not active: 0xaaaaaaaa")
-    })
-    .expect("mask panel at the collective");
-    t.wait_idle(QUIET).expect("mask paint settles");
-    assert_golden(
-        "witness-mask-80x24.txt",
-        &t.screen().to_string(),
-        "mask panel",
-    );
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("step 3/3")
+                && s.contains("0xffffffff")
+                && s.contains("named in the mask but not active: 0xaaaaaaaa")
+        })
+        .expect("mask panel at the collective");
+    assert_golden("witness-mask-80x24.txt", &frame.to_string(), "mask panel");
 
     quit(t, "journey");
 }
@@ -161,9 +158,8 @@ fn witness_ascii_mode_is_pure_ascii() {
     t.wait_until(|s| s.contains("reconverge witness"))
         .expect("initial frame");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    t.wait_until(|s| s.contains("step 5/5")).expect("verdict");
-    t.wait_idle(QUIET).expect("paint settles");
-    let screen = t.screen().to_string();
+    let frame = t.wait_frame(|s| s.contains("step 5/5")).expect("verdict");
+    let screen = frame.to_string();
     assert_golden("witness-verdict-80x24-ascii.txt", &screen, "--ascii");
     for line in normalize(&screen).lines() {
         assert!(line.is_ascii(), "non-ASCII glyph in --ascii mode: {line:?}");
@@ -182,14 +178,14 @@ fn matrix_leg(size: (u16, u16)) {
         t.wait_until(|s| s.contains("step 0/5"))
             .expect("initial frame");
         t.send(Key::Char('v')).expect("send Key::Char('v')");
-        t.wait_until(|s| {
-            s.contains("step 5/5")
-                && s.contains("verdict")
-                && s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
-        })
-        .expect("verdict moment");
-        t.wait_idle(QUIET).expect("paint settles");
-        screens.push(normalize(&t.screen().to_string()));
+        let frame = t
+            .wait_frame(|s| {
+                s.contains("step 5/5")
+                    && s.contains("verdict")
+                    && s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
+            })
+            .expect("verdict moment");
+        screens.push(normalize(&frame.to_string()));
         quit(t, "matrix leg");
     }
 
