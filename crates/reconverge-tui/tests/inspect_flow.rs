@@ -1,6 +1,10 @@
 //! Inspector flow tests (§9 layer 3): multi-step keyboard journeys driven
 //! through a real PTY on the checked-in `fixtures/inspect` scenario.
-//! Sync policy: content-based `wait_until` after every key — never sleep.
+//! Sync policy: `wait_frame` after every key, and the frame it returns is
+//! the one asserted on — never `wait_idle`, never sleep. The shell brackets
+//! repaints in DEC 2026 synchronized updates, so a frame is only ever
+//! observed whole. Waiting for a 150ms quiet period instead was a guess at
+//! how long a repaint takes, and on a loaded macOS runner it was wrong.
 //!
 //! Regenerate goldens after an intentional UI change with
 //! `RECONVERGE_BLESS=1 cargo test -p reconverge-tui --test inspect_flow`.
@@ -12,7 +16,6 @@ use std::{env, fs};
 use termlens::{Key, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-const QUIET: Duration = Duration::from_millis(150);
 
 fn scenario_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/inspect")
@@ -74,14 +77,10 @@ fn quit(mut t: Terminal, context: &str) {
 #[test]
 fn inspector_flow_journey() {
     let mut t = spawn(&[]);
-    t.wait_until(|s| s.contains("reconverge inspect") && s.contains("kernel divergent_barrier"))
+    let frame = t
+        .wait_frame(|s| s.contains("reconverge inspect") && s.contains("kernel divergent_barrier"))
         .expect("initial frame");
-    t.wait_idle(QUIET).expect("initial paint settles");
-    assert_golden(
-        "inspect-initial-80x24.txt",
-        &t.screen().to_string(),
-        "initial",
-    );
+    assert_golden("inspect-initial-80x24.txt", &frame.to_string(), "initial");
 
     // j: select `i`, the thread-index witness.
     t.send(Key::Char('j')).expect("send Key::Char('j')");
@@ -108,14 +107,10 @@ fn inspector_flow_journey() {
     for _ in 0..3 {
         t.send(Key::Char('n')).expect("send Key::Char('n')");
     }
-    t.wait_until(|s| s.contains("finding 3/3 [RC001]"))
+    let frame = t
+        .wait_frame(|s| s.contains("finding 3/3 [RC001]"))
         .expect("RC001 finding selected");
-    t.wait_idle(QUIET).expect("jump paint settles");
-    assert_golden(
-        "inspect-rc001-80x24.txt",
-        &t.screen().to_string(),
-        "rc001 jump",
-    );
+    assert_golden("inspect-rc001-80x24.txt", &frame.to_string(), "rc001 jump");
 
     quit(t, "journey");
 }
@@ -124,10 +119,10 @@ fn inspector_flow_journey() {
 #[test]
 fn inspector_ascii_mode_is_pure_ascii() {
     let mut t = spawn(&["--ascii"]);
-    t.wait_until(|s| s.contains("reconverge inspect"))
+    let frame = t
+        .wait_frame(|s| s.contains("reconverge inspect"))
         .expect("initial frame");
-    t.wait_idle(QUIET).expect("paint settles");
-    let screen = t.screen().to_string();
+    let screen = frame.to_string();
     assert_golden("inspect-initial-80x24-ascii.txt", &screen, "--ascii");
     for line in normalize(&screen).lines() {
         assert!(line.is_ascii(), "non-ASCII glyph in --ascii mode: {line:?}");

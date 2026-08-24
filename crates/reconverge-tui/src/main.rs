@@ -21,12 +21,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use ratatui::Frame;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode,
 };
 use reconverge_tui::inspect::{self, InspectorState, KeyAction};
 use reconverge_tui::load;
@@ -34,6 +36,28 @@ use reconverge_tui::view::{self, ShellModel};
 use reconverge_tui::{learn, triage, witness};
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
+
+/// One repaint, bracketed in DEC 2026 synchronized updates.
+///
+/// Without the brackets a terminal shows whatever has arrived so far, which is
+/// usually fine to look at and fatal to test: the golden-frame gate in
+/// `reconverge-tui/tests/smoke.rs` used to sync on a 150ms quiet period, and a
+/// loaded macOS runner that paused mid-repaint handed it a torn frame. That is
+/// a real flake, not a slow machine — it fails against a golden that is
+/// correct.
+///
+/// With them, termlens's `wait_frame` can wait for a *complete* frame instead
+/// of for silence, so the test is gated on the repaint finishing rather than on
+/// a duration nobody can pick correctly.
+///
+/// `End` is sent even when the draw fails, so a terminal is never left inside
+/// an update that never closes.
+fn sync_draw(terminal: &mut Term, render: impl FnOnce(&mut Frame<'_>)) -> io::Result<()> {
+    execute!(io::stdout(), BeginSynchronizedUpdate)?;
+    let drawn = terminal.draw(render).map(|_| ());
+    execute!(io::stdout(), EndSynchronizedUpdate)?;
+    drawn
+}
 
 fn main() -> ExitCode {
     let mut ascii = false;
@@ -139,7 +163,7 @@ fn run_shell(paths: &[PathBuf], ascii: bool, color: bool) -> io::Result<()> {
     }
 
     with_terminal(|terminal| {
-        terminal.draw(|frame| view::render(frame, &model))?;
+        sync_draw(terminal, |frame| view::render(frame, &model))?;
         loop {
             match event::read()? {
                 Event::Key(key)
@@ -148,7 +172,7 @@ fn run_shell(paths: &[PathBuf], ascii: bool, color: bool) -> io::Result<()> {
                     return Ok(());
                 }
                 Event::Resize(_, _) => {
-                    terminal.draw(|frame| view::render(frame, &model))?;
+                    sync_draw(terminal, |frame| view::render(frame, &model))?;
                 }
                 _ => {}
             }
@@ -162,19 +186,17 @@ fn run_witness(paths: &[PathBuf], ascii: bool, color: bool) -> io::Result<()> {
 
     with_terminal(|terminal| {
         let draw = |state: &witness::WitnessState, terminal: &mut Term| -> io::Result<()> {
-            terminal
-                .draw(|frame| {
-                    witness::view::render(
-                        frame,
-                        &witness::view::WitnessView {
-                            data: &data,
-                            state,
-                            ascii,
-                            color,
-                        },
-                    )
-                })
-                .map(|_| ())
+            sync_draw(terminal, |frame| {
+                witness::view::render(
+                    frame,
+                    &witness::view::WitnessView {
+                        data: &data,
+                        state,
+                        ascii,
+                        color,
+                    },
+                )
+            })
         };
         draw(&state, terminal)?;
         loop {
@@ -216,19 +238,17 @@ fn run_triage(paths: &[PathBuf], baseline_path: &Path, ascii: bool, color: bool)
 
     with_terminal(|terminal| {
         let draw = |state: &triage::TriageState, terminal: &mut Term| -> io::Result<()> {
-            terminal
-                .draw(|frame| {
-                    triage::view::render(
-                        frame,
-                        &triage::view::TriageView {
-                            data: &data,
-                            state,
-                            ascii,
-                            color,
-                        },
-                    )
-                })
-                .map(|_| ())
+            sync_draw(terminal, |frame| {
+                triage::view::render(
+                    frame,
+                    &triage::view::TriageView {
+                        data: &data,
+                        state,
+                        ascii,
+                        color,
+                    },
+                )
+            })
         };
         draw(&state, terminal)?;
         loop {
@@ -304,19 +324,17 @@ fn run_learn(ascii: bool, color: bool) -> io::Result<()> {
 
     with_terminal(|terminal| {
         let draw = |state: &learn::LearnState, terminal: &mut Term| -> io::Result<()> {
-            terminal
-                .draw(|frame| {
-                    learn::view::render(
-                        frame,
-                        &learn::view::LearnView {
-                            lessons: &lessons,
-                            state,
-                            ascii,
-                            color,
-                        },
-                    )
-                })
-                .map(|_| ())
+            sync_draw(terminal, |frame| {
+                learn::view::render(
+                    frame,
+                    &learn::view::LearnView {
+                        lessons: &lessons,
+                        state,
+                        ascii,
+                        color,
+                    },
+                )
+            })
         };
         draw(&state, terminal)?;
         loop {
@@ -373,19 +391,17 @@ fn run_inspector(paths: &[PathBuf], ascii: bool, color: bool) -> io::Result<()> 
 
     with_terminal(|terminal| {
         let draw = |state: &InspectorState, terminal: &mut Term| -> io::Result<()> {
-            terminal
-                .draw(|frame| {
-                    inspect::view::render(
-                        frame,
-                        &inspect::view::InspectorView {
-                            data: &data,
-                            state,
-                            ascii,
-                            color,
-                        },
-                    )
-                })
-                .map(|_| ())
+            sync_draw(terminal, |frame| {
+                inspect::view::render(
+                    frame,
+                    &inspect::view::InspectorView {
+                        data: &data,
+                        state,
+                        ascii,
+                        color,
+                    },
+                )
+            })
         };
         draw(&state, terminal)?;
         loop {

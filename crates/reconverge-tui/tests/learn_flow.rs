@@ -5,7 +5,11 @@
 //! EMPTY working directory: everything on screen is embedded in the
 //! binary.
 //!
-//! Sync policy: content-based `wait_until` after every key — never sleep.
+//! Sync policy: `wait_frame` after every key, and the frame it returns is
+//! the one asserted on — never `wait_idle`, never sleep. The shell brackets
+//! repaints in DEC 2026 synchronized updates, so a frame is only ever
+//! observed whole. Waiting for a 150ms quiet period instead was a guess at
+//! how long a repaint takes, and on a loaded macOS runner it was wrong.
 //! Regenerate goldens after an intentional UI change with
 //! `RECONVERGE_BLESS=1 cargo test -p reconverge-tui --test learn_flow`.
 
@@ -16,7 +20,6 @@ use std::{env, fs};
 use termlens::{Key, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-const QUIET: Duration = Duration::from_millis(150);
 
 /// An empty working directory: the "runs with nothing on disk" claim made
 /// literal. The caller names it, because these tests run in parallel and
@@ -84,10 +87,10 @@ fn quit(mut t: Terminal, context: &str) {
 #[test]
 fn learn_flow_journey() {
     let mut t = spawn((80, 24), &[], &[], "journey");
-    t.wait_until(|s| s.contains("reconverge learn") && s.contains("1. divergence"))
+    let frame = t
+        .wait_frame(|s| s.contains("reconverge learn") && s.contains("1. divergence"))
         .expect("lesson list");
-    t.wait_idle(QUIET).expect("list paint settles");
-    assert_golden("learn-list-80x24.txt", &t.screen().to_string(), "list");
+    assert_golden("learn-list-80x24.txt", &frame.to_string(), "list");
 
     // j, Enter: open the barriers lesson.
     t.send(Key::Char('j')).expect("send Key::Char('j')");
@@ -102,17 +105,13 @@ fn learn_flow_journey() {
     t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    t.wait_until(|s| {
-        s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
-            && s.contains("verdict: undefined behavior")
-    })
-    .expect("the hang lands inside the lesson");
-    t.wait_idle(QUIET).expect("hang paint settles");
-    assert_golden(
-        "learn-barriers-hang-80x24.txt",
-        &t.screen().to_string(),
-        "hang",
-    );
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
+                && s.contains("verdict: undefined behavior")
+        })
+        .expect("the hang lands inside the lesson");
+    assert_golden("learn-barriers-hang-80x24.txt", &frame.to_string(), "hang");
 
     // n, then Esc: last page, back to the list.
     t.send(Key::Char('n')).expect("send Key::Char('n')");
@@ -132,12 +131,12 @@ fn learn_flow_journey() {
     t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    t.wait_until(|s| s.contains("verdict: completed") && s.contains("cannot hang"))
+    let frame = t
+        .wait_frame(|s| s.contains("verdict: completed") && s.contains("cannot hang"))
         .expect("the fix completes");
-    t.wait_idle(QUIET).expect("completed paint settles");
     assert_golden(
         "learn-reconverged-80x24.txt",
-        &t.screen().to_string(),
+        &frame.to_string(),
         "completed",
     );
 
@@ -153,10 +152,10 @@ fn learn_ascii_mode_is_pure_ascii() {
     t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 1/4")).expect("opened");
     t.send(Key::Char('n')).expect("send Key::Char('n')");
-    t.wait_until(|s| s.contains("page 2/3"))
+    let frame = t
+        .wait_frame(|s| s.contains("page 2/3"))
         .expect("interactive page");
-    t.wait_idle(QUIET).expect("paint settles");
-    let screen = t.screen().to_string();
+    let screen = frame.to_string();
     assert_golden("learn-divergence-80x24-ascii.txt", &screen, "--ascii");
     for line in normalize(&screen).lines() {
         assert!(line.is_ascii(), "non-ASCII glyph in --ascii mode: {line:?}");
@@ -186,14 +185,14 @@ fn matrix_leg(size: (u16, u16)) {
         // v: in this witness the collective IS the verdict step, so one
         // jump shows the mask against the active lanes and the verdict.
         t.send(Key::Char('v')).expect("send Key::Char('v')");
-        t.wait_until(|s| {
-            s.contains("verdict")
-                && s.contains("######## ######## ######## ########")
-                && s.contains("#.#.#.#.")
-        })
-        .expect("mask, active lanes, and verdict together");
-        t.wait_idle(QUIET).expect("paint settles");
-        screens.push(normalize(&t.screen().to_string()));
+        let frame = t
+            .wait_frame(|s| {
+                s.contains("verdict")
+                    && s.contains("######## ######## ######## ########")
+                    && s.contains("#.#.#.#.")
+            })
+            .expect("mask, active lanes, and verdict together");
+        screens.push(normalize(&frame.to_string()));
         quit(t, "matrix leg");
     }
 
