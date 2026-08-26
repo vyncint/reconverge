@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+mod args;
 mod check;
 mod explain;
 mod inspect;
@@ -25,6 +26,8 @@ mod watch_cmd;
 mod witness_cmd;
 
 use std::process::ExitCode;
+
+use crate::args::ArgError;
 
 const USAGE: &str = "\
 cargo-reconverge: static reconvergence analysis for Rust GPU kernels
@@ -61,9 +64,10 @@ check options:
                               findings.v1 document per analyzed crate, one
                               per line
   --sarif <PATH>              also write a SARIF 2.1.0 report to PATH
-  --baseline <PATH>           reviewed suppressions to apply (default:
+  --baseline <PATH>           reviewed suppressions to apply. The default,
                               reconverge-baseline.json at the workspace
-                              root; missing is an empty baseline)
+                              root, is treated as empty when absent; a path
+                              named here must exist
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
 
@@ -75,6 +79,23 @@ code, and their count is always reported.
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     ExitCode::from(run(&args))
+}
+
+/// Report a command-line error, with the usage text only where it earns its
+/// place.
+///
+/// An argument nobody recognises needs the reference; a recognised argument
+/// with an unusable value does not, because the message already names what is
+/// accepted. Printing it regardless put forty-odd lines between the reader
+/// and the answer — and put the exit-code legend, rather than the reason, at
+/// the end of stderr where a calling tool looks for it.
+fn report_arg_error(err: &ArgError) -> u8 {
+    if err.wants_usage() {
+        eprintln!("error: {err}\n\n{USAGE}");
+    } else {
+        eprintln!("error: {err}");
+    }
+    2
 }
 
 /// Exit codes follow the CLI contract of README.md: 0 = clean,
@@ -103,17 +124,11 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("--explain" | "explain") => match explain::parse(&rest[1..]) {
             Ok(code) => explain::run(&code),
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("inspect") => match inspect::InspectOptions::parse(&rest[1..]) {
             Ok(options) => match inspect::run(&options) {
@@ -123,10 +138,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("setup") => match setup_cmd::SetupOptions::parse(&rest[1..]) {
             Ok(options) => match setup_cmd::run(&options) {
@@ -136,10 +148,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("triage") => match triage_cmd::TriageOptions::parse(&rest[1..]) {
             Ok(options) => match triage_cmd::run(&options) {
@@ -149,10 +158,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("watch") => match watch_cmd::WatchOptions::parse(&rest[1..]) {
             Ok(options) => match watch_cmd::run(&options) {
@@ -162,10 +168,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("learn") => match learn_cmd::LearnOptions::parse(&rest[1..]) {
             Ok(options) => match learn_cmd::run(&options) {
@@ -175,10 +178,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some("witness") => match witness_cmd::WitnessOptions::parse(&rest[1..]) {
             Ok(options) => match witness_cmd::run(&options) {
@@ -188,10 +188,7 @@ fn run(args: &[String]) -> u8 {
                     2
                 }
             },
-            Err(err) => {
-                eprintln!("error: {err}\n\n{USAGE}");
-                2
-            }
+            Err(err) => report_arg_error(&err),
         },
         Some(other) => {
             eprintln!("error: unrecognized argument `{other}`\n\n{USAGE}");

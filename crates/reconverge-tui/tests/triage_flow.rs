@@ -105,9 +105,7 @@ fn triage_flow_journey() {
     let mut t = spawn((80, 24), &[], &[], &baseline);
 
     let frame = t
-        .wait_frame(|s| {
-            s.contains("reconverge triage") && s.contains("2 finding(s) — 0 suppressed")
-        })
+        .wait_frame(|s| s.contains("reconverge triage") && s.contains("2 findings — 0 suppressed"))
         .expect("initial frame");
     assert_golden("triage-initial-80x24.txt", &frame.to_string(), "initial");
 
@@ -127,7 +125,7 @@ fn triage_flow_journey() {
         .expect("reason echoes as typed");
     t.send(Key::Enter).expect("send Key::Enter");
     let frame = t
-        .wait_frame(|s| s.contains("2 finding(s) — 1 suppressed") && s.contains("(unsaved)"))
+        .wait_frame(|s| s.contains("2 findings — 1 suppressed") && s.contains("(unsaved)"))
         .expect("acceptance recorded, not yet written");
     assert_golden("triage-accepted-80x24.txt", &frame.to_string(), "accepted");
 
@@ -146,7 +144,7 @@ fn triage_flow_journey() {
 
     // u: withdraw the acceptance — an edit again, so q asks before losing it.
     t.send(Key::Char('u')).expect("send Key::Char('u')");
-    t.wait_until(|s| s.contains("2 finding(s) — 0 suppressed") && s.contains("(unsaved)"))
+    t.wait_until(|s| s.contains("2 findings — 0 suppressed") && s.contains("(unsaved)"))
         .expect("acceptance withdrawn");
     t.send(Key::Char('q')).expect("send Key::Char('q')");
     t.wait_until(|s| s.contains("unsaved edits — press w to write"))

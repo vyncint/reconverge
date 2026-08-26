@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::args::ArgError;
 use crate::check;
 use crate::inspect::locate_tui;
 use crate::review::DEFAULT_BASELINE;
@@ -17,7 +18,7 @@ pub struct TriageOptions {
 }
 
 impl TriageOptions {
-    pub fn parse(args: &[String]) -> Result<TriageOptions, String> {
+    pub fn parse(args: &[String]) -> Result<TriageOptions, ArgError> {
         let mut options = TriageOptions {
             ascii: false,
             baseline: None,
@@ -37,7 +38,7 @@ impl TriageOptions {
             match flag {
                 "--ascii" => options.ascii = true,
                 "--baseline" => options.baseline = Some(PathBuf::from(value("--baseline")?)),
-                other => return Err(format!("unrecognized argument `{other}`")),
+                other => return Err(ArgError::unknown(other)),
             }
         }
         Ok(options)

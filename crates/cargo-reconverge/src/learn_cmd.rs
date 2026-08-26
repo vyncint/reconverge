@@ -7,6 +7,7 @@
 
 use std::process::Command;
 
+use crate::args::ArgError;
 use crate::inspect::locate_tui;
 
 pub struct LearnOptions {
@@ -14,12 +15,12 @@ pub struct LearnOptions {
 }
 
 impl LearnOptions {
-    pub fn parse(args: &[String]) -> Result<LearnOptions, String> {
+    pub fn parse(args: &[String]) -> Result<LearnOptions, ArgError> {
         let mut options = LearnOptions { ascii: false };
         for arg in args {
             match arg.as_str() {
                 "--ascii" => options.ascii = true,
-                other => return Err(format!("unrecognized argument `{other}`")),
+                other => return Err(ArgError::unknown(other)),
             }
         }
         Ok(options)

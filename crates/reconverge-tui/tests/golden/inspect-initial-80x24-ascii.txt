@@ -21,5 +21,5 @@ size: 80x24  cursor: hidden
 |   25         *e = 1;                                                         |
 |   26     }                                                                   |
 |   27 }                                                                       |
-|3 finding(s) loaded -- press n to visit them                                  |
+|3 findings loaded -- press n to visit them                                    |
 + j/k value  p walk  u back  n/N finding  f fn  q quit ------------------------+

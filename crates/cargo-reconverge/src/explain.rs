@@ -4,6 +4,8 @@
 //! build time, so `--explain` works offline, exactly as shipped — and so
 //! they travel with the crate when it is published.
 
+use crate::args::ArgError;
+
 struct Page {
     code: &'static str,
     text: &'static str,
@@ -64,16 +66,16 @@ pub fn run(code: &str) -> u8 {
 }
 
 /// Parse `--explain <CODE>`.
-pub fn parse(args: &[String]) -> Result<String, String> {
+pub fn parse(args: &[String]) -> Result<String, ArgError> {
     let mut code = None;
     for arg in args {
         if arg.starts_with('-') || code.is_some() {
-            return Err(format!("unrecognized argument `{arg}`"));
+            return Err(ArgError::unknown(arg));
         }
         code = Some(arg.clone());
     }
     code.ok_or_else(|| {
-        "`--explain` requires a diagnostic code (e.g. `--explain RC001`)".to_string()
+        ArgError::from("`--explain` requires a diagnostic code (e.g. `--explain RC001`)")
     })
 }
 

@@ -45,11 +45,11 @@ dependencies = [
 
 [[package]]
 name = "reconverge-core"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "reconverge-dialect-oxide"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reconverge-core",
 ]

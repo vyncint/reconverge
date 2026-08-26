@@ -13,10 +13,10 @@ use reconverge_dialect_oxide::cc::{
 use reconverge_dialect_oxide::kernel_base_name;
 use reconverge_dialect_oxide::paths::{self, IndexFn, LaunchDomain};
 use rustc_public::mir::alloc::GlobalAlloc;
-use rustc_public::mir::mono::StaticDef;
+use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::mir::visit::MirVisitor;
 use rustc_public::mir::{ConstOperand, Mutability, Terminator, TerminatorKind};
-use rustc_public::ty::{ConstantKind, GenericArgKind, RigidTy, Ty, TyKind};
+use rustc_public::ty::{ConstantKind, GenericArgKind, RigidTy, Ty, TyConst, TyConstKind, TyKind};
 use rustc_public::{CrateDef, CrateItem, ItemKind};
 
 use crate::emit;
@@ -138,10 +138,56 @@ fn rc004_shared_memory_budget(
 
     let mut total: u64 = 0;
     let mut notes = Vec::new();
+    let mut unreadable = Vec::new();
     for (def, size, kind) in collector.statics.values() {
-        total += size;
-        notes.push(format!("`{}`: {size} bytes ({kind})", def.trimmed_name()));
+        match size {
+            Some(size) => {
+                total = total.saturating_add(*size);
+                notes.push(format!("`{}`: {size} bytes ({kind})", def.trimmed_name()));
+            }
+            None => unreadable.push(format!("`{}` ({kind})", def.trimmed_name())),
+        }
     }
+
+    // A size the analysis could not read is reported before the budget is
+    // compared, and separately from it: the comparison that follows is over a
+    // total this kernel is known to exceed by an unknown amount, so a clean
+    // verdict from it would be meaningless rather than merely incomplete.
+    if !unreadable.is_empty() {
+        unreadable.sort();
+        let mut notes = unreadable.clone();
+        notes.push(format!(
+            "the sizes it could read total {total} bytes, against the \
+             {STATIC_SHARED_LIMIT_BYTES}-byte static limit"
+        ));
+        notes.push(
+            "a length given as a literal, or as a `const` with no generic parameters of its \
+             own, is readable here; one that depends on a generic parameter is not known \
+             until the kernel is instantiated"
+                .to_string(),
+        );
+        findings.push(Finding {
+            code: "RC004".to_string(),
+            confidence: Confidence::Deny,
+            message: format!(
+                "kernel `{}` declares shared memory whose size could not be read, so its \
+                 shared-memory budget is unchecked",
+                kernel.name
+            ),
+            kernel: Some(kernel.name.clone()),
+            span: emit::source_span(kernel.item.span()),
+            notes,
+            help: Some(
+                "give the length as a literal or a non-generic `const`, or report this \
+                 kernel — an unreadable size is a gap in the check, not a property of the \
+                 kernel"
+                    .to_string(),
+            ),
+            explain: "RC004".to_string(),
+            provenance: Vec::new(),
+        });
+    }
+
     if total <= STATIC_SHARED_LIMIT_BYTES {
         return;
     }
@@ -185,9 +231,13 @@ fn rc004_shared_memory_budget(
 
 /// Collects shared-memory statics (`SharedArray`, `Barrier`) referenced by a
 /// body, deduplicated and in stable name order, with their device sizes.
+///
+/// A size of `None` is one the analysis could not read. It is kept rather
+/// than dropped, because dropping it is indistinguishable from the static not
+/// being there — which is how a kernel over the cap came back clean.
 #[derive(Default)]
 struct SharedStaticCollector {
-    statics: BTreeMap<String, (StaticDef, u64, &'static str)>,
+    statics: BTreeMap<String, (StaticDef, Option<u64>, &'static str)>,
 }
 
 impl MirVisitor for SharedStaticCollector {
@@ -201,13 +251,74 @@ impl MirVisitor for SharedStaticCollector {
                 let GlobalAlloc::Static(def) = GlobalAlloc::from(prov.0) else {
                     continue;
                 };
-                if let Some((size, kind)) = shared_resident_size(def.ty()) {
-                    self.statics.insert(def.name(), (def, size, kind));
+                match shared_resident_size(def.ty()) {
+                    SharedSize::Known(size, kind) => {
+                        self.statics.insert(def.name(), (def, Some(size), kind));
+                    }
+                    SharedSize::Unresolved(kind) => {
+                        self.statics.insert(def.name(), (def, None, kind));
+                    }
+                    SharedSize::NotShared => {}
                 }
             }
         }
         self.super_const_operand(constant, _location);
     }
+}
+
+/// What a static's type contributes to the shared-memory budget.
+enum SharedSize {
+    /// Not a shared-resident type: contributes nothing, and that is a fact
+    /// rather than a gap.
+    NotShared,
+    /// A shared-resident type of a size the analysis could read.
+    Known(u64, &'static str),
+    /// A shared-resident type whose size the analysis could **not** read.
+    ///
+    /// Kept rather than dropped. RC004 is a capacity gate against a hard
+    /// architectural limit, so a size it cannot read is a kernel it has not
+    /// checked — and reporting that as clean is the one outcome a gate must
+    /// never produce (docs/SAFETY.md).
+    Unresolved(&'static str),
+}
+
+/// The value of a const generic argument, following an unevaluated const to
+/// its own body.
+///
+/// `SharedArray<f32, 16384>` arrives as `TyConstKind::Value` and
+/// `eval_target_usize` reads it directly. `SharedArray<f32, TILE>` arrives as
+/// `Unevaluated(ConstDef, _)` — an anonymous const body wrapping the path —
+/// and `eval_target_usize` refuses it outright:
+///
+/// ```text
+/// Const `UnevaluatedConst { def: …::STAGE::{constant#0}, args: [] }`
+/// cannot be encoded as u64
+/// ```
+///
+/// That body is an ordinary item with no generic arguments of its own, so it
+/// evaluates through the instance machinery. Without this, every named size
+/// was silently invisible to RC004 — and a tuner that rewrites named consts
+/// per candidate, as launchbound does, takes exactly that path for every
+/// configuration it tries.
+fn const_as_usize(c: &TyConst) -> Option<u64> {
+    if let Ok(len) = c.eval_target_usize() {
+        return Some(len);
+    }
+    let TyConstKind::Unevaluated(def, args) = c.kind() else {
+        return None;
+    };
+    // Arguments of its own mean it still depends on something not yet known;
+    // there is nothing to evaluate against.
+    if !args.0.is_empty() {
+        return None;
+    }
+    let instance = Instance::try_from(CrateItem(def.0)).ok()?;
+    let value = instance
+        .try_const_eval(Ty::usize_ty())
+        .ok()?
+        .read_uint()
+        .ok()?;
+    u64::try_from(value).ok()
 }
 
 /// Device-side shared-memory footprint of a static's type, if it is a
@@ -218,9 +329,9 @@ impl MirVisitor for SharedStaticCollector {
 /// computed as `N * size_of::<T>()` from the generic arguments (a lower
 /// bound: inter-array alignment padding can only add to it, which keeps the
 /// over-limit verdict sound). `Barrier` is a real 8-byte object.
-fn shared_resident_size(ty: Ty) -> Option<(u64, &'static str)> {
+fn shared_resident_size(ty: Ty) -> SharedSize {
     let TyKind::RigidTy(RigidTy::Adt(adt, generic_args)) = ty.kind() else {
-        return None;
+        return SharedSize::NotShared;
     };
     let type_path = adt.name();
     if paths::is_shared_array(&type_path) {
@@ -233,20 +344,25 @@ fn shared_resident_size(ty: Ty) -> Option<(u64, &'static str)> {
                 }
                 // First const parameter is N; the second is ALIGN.
                 GenericArgKind::Const(c) if len.is_none() => {
-                    len = c.eval_target_usize().ok();
+                    len = const_as_usize(c);
                 }
                 _ => {}
             }
         }
-        Some((element_size? * len?, "SharedArray"))
+        match (element_size, len) {
+            (Some(element_size), Some(len)) => {
+                SharedSize::Known(element_size.saturating_mul(len), "SharedArray")
+            }
+            _ => SharedSize::Unresolved("SharedArray"),
+        }
     } else if paths::is_barrier(&type_path) {
         let size = ty
             .layout()
             .ok()
             .map_or(8, |l| l.shape().size.bytes() as u64);
-        Some((size, "Barrier"))
+        SharedSize::Known(size, "Barrier")
     } else {
-        None
+        SharedSize::NotShared
     }
 }
 

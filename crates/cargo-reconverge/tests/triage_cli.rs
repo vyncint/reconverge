@@ -132,7 +132,7 @@ fn the_review_loop_gates_accepts_and_reports() {
     );
     assert!(
         stdout.contains(&format!(
-            "0 deny, 0 confirmed, {warnings} warning finding(s) ({warnings} hidden; rerun with \
+            "0 deny, 0 confirmed, {warnings} warning findings ({warnings} hidden; rerun with \
              --strict to see them); {} suppressed by the baseline",
             gating.len()
         )),
@@ -326,7 +326,7 @@ fn watch_reruns_the_check_when_a_source_file_changes() {
 
     // Run #1 completes — with a real analysis, not a build error — and the
     // loop settles into waiting.
-    t.wait_until(|s| s.contains("run #1") && s.contains("file(s) watched"))
+    t.wait_until(|s| s.contains("run #1") && s.contains("files watched"))
         .expect("first run announced");
     t.wait_until(|s| s.contains("reconverge: ") && s.contains("deny,"))
         .expect("the first run analyzed the samples");

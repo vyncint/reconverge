@@ -9,6 +9,7 @@ use std::fs;
 use std::path::Path;
 
 use reconverge_artifacts::findings::{Confidence, FindingsArtifact};
+use reconverge_artifacts::plural;
 use reconverge_artifacts::unimap::{Uniformity, UnimapArtifact};
 use reconverge_artifacts::witness::{VerdictKind, WitnessArtifact};
 use unicode_normalization::UnicodeNormalization;
@@ -85,9 +86,10 @@ fn summarize_findings(artifact: &FindingsArtifact) -> String {
         }
     }
     format!(
-        "crate {} — {} finding(s): {deny} deny, {confirmed} confirmed, {warning} warning",
+        "crate {} — {} {}: {deny} deny, {confirmed} confirmed, {warning} warning",
         artifact.krate,
-        artifact.findings.len()
+        artifact.findings.len(),
+        plural(artifact.findings.len(), "finding", "findings")
     )
 }
 
@@ -101,8 +103,10 @@ fn summarize_unimap(artifact: &UnimapArtifact) -> String {
         .filter(|v| v.uniformity == Uniformity::Divergent)
         .count();
     format!(
-        "crate {} — {functions} function(s), {values} value(s), {divergent} divergent",
-        artifact.krate
+        "crate {} — {functions} {}, {values} {}, {divergent} divergent",
+        artifact.krate,
+        plural(functions, "function", "functions"),
+        plural(values, "value", "values")
     )
 }
 
@@ -144,14 +148,14 @@ mod tests {
         assert_eq!(findings.schema, "findings.v1");
         assert_eq!(
             findings.summary,
-            "crate sample_kernels — 2 finding(s): 1 deny, 0 confirmed, 1 warning"
+            "crate sample_kernels — 2 findings: 1 deny, 0 confirmed, 1 warning"
         );
 
         let unimap = load(&fixture("unimap/divergent-barrier.json")).unwrap();
         assert_eq!(unimap.schema, "unimap.v1");
         assert_eq!(
             unimap.summary,
-            "crate sample_kernels — 1 function(s), 3 value(s), 2 divergent"
+            "crate sample_kernels — 1 function, 3 values, 2 divergent"
         );
 
         let witness = load(&fixture("witness/rc001-divergent-barrier.json")).unwrap();

@@ -17,6 +17,11 @@
 # conformance has just run.
 set -euo pipefail
 
+# The singular or the plural of a word, chosen by a count — the shell half of
+# `reconverge_artifacts::plural`. These lines land in CI logs and in issues,
+# and "1 finding(s)" reads there exactly as badly as it did in the tool.
+plural() { if [ "$1" = "1" ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK="$ROOT/target/conformance"
 MWORK="$ROOT/target/mutation"
@@ -48,7 +53,7 @@ if [ -n "$FAILING" ]; then
 fi
 EMITTED=$(grep -vc '^#' labels.tsv)
 ANALYZED=$(grep -c 'crates/' Cargo.toml)
-echo "mutation: $EMITTED mutant(s) emitted, $ANALYZED compile, $PRUNED pruned"
+echo "mutation: $EMITTED $(plural "$EMITTED" mutant mutants) emitted, $ANALYZED compile, $PRUNED pruned"
 
 # 4. Run the tool over every compiling mutant.
 set +e

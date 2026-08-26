@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+use reconverge_artifacts::plural;
 use reconverge_artifacts::witness::{LaneState, VerdictKind};
 use reconverge_core::dialect::CallKind;
 use reconverge_core::graph::{Cfg, post_dominators};
@@ -955,8 +956,9 @@ fn build_replay(
             });
             steps.push(ReplayStep {
                 statement: format!(
-                    "{} lane(s) named by the mask never reach the call",
-                    named_absent.count_ones()
+                    "{} {} named by the mask never reach the call",
+                    named_absent.count_ones(),
+                    plural(named_absent.count_ones(), "lane", "lanes")
                 ),
                 span: Some(cause_span),
                 lane_changes: lanes_of(never, lanes)
@@ -970,9 +972,10 @@ fn build_replay(
                 VerdictKind::UndefinedBehavior,
                 format!(
                     "`{site_display}()` executes with active lanes {arrived:#010x} but its \
-                     mask {mask:#010x} names {} lane(s) that never arrive — undefined \
+                     mask {mask:#010x} names {} {} that never arrive — undefined \
                      behavior on hardware, usually a kernel that never finishes",
-                    named_absent.count_ones()
+                    named_absent.count_ones(),
+                    plural(named_absent.count_ones(), "lane", "lanes")
                 ),
             )
         }

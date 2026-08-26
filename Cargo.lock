@@ -115,7 +115,7 @@ checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
 name = "cargo-reconverge"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reconverge-artifacts",
  "reconverge-dialect-oxide",
@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "reconverge-artifacts"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1108,18 +1108,18 @@ dependencies = [
 
 [[package]]
 name = "reconverge-core"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "reconverge-dialect-oxide"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reconverge-core",
 ]
 
 [[package]]
 name = "reconverge-driver"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reconverge-artifacts",
  "reconverge-core",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "reconverge-tui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ratatui",
  "reconverge-artifacts",
@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "reconverge-witness"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reconverge-artifacts",
  "reconverge-core",

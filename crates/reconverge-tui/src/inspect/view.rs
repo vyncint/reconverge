@@ -13,6 +13,7 @@ use reconverge_artifacts::unimap::{Uniformity, Value, ValueSource};
 use super::data::{FunctionData, InspectorData};
 use super::state::InspectorState;
 use crate::view::fit;
+use reconverge_artifacts::plural;
 
 pub struct InspectorView<'a> {
     pub data: &'a InspectorData,
@@ -335,8 +336,10 @@ fn render_finding_bar(frame: &mut Frame<'_>, view: &InspectorView<'_>, area: Rec
         }
         None if view.data.findings.is_empty() => "no findings loaded".to_string(),
         None => format!(
-            "{} finding(s) loaded \u{2014} press n to visit them",
-            view.data.findings.len()
+            "{} {} loaded \u{2014} press n to visit {}",
+            view.data.findings.len(),
+            plural(view.data.findings.len(), "finding", "findings"),
+            plural(view.data.findings.len(), "it", "them")
         ),
     };
     frame.render_widget(

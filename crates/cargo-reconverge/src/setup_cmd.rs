@@ -12,6 +12,7 @@
 //! with the manual commands, so `setup` is a convenience — never a
 //! mystery.
 
+use crate::args::ArgError;
 use std::process::Command;
 
 /// The nightly the driver wraps, in lockstep with upstream cuda-oxide's
@@ -22,10 +23,10 @@ pub const PINNED_TOOLCHAIN: &str = "nightly-2026-04-03";
 pub struct SetupOptions {}
 
 impl SetupOptions {
-    pub fn parse(args: &[String]) -> Result<SetupOptions, String> {
+    pub fn parse(args: &[String]) -> Result<SetupOptions, ArgError> {
         match args.first() {
             None => Ok(SetupOptions {}),
-            Some(other) => Err(format!("unrecognized argument `{other}`")),
+            Some(other) => Err(ArgError::unknown(other)),
         }
     }
 }
