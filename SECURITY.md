@@ -2,9 +2,7 @@
 
 ## Supported versions
 
-reconverge is in pre-release development: there are no tagged releases and
-no published crates yet. Until the first release, the supported version is
-the tip of `main`.
+The latest published version of reconverge is supported. Security fixes are released in a new patch or minor version, since crates.io releases are immutable. Users should upgrade to the latest published version to receive security fixes.
 
 ## Reporting a vulnerability
 
