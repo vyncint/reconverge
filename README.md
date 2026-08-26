@@ -432,13 +432,7 @@ one that does less.
 
 ## Status
 
-Everything on this page is implemented and gate-tested: the five diagnostics
-with their witness promotions, the four terminal views, the GitHub Action,
-the conformance gate, and the mutation corpus behind the published numbers.
-What is left before a first tag is deliberate rather than technical: two
-hardware sessions to calibrate the verdict wording against real silicon (the
-procedures are written up in [`docs/hardware/`](docs/hardware/)), and the
-publishing step itself, which stays a human decision.
+Everything on this page is implemented and gate-tested: the five diagnostics with their witness promotions, the four terminal views, the GitHub Action, the conformance gate, and the mutation corpus behind the published numbers. reconverge is released and published on crates.io. Two hardware sessions are still planned to calibrate verdict wording against real silicon, but they are no longer a release blocker.
 
 Next on the engineering side: `RC006`/`RC007`, the coalescing and
 bank-conflict lints, with the lanes-to-address-grid visualizer that goes
