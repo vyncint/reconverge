@@ -178,8 +178,9 @@ fn run_analyses(
 
         match emit::write_findings(dir, crate_types, &findings) {
             Ok(path) => eprintln!(
-                "reconverge-driver: {} finding(s) in `{}` -> {}",
+                "reconverge-driver: {} {} in `{}` -> {}",
                 findings.len(),
+                reconverge_artifacts::plural(findings.len(), "finding", "findings"),
                 rustc_public::local_crate().name,
                 path.display()
             ),

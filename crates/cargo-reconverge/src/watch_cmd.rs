@@ -23,7 +23,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::{fs, thread};
 
+use crate::args::ArgError;
 use crate::check::{self, CheckOptions};
+use reconverge_artifacts::plural;
 
 /// How often the watch set is restatted. Cheap: metadata calls only.
 const POLL: Duration = Duration::from_millis(250);
@@ -35,7 +37,7 @@ pub struct WatchOptions {
 }
 
 impl WatchOptions {
-    pub fn parse(args: &[String]) -> Result<WatchOptions, String> {
+    pub fn parse(args: &[String]) -> Result<WatchOptions, ArgError> {
         // `--max-runs` is ours; everything else belongs to `check`, so the
         // two surfaces cannot drift apart on flags.
         let mut passthrough = Vec::new();
@@ -54,7 +56,7 @@ impl WatchOptions {
                     .parse()
                     .map_err(|_| format!("--max-runs {raw} is not a number"))?;
                 if runs == 0 {
-                    return Err("--max-runs must be at least 1".to_string());
+                    return Err(ArgError::from("--max-runs must be at least 1"));
                 }
                 max_runs = Some(runs);
             } else {
@@ -80,8 +82,9 @@ pub fn run(options: &WatchOptions) -> Result<u8, String> {
     loop {
         runs += 1;
         println!(
-            "reconverge watch: run #{runs} \u{2014} {} file(s) watched",
-            watched.len()
+            "reconverge watch: run #{runs} \u{2014} {} {} watched",
+            watched.len(),
+            plural(watched.len(), "file", "files")
         );
         match check::run(&options.check) {
             // A broken build is the normal state mid-edit: report it and

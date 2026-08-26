@@ -12,6 +12,63 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-26
+
+### Fixed
+
+- **RC004 reads a shared-memory length given as a named `const`.** It could
+  only read a literal. `SharedArray<f32, TILE>` arrived as an unevaluated
+  anonymous const body, `eval_target_usize` refused it, and the static was
+  dropped from the budget with no finding and no diagnostic — so a kernel
+  declaring 80 KiB came back **clean**.
+
+  This was a false negative in a capacity gate, which is the worst shape a
+  bug in this tool can take, and the path it hid on is the one that matters
+  most: an autotuner rewrites *named* consts per candidate, so every tunable
+  shared-memory size took it. launchbound pruned an eight-candidate space
+  with an over-cap tile as 8/8 clean at `--cc 7.5`.
+
+  Reported by a user gating a kernel crate (#65), with the cause correctly
+  diagnosed in the report. Both halves are now sample kernels: a named const
+  over the cap, and one under it, because resolving a const only counts if it
+  resolves to the right number.
+
+- **A size RC004 cannot read is reported, not skipped.** A length that
+  depends on a generic parameter is not knowable before the kernel is
+  instantiated. It is now a `deny` finding saying the budget is unchecked,
+  rather than a silent omission that looks exactly like a kernel with no
+  shared memory. Fires on none of the sixteen sample kernels.
+
+- **A bad flag value answers in one line.** `--cc 80` printed the right
+  message — `` `80` is not a compute capability; expected e.g. `8.6` `` — and
+  then forty-four lines of usage text after it. A caller reading the tail of
+  stderr, which is where a failing tool usually puts its reason, got the
+  exit-code legend instead; launchbound reported that legend as the cause of
+  the failure, once per candidate. Usage now accompanies an *unrecognised
+  argument*, where the reference is the answer, and not a recognised argument
+  with an unusable value, where the message already is.
+
+### Changed
+
+- **Counts agree with their nouns.** `1 finding(s)`, `4 file(s) watched`,
+  `1 function(s), 3 value(s)` — on the last line of every run, in the TUI
+  headers, in the driver's progress line and in the conformance scripts, which
+  is to say in every CI log anyone pastes into an issue. They now read
+  `1 warning finding (1 hidden; rerun with --strict to see it)`, verb and
+  pronoun included.
+
+- **`--baseline`'s help says what `--baseline` does.** It read as though a
+  missing file were always an empty baseline. Only the *default* is; a path
+  named explicitly must exist, so a typo cannot pass for a clean run. The
+  behaviour is unchanged and was already tested — the documentation was
+  wrong, and the error now explains the asymmetry rather than stating it.
+
+### Corpus
+
+- 387 warning-confidence findings, 8 RC001/RC002 chains complete, mutation
+  precision 1.0 — unchanged.
+- Found in the wild this cycle: one (#65, RC004 named consts).
+
 ## [0.3.0] — 2026-08-22
 
 ### Added
@@ -514,6 +571,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.4.0]: https://github.com/vyncint/reconverge/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vyncint/reconverge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vyncint/reconverge/releases/tag/v0.2.0
 [0.1.12]: https://github.com/vyncint/reconverge/releases/tag/v0.1.12

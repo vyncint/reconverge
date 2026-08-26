@@ -38,6 +38,47 @@ pub fn rc003_ok_not_a_kernel(data: &mut [f32]) {
 
 // ---------------------------------------------------------------- RC004
 
+/// True positive: 65536 bytes, with the length given as a **named const**.
+///
+/// The same footprint as `rc004_over_budget`, spelled the way a tunable
+/// kernel spells it. Until this was fixed the const arrived as an
+/// unevaluated anonymous body, `eval_target_usize` refused it, and the
+/// static vanished from the budget with no finding and no diagnostic — so
+/// this kernel came back clean. An autotuner that rewrites named consts per
+/// candidate takes this path for every configuration it tries.
+pub const OVER_TILE: usize = 16384;
+
+#[kernel]
+pub fn rc004_named_const_over_budget(mut out: DisjointSlice<f32>) {
+    static mut STAGE: SharedArray<f32, OVER_TILE> = SharedArray::UNINIT;
+    let i = thread::index_1d();
+    unsafe {
+        STAGE[0] = 0.0;
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = unsafe { STAGE[0] };
+    }
+}
+
+/// True negative: 4096 bytes through the same named-const path.
+///
+/// The pair matters more than either half. Resolving the const only counts
+/// if it resolves to the *right* number: a fix that reported every named
+/// size as over-budget would satisfy the test above on its own.
+pub const SMALL_TILE: usize = 1024;
+
+#[kernel]
+pub fn rc004_ok_named_const_under(mut out: DisjointSlice<f32>) {
+    static mut SMALL: SharedArray<f32, SMALL_TILE> = SharedArray::UNINIT;
+    let i = thread::index_1d();
+    unsafe {
+        SMALL[0] = 0.0;
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = unsafe { SMALL[0] };
+    }
+}
+
 /// True positive: 65536 bytes of static shared memory.
 #[kernel]
 pub fn rc004_over_budget(mut out: DisjointSlice<f32>) {

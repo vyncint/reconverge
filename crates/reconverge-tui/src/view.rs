@@ -176,7 +176,7 @@ mod tests {
             artifacts: vec![LoadedArtifact {
                 name: "a.json".into(),
                 schema: "findings.v1".into(),
-                summary: "crate k — 0 finding(s): 0 deny, 0 confirmed, 0 warning".into(),
+                summary: "crate k — 0 findings: 0 deny, 0 confirmed, 0 warning".into(),
             }],
             errors: vec!["b.json: not JSON: oops".into()],
             ascii: false,

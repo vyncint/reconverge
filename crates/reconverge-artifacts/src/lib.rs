@@ -16,6 +16,21 @@ pub mod findings;
 pub mod unimap;
 pub mod witness;
 
+/// The singular or the plural of a word, chosen by a count.
+///
+/// Here, rather than in each front-end, because the same counts are printed
+/// by the CLI summary, the TUI headers and the driver's own progress line,
+/// and they should agree. Every one of them used to say `finding(s)` — on the
+/// last line of every run, and in whatever a CI log pasted into an issue.
+///
+/// Both forms are taken rather than an `s` appended: it keeps the irregular
+/// cases honest, and it lets a caller put the verb in too, which is the
+/// difference between `1 day is short` and `1 day(s) are short`.
+#[must_use]
+pub fn plural<'a, N: PartialEq + From<u8>>(n: N, one: &'a str, many: &'a str) -> &'a str {
+    if n == N::from(1) { one } else { many }
+}
+
 #[cfg(test)]
 pub(crate) mod tests_support {
     use std::fs;

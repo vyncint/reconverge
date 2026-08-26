@@ -15,6 +15,11 @@
 # device side, which is the analysis surface anyway. See conformance/README.md.
 set -euo pipefail
 
+# The singular or the plural of a word, chosen by a count — the shell half of
+# `reconverge_artifacts::plural`. These lines land in CI logs and in issues,
+# and "1 finding(s)" reads there exactly as badly as it did in the tool.
+plural() { if [ "$1" = "1" ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK="$ROOT/target/conformance"
 CORPUS="$WORK/corpus"
@@ -124,5 +129,5 @@ CHAINS=$(printf '%s\n' "$JSON" | jq -r '
   [.findings[] | select(.code == "RC001" or .code == "RC002")] | length' | paste -sd+ - | bc)
 
 echo "conformance: PASS — gating findings match the baseline exactly"
-echo "conformance: $WARNINGS warning-confidence finding(s) (informational)"
-echo "conformance: $CHAINS RC001/RC002 chain(s) complete (source-terminated provenance)"
+echo "conformance: $WARNINGS warning-confidence $(plural "$WARNINGS" finding findings) (informational)"
+echo "conformance: $CHAINS RC001/RC002 $(plural "$CHAINS" chain chains) complete (source-terminated provenance)"

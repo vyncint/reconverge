@@ -1,6 +1,6 @@
 size: 120x40  cursor: hidden
 ┌ reconverge triage ───────────────────────────────────────────────────────────────────────────────────────────────────┐
-│2 finding(s) — 1 suppressed — baseline: minimal.json                                                                  │
+│2 findings — 1 suppressed — baseline: minimal.json                                                                    │
 │                                                                                                                      │
 │>[s] deny      RC003 bad_mut_slice            kernel `bad_mut_slice` takes `&mut [f32]` as a parameter                │
 │ [ ] warning   RC005 scale                    kernel `scale` uses `index_1d()` without a launch contract              │

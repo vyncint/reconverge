@@ -16,6 +16,7 @@ use std::process::Command;
 
 use reconverge_artifacts::findings::FindingsArtifact;
 
+use crate::args::ArgError;
 use crate::review::{DEFAULT_BASELINE, Review};
 use crate::{render, sarif};
 
@@ -37,7 +38,7 @@ pub enum MessageFormat {
 }
 
 impl CheckOptions {
-    pub fn parse(args: &[String]) -> Result<CheckOptions, String> {
+    pub fn parse(args: &[String]) -> Result<CheckOptions, ArgError> {
         let mut options = CheckOptions {
             strict: false,
             cc: None,
@@ -70,16 +71,16 @@ impl CheckOptions {
                         "text" => MessageFormat::Text,
                         "json" => MessageFormat::Json,
                         other => {
-                            return Err(format!(
+                            return Err(ArgError::Value(format!(
                                 "unknown message format `{other}` (expected `text` or `json`)"
-                            ));
+                            )));
                         }
                     };
                 }
                 "--sarif" => options.sarif_path = Some(PathBuf::from(value("--sarif")?)),
                 "--baseline" => options.baseline = Some(PathBuf::from(value("--baseline")?)),
                 "--show-suppressed" => options.show_suppressed = true,
-                other => return Err(format!("unrecognized argument `{other}`")),
+                other => return Err(ArgError::unknown(other)),
             }
         }
         Ok(options)

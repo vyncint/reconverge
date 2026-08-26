@@ -104,6 +104,21 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
     // The at-limit kernel must NOT be flagged.
     assert!(!stdout.contains("rc004_ok_at_limit"), "stdout:\n{stdout}");
 
+    // A length given as a named const is read, and read correctly. Before
+    // this was fixed the static vanished from the budget with no finding and
+    // no diagnostic, so the over-budget kernel below came back clean — and a
+    // tuner rewriting named consts per candidate hit that path every time.
+    assert!(
+        stdout.contains("kernel `rc004_named_const_over_budget` declares 65536 bytes"),
+        "a named-const length must reach RC004:\n{stdout}"
+    );
+    // ...and the under-budget one through the same path must not be flagged,
+    // or "resolved" would only mean "reported".
+    assert!(
+        !stdout.contains("rc004_ok_named_const_under"),
+        "a named const under the cap is not a finding:\n{stdout}"
+    );
+
     // --- strict text mode: warnings appear, exit still 1.
     let output = check(&project, &["--strict"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -150,6 +165,7 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         ("RC003", "rc003_mut_slice"),
         ("RC004", "rc004_over_budget"),
         ("RC004", "rc004_barrier_pushes_over"),
+        ("RC004", "rc004_named_const_over_budget"),
         ("RC005", "rc001_divergent_barrier"),
         ("RC005", "rc001_divergent_call"),
         ("RC005", "rc001_ok_block_uniform"),
@@ -161,6 +177,8 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         ("RC005", "rc004_over_budget"),
         ("RC005", "rc004_barrier_pushes_over"),
         ("RC005", "rc004_ok_at_limit"),
+        ("RC005", "rc004_named_const_over_budget"),
+        ("RC005", "rc004_ok_named_const_under"),
         ("RC005", "rc005_mismatch"),
         ("RC005", "rc005_missing_contract"),
     ]
@@ -237,7 +255,7 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
     // inlining turned into concrete paths.
     assert_eq!(witness_count, 4, "one witness per confirmed finding");
 
-    // --- SARIF: the full registry of rules, twenty results.
+    // --- SARIF: the full registry of rules, one result per finding.
     let sarif: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&sarif_path).unwrap()).unwrap();
     assert_eq!(sarif["version"], "2.1.0");
@@ -249,7 +267,64 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         .map(|r| r["id"].as_str().unwrap())
         .collect();
     assert_eq!(rule_ids, ["RC001", "RC002", "RC003", "RC004", "RC005"]);
-    assert_eq!(run["results"].as_array().unwrap().len(), 20);
+    assert_eq!(run["results"].as_array().unwrap().len(), expected.len());
+}
+
+/// A bad flag *value* answers in one line; an unrecognised *argument* gets
+/// the reference.
+///
+/// The distinction is what a calling tool depends on. launchbound shells out
+/// to `check` and, on a tool error, reports the tail of stderr — a reasonable
+/// default, since a failing tool usually fails last. When every argument
+/// error printed the whole usage text, that tail was the exit-code legend,
+/// and the reason (`80` is not a compute capability) was forty-four lines
+/// above it, out of view. It reported the legend as the cause. Eleven times,
+/// once per candidate.
+#[test]
+fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
+    let bad_value = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+        .args(["reconverge", "check", "--cc", "80"])
+        .output()
+        .unwrap();
+    assert_eq!(bad_value.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&bad_value.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "error: `80` is not a compute capability; expected e.g. `8.6`",
+        "a value error is the whole of stderr:\n{stderr}"
+    );
+
+    // The property the caller actually relies on: the last line is the reason.
+    assert!(
+        stderr
+            .trim()
+            .lines()
+            .next_back()
+            .unwrap()
+            .starts_with("error:"),
+        "the tail of stderr must be the diagnosis:\n{stderr}"
+    );
+
+    for argv in [
+        ["reconverge", "check", "--bogus"],
+        ["reconverge", "frobnicate", ""],
+    ] {
+        let argv: Vec<&str> = argv.iter().copied().filter(|a| !a.is_empty()).collect();
+        let unknown = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+            .args(&argv)
+            .output()
+            .unwrap();
+        assert_eq!(unknown.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&unknown.stderr);
+        assert!(
+            stderr.starts_with("error: unrecognized argument"),
+            "{argv:?} stderr:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("cargo reconverge check [OPTIONS]"),
+            "an unrecognised argument still gets the reference: {argv:?}\n{stderr}"
+        );
+    }
 }
 
 #[test]

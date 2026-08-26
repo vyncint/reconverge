@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::args::ArgError;
 use crate::check;
 
 pub struct InspectOptions {
@@ -14,12 +15,12 @@ pub struct InspectOptions {
 }
 
 impl InspectOptions {
-    pub fn parse(args: &[String]) -> Result<InspectOptions, String> {
+    pub fn parse(args: &[String]) -> Result<InspectOptions, ArgError> {
         let mut options = InspectOptions { ascii: false };
         for arg in args {
             match arg.as_str() {
                 "--ascii" => options.ascii = true,
-                other => return Err(format!("unrecognized argument `{other}`")),
+                other => return Err(ArgError::unknown(other)),
             }
         }
         Ok(options)

@@ -11,5 +11,5 @@ keywords = ["gpu", "simt", "interpreter", "debugging"]
 categories = ["development-tools::debugging"]
 
 [dependencies]
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.3.0" }
-reconverge-core = { path = "../reconverge-core", version = "0.3.0" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.4.0" }
+reconverge-core = { path = "../reconverge-core", version = "0.4.0" }

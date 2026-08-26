@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use reconverge_artifacts::baseline::{BaselineArtifact, Entry};
 use reconverge_artifacts::findings::{Confidence, Finding, FindingsArtifact};
+use reconverge_artifacts::plural;
 
 /// Default baseline filename, looked up at the workspace root.
 pub const DEFAULT_BASELINE: &str = "reconverge-baseline.json";
@@ -79,6 +80,19 @@ impl Review {
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && !explicit => {
                 BaselineArtifact::empty()
+            }
+            // A named path that is not there is an error, while the default
+            // being absent is not. The asymmetry is deliberate and worth
+            // stating: treating a typo'd `--baseline` as empty would suppress
+            // nothing while looking exactly like a run that suppressed
+            // everything asked of it.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!(
+                    "cannot read {}: {e}\n       a path given to --baseline must exist; only \
+                     the default is treated as empty when absent, so a mistyped one cannot \
+                     pass for a clean run",
+                    path.display()
+                ));
             }
             Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
         };
@@ -149,15 +163,20 @@ impl Counts {
     #[must_use]
     pub fn summary_line(&self, strict: bool) -> String {
         use std::fmt::Write as _;
+        let total = self.deny + self.confirmed + self.warning;
         let mut line = format!(
-            "reconverge: {} deny, {} confirmed, {} warning finding(s)",
-            self.deny, self.confirmed, self.warning
+            "reconverge: {} deny, {} confirmed, {} warning {}",
+            self.deny,
+            self.confirmed,
+            self.warning,
+            plural(total, "finding", "findings")
         );
         if self.warning > 0 && !strict {
             let _ = write!(
                 line,
-                " ({} hidden; rerun with --strict to see them)",
-                self.warning
+                " ({} hidden; rerun with --strict to see {})",
+                self.warning,
+                plural(self.warning, "it", "them")
             );
         }
         if self.suppressed > 0 {
@@ -260,7 +279,7 @@ mod tests {
             suppressed: 3,
         };
         let line = counts.summary_line(false);
-        assert!(line.contains("2 warning finding(s) (2 hidden"), "{line}");
+        assert!(line.contains("2 warning findings (2 hidden"), "{line}");
         assert!(line.contains("3 suppressed by the baseline"), "{line}");
         // Even in strict mode the suppressed count stays visible: a
         // suppression is never invisible, only unobtrusive.
@@ -306,6 +325,14 @@ mod tests {
         assert!(Review::load(Vec::new(), missing.clone(), false).is_ok());
         let err = Review::load(Vec::new(), missing, true).unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
+        // The asymmetry is deliberate, so the message has to say so: a reader
+        // who has just been told the default is fine when absent will
+        // otherwise read this as a contradiction rather than as a guard
+        // against a typo passing for a clean run.
+        assert!(
+            err.contains("only the default is treated as empty when absent"),
+            "the error explains why the two cases differ: {err}"
+        );
     }
 
     #[test]

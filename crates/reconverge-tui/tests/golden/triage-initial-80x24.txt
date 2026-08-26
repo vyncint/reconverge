@@ -1,6 +1,6 @@
 size: 80x24  cursor: hidden
 ┌ reconverge triage ───────────────────────────────────────────────────────────┐
-│2 finding(s) — 0 suppressed — baseline: reconverge-baseline.json              │
+│2 findings — 0 suppressed — baseline: reconverge-baseline.json                │
 │                                                                              │
 │>[ ] deny      RC003 bad_mut_slice            kernel `bad_mut_slice` takes `&…│
 │ [ ] warning   RC005 scale                    kernel `scale` uses `index_1d()…│

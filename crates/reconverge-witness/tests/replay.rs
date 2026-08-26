@@ -175,7 +175,7 @@ fn rc002_mask_mismatch_replays_concretely() {
         op_step.warp_op,
         Some(("ballot_sync".to_string(), 0xffff_ffff, EVEN_LANES as u32))
     );
-    assert!(replay.verdict_message.contains("16 lane(s)"));
+    assert!(replay.verdict_message.contains("16 lanes"));
 }
 
 /// Mask refinement: a constant mask naming exactly the arriving lanes is

@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::args::ArgError;
 use crate::check;
 use crate::inspect::locate_tui;
 
@@ -19,7 +20,7 @@ pub struct WitnessOptions {
 }
 
 impl WitnessOptions {
-    pub fn parse(args: &[String]) -> Result<WitnessOptions, String> {
+    pub fn parse(args: &[String]) -> Result<WitnessOptions, ArgError> {
         let mut options = WitnessOptions {
             ascii: false,
             kernel: None,
@@ -39,7 +40,7 @@ impl WitnessOptions {
             match flag {
                 "--ascii" => options.ascii = true,
                 "--kernel" => options.kernel = Some(value("--kernel")?),
-                other => return Err(format!("unrecognized argument `{other}`")),
+                other => return Err(ArgError::unknown(other)),
             }
         }
         Ok(options)

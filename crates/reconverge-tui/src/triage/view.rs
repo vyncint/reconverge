@@ -12,6 +12,7 @@ use reconverge_artifacts::findings::Confidence;
 use super::data::TriageData;
 use super::state::{Status, TriageState};
 use crate::view::fit;
+use reconverge_artifacts::plural;
 
 pub struct TriageView<'a> {
     pub data: &'a TriageData,
@@ -125,8 +126,9 @@ fn render_header(frame: &mut Frame<'_>, view: &TriageView<'_>, area: Rect) {
     };
     let text = fit(
         &format!(
-            "{} finding(s) — {suppressed} suppressed — baseline: {baseline_name}{dirty}",
+            "{} {} — {suppressed} suppressed — baseline: {baseline_name}{dirty}",
             view.data.items.len(),
+            plural(view.data.items.len(), "finding", "findings"),
         ),
         area.width as usize,
         view.ascii,
