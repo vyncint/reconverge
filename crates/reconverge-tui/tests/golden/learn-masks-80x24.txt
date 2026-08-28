@@ -12,8 +12,6 @@ size: 80x24  cursor: hidden
 │                                                                              │
 │    if i.get() % 2 == 0 {                                                     │
 │        vote = warp::ballot_sync(0xffff_ffff, true); // <- RC002              │
-│    }                                                                         │
-│                                                                              │
 │                                                                              │
 │replay — step 3/3  [==>]                                                      │
 │          0        8        16       24                                       │
@@ -21,5 +19,7 @@ size: 80x24  cursor: hidden
 │mask      ######## ######## ######## ########  0xffffffff                     │
 │active    #.#.#.#. #.#.#.#. #.#.#.#. #.#.#.#.  0x55555555                     │
 │_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)         │
-│verdict: undefined behavior — ballot_sync names all 32 lanes in its mask, but…│
+│verdict: undefined behavior — ballot_sync names all 32 lanes in its mask, but │
+│only the 16 even lanes are active at the call — the named-but-absent lanes    │
+│make the collective undefined; on hardware this usually never completes       │
 └ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────┘

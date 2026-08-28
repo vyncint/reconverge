@@ -21,6 +21,21 @@ the corpus; found-in-the-wild is the true north.
 
 ### Fixed
 
+- **`learn` wraps the verdict instead of truncating it.** The replay panel
+  built the verdict as a single line and fit it to the terminal width, so
+  the message — the line the lesson exists to deliver — was cut off with an
+  ellipsis at every width; the mask lesson needed a ~226-column terminal to
+  finish its own sentence, and no key revealed the rest. It now reuses the
+  witness debugger's wrapping (`Paragraph::wrap` with the shared
+  `wrapped_rows`), sizing the panel to the rows the verdict actually takes,
+  exactly as `witness` already renders the same `witness.v1` message. The
+  lanes strip — the one multi-span line, which cannot go through `fit` — is
+  clipped to the width as it is built, so it too stays a single row and the
+  verdict is never pushed off the panel at a narrow width. The four learn
+  replay goldens are re-blessed accordingly, plus a narrow-width golden, and
+  a guard test asserts no golden's final content line ends in an ellipsis.
+  Reported in #69.
+
 - **`check` and `inspect` show the source snippet from any directory in the
   workspace.** Artifact spans are workspace-root-relative, but the reader
   resolved them against the process cwd, so running from a member

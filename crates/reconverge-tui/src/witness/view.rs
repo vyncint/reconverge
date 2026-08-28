@@ -558,8 +558,9 @@ fn verdict_height(view: &WitnessView<'_>, witness: &WitnessArtifact, width: u16)
 
 /// Lines `text` wraps to at `width`, counted the way the paragraph wraps it:
 /// greedily, breaking between words, and never splitting a word that fits on
-/// a line of its own.
-fn wrapped_rows(text: &str, width: u16) -> u16 {
+/// a line of its own. Shared with learn mode, which sizes its replay panel
+/// to the wrapped verdict the same way.
+pub(crate) fn wrapped_rows(text: &str, width: u16) -> u16 {
     let width = usize::from(width.max(1));
     let mut rows = 1usize;
     let mut used = 0usize;

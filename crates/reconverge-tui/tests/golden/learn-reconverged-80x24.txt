@@ -12,8 +12,6 @@ size: 80x24  cursor: hidden
 │        // per-lane work, no barrier in here                                  │
 │    }                                                                         │
 │    // the paths rejoin at the branch's post-dominator                        │
-│    thread::sync_threads(); // every lane arrives                             │
-│                                                                              │
 │                                                                              │
 │replay — step 5/5  [====>]                                                    │
 │          0        8        16       24                                       │
@@ -21,5 +19,7 @@ size: 80x24  cursor: hidden
 │          o active   W waiting   . exited                                     │
 │                                                                              │
 │the barrier is satisfied and releases every thread; the kernel returns        │
-│verdict: completed — all 32 lanes reconverged at the branch's post-dominator …│
+│verdict: completed — all 32 lanes reconverged at the branch's post-dominator  │
+│before the barrier, so all 32 arrived and the barrier released — this is the  │
+│shape that cannot hang                                                        │
 └ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────┘
