@@ -203,6 +203,37 @@ fn matrix_leg(size: (u16, u16)) {
     );
 }
 
+/// Guard against the truncation returning: the verdict is the last content
+/// row of every replay golden and must be wrapped in full, never cut off
+/// with the fit ellipsis. Checked over the checked-in goldens so it holds
+/// without spawning a PTY.
+#[test]
+fn no_learn_golden_truncates_its_final_line() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    let mut checked = 0;
+    for entry in fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if !name.starts_with("learn-") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        // Inner content rows carry the side border (`│`, or `|` in ASCII
+        // mode); the last one is the final content line.
+        let final_line = text
+            .lines()
+            .rfind(|l| l.starts_with('│') || l.starts_with('|'))
+            .unwrap_or_else(|| panic!("{name}: no content rows"));
+        let content = final_line.trim_end_matches(['│', '|']).trim_end();
+        assert!(
+            !content.ends_with('…') && !content.ends_with("..."),
+            "{name}: final content line is truncated: {final_line:?}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no learn goldens found to check");
+}
+
 #[test]
 fn matrix_80x24() {
     matrix_leg((80, 24));

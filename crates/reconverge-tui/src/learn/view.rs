@@ -11,7 +11,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use reconverge_artifacts::witness::{VerdictKind, WitnessArtifact};
 
 use super::lessons::{Lesson, Page};
@@ -36,9 +36,6 @@ const ASCII_BORDER: border::Set = border::Set {
     horizontal_top: "-",
     horizontal_bottom: "-",
 };
-
-/// Rows the replay panel occupies (leading blank included).
-const REPLAY_ROWS: u16 = 8;
 
 /// Keys shown along the bottom border, per screen.
 const LIST_KEYS: &str = " j/k select  Enter open  q quit ";
@@ -111,20 +108,38 @@ fn render_list(frame: &mut Frame<'_>, view: &LearnView<'_>, area: Rect) {
 fn render_page(frame: &mut Frame<'_>, view: &LearnView<'_>, area: Rect) {
     let lesson = &view.lessons[view.state.lesson];
     let page = &lesson.pages[view.state.page];
-    let replay_rows = if page.witness.is_some() {
-        REPLAY_ROWS.min(area.height)
-    } else {
-        0
-    };
+    // Build the replay panel first, then size it to the rows its lines
+    // actually take: every strip is one row, and only the verdict wraps, so
+    // this gives a long verdict the room to be read in full instead of being
+    // cut at the panel's edge — capped at the box so it cannot spill over.
+    let replay = page.witness.as_ref().map(|witness| {
+        let lines = replay_lines(view, witness, area.width as usize, area.height as usize);
+        let rows = lines
+            .iter()
+            .map(|line| wview::wrapped_rows(&line_text(line), area.width))
+            .sum::<u16>()
+            .min(area.height);
+        (lines, rows)
+    });
+    let replay_rows = replay.as_ref().map_or(0, |(_, rows)| *rows);
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(replay_rows)])
         .split(area);
 
     render_text(frame, view, lesson, page, rows[0]);
-    if let Some(witness) = &page.witness {
-        render_replay(frame, view, witness, rows[1]);
+    if let Some((lines, _)) = replay {
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[1]);
     }
+}
+
+/// The plain text of a rendered line, for measuring how many rows it wraps to.
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
 }
 
 fn render_text(
@@ -168,16 +183,16 @@ fn render_text(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// The compact replay panel: the debugger's lane strip, mask panel, and
-/// event line, driven by the page's embedded witness at the lesson's
-/// current position.
-fn render_replay(
-    frame: &mut Frame<'_>,
+/// The compact replay panel's lines: the debugger's lane strip, mask panel,
+/// and event line, driven by the page's embedded witness at the lesson's
+/// current position. `height` bounds the verdict, the one line allowed to
+/// wrap to several rows; every other line is a single-row strip.
+fn replay_lines(
     view: &LearnView<'_>,
     witness: &WitnessArtifact,
-    area: Rect,
-) {
-    let width = area.width as usize;
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
     let position = view.state.position;
     let total = witness.steps.len();
     let executed = position.checked_sub(1).and_then(|i| witness.steps.get(i));
@@ -277,6 +292,10 @@ fn render_replay(
                 .add_modifier(Modifier::BOLD),
             _ => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         });
+        // The verdict is the line the lesson exists to deliver, so it wraps
+        // rather than truncates: fit only asciifies and caps it to the panel
+        // (a whole-box budget), and `Wrap` lays it across as many rows as it
+        // needs — the rows the panel was sized for above.
         lines.push(Line::from(Span::styled(
             fit(
                 &format!(
@@ -284,7 +303,7 @@ fn render_replay(
                     wview::verdict_word(witness.verdict.kind),
                     witness.verdict.message
                 ),
-                width,
+                width.saturating_mul(height.max(1)),
                 view.ascii,
             ),
             verdict_style,
@@ -318,7 +337,7 @@ fn render_replay(
             view.accent(Style::default().fg(Color::Yellow)),
         )));
     }
-    frame.render_widget(Paragraph::new(lines), area);
+    lines
 }
 
 #[cfg(test)]
