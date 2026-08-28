@@ -70,6 +70,8 @@ check options:
                               named here must exist
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
+  Note: --strict and --show-suppressed affect text output only;
+        JSON is always the unfiltered record
 
 Exit codes: 0 = no findings at deny/confirmed confidence, 1 = findings,
 2 = tool error. Findings accepted by the baseline never gate the exit
