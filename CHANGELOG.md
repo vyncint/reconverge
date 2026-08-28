@@ -21,6 +21,15 @@ the corpus; found-in-the-wild is the true north.
 
 ### Fixed
 
+- **`check` and `inspect` show the source snippet from any directory in the
+  workspace.** Artifact spans are workspace-root-relative, but the reader
+  resolved them against the process cwd, so running from a member
+  subdirectory read the wrong path: `check` silently dropped every caret
+  snippet, and `inspect`'s source pane went blank. Both now anchor to the
+  workspace root `cargo metadata` already reports — `render` reads spans
+  under it, and `inspect` launches the TUI with its cwd set there, so the
+  TUI stays a pure reader. Reported in #67.
+
 - **`--cc` reports an out-of-range or negative capability against the table,
   not as "non-numeric".** Every parse failure — overflow, negative, empty,
   non-digit — shared one "non-numeric major part" message, so `--cc 999.999`,
