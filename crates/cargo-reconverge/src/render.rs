@@ -1,6 +1,7 @@
 //! rustc-style text rendering of findings.
 
 use std::fs;
+use std::path::Path;
 
 use reconverge_artifacts::findings::{Confidence, Finding};
 
@@ -8,18 +9,21 @@ use crate::review::{Item, Review};
 
 /// Print findings in rustc-like text form to stdout, honoring `--strict`
 /// and `--show-suppressed`, then a summary line.
-pub fn render_text(review: &Review, strict: bool, show_suppressed: bool) {
+///
+/// `workspace_root` anchors the source snippets: spans are stored relative
+/// to it, so it — not the process cwd — is where their files are read from.
+pub fn render_text(review: &Review, workspace_root: &Path, strict: bool, show_suppressed: bool) {
     for item in review.items() {
         if !item.shown(strict, show_suppressed) {
             continue;
         }
-        print!("{}", render_item(&item));
+        print!("{}", render_item(&item, workspace_root));
         println!();
     }
     println!("{}", review.counts().summary_line(strict));
 }
 
-fn render_item(item: &Item<'_>) -> String {
+fn render_item(item: &Item<'_>, workspace_root: &Path) -> String {
     let finding = item.finding;
     let mut out = String::new();
     let severity = match (item.suppression, finding.confidence) {
@@ -37,7 +41,7 @@ fn render_item(item: &Item<'_>) -> String {
         "  --> {}:{}:{}\n",
         finding.span.file, finding.span.line_start, finding.span.column_start
     ));
-    if let Some(snippet) = source_snippet(finding) {
+    if let Some(snippet) = source_snippet(finding, workspace_root) {
         out.push_str(&snippet);
     }
     if let Some(entry) = item.suppression {
@@ -60,12 +64,16 @@ fn render_item(item: &Item<'_>) -> String {
 
 /// The offending source line with a caret run, single-line spans only.
 /// Rendering is best-effort: an unreadable file just omits the snippet.
-fn source_snippet(finding: &Finding) -> Option<String> {
+///
+/// The span's file is workspace-root-relative, so it is resolved against
+/// `workspace_root` rather than the process cwd — otherwise running from a
+/// member directory reads the wrong path and silently drops every snippet.
+fn source_snippet(finding: &Finding, workspace_root: &Path) -> Option<String> {
     let span = &finding.span;
     if span.line_start != span.line_end {
         return None;
     }
-    let text = fs::read_to_string(&span.file).ok()?;
+    let text = fs::read_to_string(workspace_root.join(&span.file)).ok()?;
     let line = text.lines().nth(span.line_start - 1)?;
     let gutter = span.line_start.to_string();
     let pad = " ".repeat(gutter.len());
@@ -114,17 +122,23 @@ mod tests {
             reason: "reviewed: the host half owns this buffer".into(),
         };
 
-        let open = render_item(&Item {
-            finding: &finding,
-            suppression: None,
-        });
+        let open = render_item(
+            &Item {
+                finding: &finding,
+                suppression: None,
+            },
+            Path::new("."),
+        );
         assert!(open.starts_with("error[RC003]: "), "{open}");
         assert!(!open.contains("= baseline:"));
 
-        let suppressed = render_item(&Item {
-            finding: &finding,
-            suppression: Some(&entry),
-        });
+        let suppressed = render_item(
+            &Item {
+                finding: &finding,
+                suppression: Some(&entry),
+            },
+            Path::new("."),
+        );
         assert!(
             suppressed.starts_with("suppressed[RC003]: "),
             "{suppressed}"

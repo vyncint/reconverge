@@ -29,9 +29,21 @@ the corpus; found-in-the-wild is the true north.
   witness debugger's wrapping (`Paragraph::wrap` with the shared
   `wrapped_rows`), sizing the panel to the rows the verdict actually takes,
   exactly as `witness` already renders the same `witness.v1` message. The
-  four learn replay goldens are re-blessed accordingly, and a guard test
-  asserts no golden's final content line ends in an ellipsis. Reported in
-  #69.
+  lanes strip — the one multi-span line, which cannot go through `fit` — is
+  clipped to the width as it is built, so it too stays a single row and the
+  verdict is never pushed off the panel at a narrow width. The four learn
+  replay goldens are re-blessed accordingly, plus a narrow-width golden, and
+  a guard test asserts no golden's final content line ends in an ellipsis.
+  Reported in #69.
+
+- **`check` and `inspect` show the source snippet from any directory in the
+  workspace.** Artifact spans are workspace-root-relative, but the reader
+  resolved them against the process cwd, so running from a member
+  subdirectory read the wrong path: `check` silently dropped every caret
+  snippet, and `inspect`'s source pane went blank. Both now anchor to the
+  workspace root `cargo metadata` already reports — `render` reads spans
+  under it, and `inspect` launches the TUI with its cwd set there, so the
+  TUI stays a pure reader. Reported in #67.
 
 - **`--cc` reports an out-of-range or negative capability against the table,
   not as "non-numeric".** Every parse failure — overflow, negative, empty,
