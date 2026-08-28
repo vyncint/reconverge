@@ -373,6 +373,51 @@ fn inspect_reports_missing_artifacts_and_bad_flags() {
     );
 }
 
+/// Source spans are workspace-root-relative, so the caret snippet must
+/// render no matter which directory inside the workspace `check` runs from.
+/// Before the fix the reader resolved spans against the process cwd, so a
+/// run from a member subdirectory read the wrong path and silently dropped
+/// every snippet — the existing CLI tests never caught it because they all
+/// run from the crate root.
+#[test]
+fn source_snippet_survives_a_subdirectory_cwd() {
+    let project = prepared_copy(
+        "m1-subdir-snippet",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lint-samples"),
+    );
+    let driver = ensure_driver();
+
+    let run = |dir: &Path| -> String {
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+            .args(["reconverge", "check", "--cc", "8.6"])
+            .current_dir(dir)
+            .env("RECONVERGE_DRIVER", &driver)
+            .output()
+            .expect("failed to spawn cargo-reconverge");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    // The caret lines are the part that depends on reading the source file.
+    let carets = |stdout: &str| -> Vec<String> {
+        stdout
+            .lines()
+            .filter(|l| l.trim_start().starts_with('|') && l.contains('^'))
+            .map(|l| l.trim().to_string())
+            .collect()
+    };
+
+    let from_root = carets(&run(&project));
+    assert!(
+        !from_root.is_empty(),
+        "the root run must render at least one source snippet"
+    );
+    let from_subdir = carets(&run(&project.join("src")));
+    assert_eq!(
+        from_subdir, from_root,
+        "the source snippet must survive a subdirectory cwd, not be dropped"
+    );
+}
+
 /// The driver sample crate carries the canonical hang; the witness
 /// confirms it, so the sample gates the exit code by default — while its
 /// clean `scale` kernel contributes nothing.

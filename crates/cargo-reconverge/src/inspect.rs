@@ -30,7 +30,7 @@ impl InspectOptions {
 /// Locate this project's reconverge artifacts and launch the Inspector on
 /// them. Returns the TUI's exit code.
 pub fn run(options: &InspectOptions) -> Result<u8, String> {
-    let artifacts = discover_artifacts()?;
+    let (workspace_root, artifacts) = discover_artifacts()?;
     let tui = locate_tui()?;
 
     let mut command = Command::new(tui);
@@ -39,15 +39,19 @@ pub fn run(options: &InspectOptions) -> Result<u8, String> {
         command.arg("--ascii");
     }
     command.args(&artifacts);
+    // Spans in the artifacts are workspace-root-relative, and the TUI reads
+    // them against its own cwd; run it from the workspace root so `inspect`
+    // shows source no matter which member directory it was launched from.
+    command.current_dir(&workspace_root);
     let status = command
         .status()
         .map_err(|e| format!("cannot launch reconverge-tui: {e}"))?;
     Ok(u8::try_from(status.code().unwrap_or(2)).unwrap_or(2))
 }
 
-/// The unimap and findings artifacts of the current workspace members,
-/// from `<target>/reconverge/`.
-fn discover_artifacts() -> Result<Vec<PathBuf>, String> {
+/// The workspace root and the unimap and findings artifacts of the current
+/// workspace members, from `<target>/reconverge/`.
+fn discover_artifacts() -> Result<(PathBuf, Vec<PathBuf>), String> {
     let metadata = check::cargo_metadata()?;
     let dir = metadata.target_directory.join("reconverge");
     let mut artifacts = Vec::new();
@@ -83,7 +87,7 @@ fn discover_artifacts() -> Result<Vec<PathBuf>, String> {
             dir.display()
         ));
     }
-    Ok(artifacts)
+    Ok((metadata.workspace_root, artifacts))
 }
 
 /// The TUI binary: `$RECONVERGE_TUI`, or the sibling of this executable.

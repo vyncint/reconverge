@@ -142,9 +142,12 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     )?;
 
     match options.message_format {
-        MessageFormat::Text => {
-            render::render_text(&review, options.strict, options.show_suppressed)
-        }
+        MessageFormat::Text => render::render_text(
+            &review,
+            &metadata.workspace_root,
+            options.strict,
+            options.show_suppressed,
+        ),
         MessageFormat::Json => {
             // The analysis record, unfiltered: the baseline is a review
             // decision, and machine consumers get the raw findings plus the
