@@ -328,6 +328,24 @@ fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
 }
 
 #[test]
+fn help_explains_that_text_filters_do_not_change_json() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+        .args(["reconverge", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--strict and --show-suppressed affect text output only"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("JSON is always the unfiltered record"),
+        "stdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn inspect_reports_missing_artifacts_and_bad_flags() {
     // Bad flag: tool error.
     let output = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))

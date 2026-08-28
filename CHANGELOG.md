@@ -12,6 +12,13 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Changed
+
+- **JSON mode's help names the filters it ignores.** `--strict` and
+  `--show-suppressed` affect text output only; JSON remains the unfiltered
+  analysis record. The behavior was deliberate, but the help text previously
+  implied that both flags changed JSON output.
+
 ## [0.4.0] — 2026-08-26
 
 ### Fixed
