@@ -234,6 +234,41 @@ fn no_learn_golden_truncates_its_final_line() {
     assert!(checked > 0, "no learn goldens found to check");
 }
 
+/// Regression (#69 review): at inner widths 41–44 the multi-span lanes strip
+/// used to wrap and shove the verdict's tail off the panel — with no ellipsis
+/// to show anything was missing, worse than the truncation this replaced.
+/// Drive the masks verdict at 46×24, inside that band, and require it in
+/// full; the 80/120 goldens all sit outside the band and cannot catch it.
+#[test]
+fn masks_verdict_is_whole_at_a_narrow_width() {
+    let mut t = spawn((46, 24), &[], &[], "narrow-verdict");
+    t.wait_until(|s| s.contains("reconverge learn"))
+        .expect("list");
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
+    t.send(Key::Char('j')).expect("send Key::Char('j')");
+    t.wait_until(|s| s.contains("> 3."))
+        .expect("masks selected");
+    t.send(Key::Enter).expect("send Key::Enter");
+    // At 46 columns the "page N/M" header itself truncates, so key off the
+    // replay step line instead — it renders in full at this width.
+    t.wait_until(|s| s.contains("lesson 3/4"))
+        .expect("masks opened");
+    t.send(Key::Char('n')).expect("send Key::Char('n')");
+    t.wait_until(|s| s.contains("step 0/3"))
+        .expect("interactive page");
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
+    // Its final word fell off the panel before the fix.
+    let frame = t
+        .wait_frame(|s| s.contains("verdict") && s.contains("completes"))
+        .expect("the masks verdict must appear in full at 46 columns");
+    assert_golden(
+        "learn-masks-46x24.txt",
+        &frame.to_string(),
+        "narrow verdict",
+    );
+    quit(t, "narrow verdict");
+}
+
 #[test]
 fn matrix_80x24() {
     matrix_leg((80, 24));

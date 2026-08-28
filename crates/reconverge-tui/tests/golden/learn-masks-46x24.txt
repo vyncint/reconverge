@@ -1,0 +1,25 @@
+size: 46x24  cursor: hidden
+┌ reconverge learn ──────────────────────────┐
+│lesson 3/4 — masks — who joins a warp colle…│
+│                                            │
+│Watch the mismatch. The ballot below sits u…│
+│the full mask `0xffffffff`: the mask promis…│
+│delivers 16.                                │
+│                                            │
+│Step with l to the collective: the mask str…│
+│active strip shows who actually arrived, an…│
+│are computed for you. Sixteen promised vote…│
+│                                            │
+│replay — step 3/3  [==>]                    │
+│          0        8        16       24     │
+│lanes     oWoWoWoW oWoWoWoW oWoWoWoW oWoWoW…│
+│mask      ######## ######## ######## ######…│
+│active    #.#.#.#. #.#.#.#. #.#.#.#. #.#.#.…│
+│_5 = cuda_device::warp::ballot_sync(const 0…│
+│verdict: undefined behavior — ballot_sync   │
+│names all 32 lanes in its mask, but only the│
+│16 even lanes are active at the call — the  │
+│named-but-absent lanes make the collective  │
+│undefined; on hardware this usually never   │
+│completes                                   │
+└ n/p page  h/l step  d/v jumps  Esc list  q…┘

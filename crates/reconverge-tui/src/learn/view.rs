@@ -13,6 +13,8 @@ use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use reconverge_artifacts::witness::{VerdictKind, WitnessArtifact};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::lessons::{Lesson, Page};
 use super::state::{LearnState, Screen};
@@ -142,6 +144,42 @@ fn line_text(line: &Line<'_>) -> String {
         .collect()
 }
 
+/// `fit`, but for a strip built from many styled spans — the lanes row, where
+/// each lane carries its own state colour and so cannot be one `&str` through
+/// `fit`. Clips the spans to `width` display columns, grapheme-safe, with the
+/// same ellipsis `fit` uses, keeping each span's style. This keeps the strip a
+/// single row under `Wrap` (so it never pushes the verdict off the panel) and
+/// column-aligned with the fitted strips above it.
+fn fit_spans(spans: Vec<Span<'static>>, width: usize, ascii: bool) -> Vec<Span<'static>> {
+    let total: usize = spans.iter().map(|span| span.content.as_ref().width()).sum();
+    if total <= width {
+        return spans;
+    }
+    let ellipsis = if ascii { "..." } else { "\u{2026}" };
+    let budget = width.saturating_sub(ellipsis.width());
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    for span in spans {
+        if used >= budget {
+            break;
+        }
+        let mut kept = String::new();
+        for grapheme in span.content.as_ref().graphemes(true) {
+            let w = grapheme.width();
+            if used + w > budget {
+                break;
+            }
+            kept.push_str(grapheme);
+            used += w;
+        }
+        if !kept.is_empty() {
+            out.push(Span::styled(kept, span.style));
+        }
+    }
+    out.push(Span::raw(ellipsis));
+    out
+}
+
 fn render_text(
     frame: &mut Frame<'_>,
     view: &LearnView<'_>,
@@ -229,7 +267,7 @@ fn replay_lines(
             view.accent(wview::lane_state_style(*state)),
         ));
     }
-    lines.push(Line::from(spans));
+    lines.push(Line::from(fit_spans(spans, width, view.ascii)));
 
     // Mask and active strips at a collective step; otherwise the legend.
     match executed.and_then(|s| s.warp_op.as_ref()) {
