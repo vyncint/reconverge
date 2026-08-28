@@ -87,17 +87,22 @@ impl CheckOptions {
     }
 }
 
-/// Validate a `--cc` value against the dialect table, returning it verbatim.
+/// Validate a `--cc` value against the dialect table, returning it in the
+/// canonical `major.minor` form.
+///
+/// The normalized spelling — not the raw one — is what travels on into
+/// `RECONVERGE_CC` and the `cc-marker`, so two spellings of one capability
+/// (`8.6` and `+8.6`) do not look like a change and force a needless re-lint.
 fn reconverge_dialect_oxide_cc_check(raw: &str) -> Result<String, String> {
     use reconverge_dialect_oxide::cc;
-    let parsed = cc::parse_compute_capability(raw)?;
-    if cc::shared_memory_limits(parsed).is_none() {
+    let (major, minor) = cc::parse_compute_capability(raw)?;
+    if cc::shared_memory_limits((major, minor)).is_none() {
         return Err(format!(
             "--cc {raw} is not in the compute-capability table; known: {}",
             cc::known_compute_capabilities().join(", ")
         ));
     }
-    Ok(raw.to_string())
+    Ok(format!("{major}.{minor}"))
 }
 
 pub fn run(options: &CheckOptions) -> Result<Review, String> {
@@ -459,6 +464,24 @@ mod tests {
     fn dropping_fingerprints_before_any_build_is_fine() {
         let build_dir = empty_dir("fingerprints-missing").join("never-built");
         drop_build_fingerprints(&build_dir); // must not panic or error
+    }
+
+    #[test]
+    fn cc_check_normalizes_and_classifies() {
+        // Both spellings of one capability normalize to the same marker
+        // value, so `+8.6` after `8.6` is not seen as a change to re-lint.
+        assert_eq!(reconverge_dialect_oxide_cc_check("8.6").unwrap(), "8.6");
+        assert_eq!(reconverge_dialect_oxide_cc_check("+8.6").unwrap(), "8.6");
+        // Out-of-range input reaches the table message, not "non-numeric".
+        let err = reconverge_dialect_oxide_cc_check("999.999").unwrap_err();
+        assert!(err.contains("not in the compute-capability table"), "{err}");
+        assert!(!err.contains("non-numeric"), "{err}");
+        // A valid but unlisted capability still reports against the table.
+        assert!(
+            reconverge_dialect_oxide_cc_check("9.9")
+                .unwrap_err()
+                .contains("not in the compute-capability table")
+        );
     }
 
     #[test]
