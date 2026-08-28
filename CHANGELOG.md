@@ -19,6 +19,20 @@ the corpus; found-in-the-wild is the true north.
   analysis record. The behavior was deliberate, but the help text previously
   implied that both flags changed JSON output.
 
+### Fixed
+
+- **`--cc` reports an out-of-range or negative capability against the table,
+  not as "non-numeric".** Every parse failure — overflow, negative, empty,
+  non-digit — shared one "non-numeric major part" message, so `--cc 999.999`,
+  `--cc 256.0`, and `--cc -1.0` each told the user their digits were not
+  digits and hid the known-capabilities list that would have helped. Numeric
+  but impossible values now fall through to the "not in the compute-capability
+  table; known: …" message; only genuinely non-numeric input is named as
+  such. In the same path, the validated value now travels on in its
+  normalized `major.minor` form, so two spellings of one capability (`8.6`
+  and `+8.6`) no longer look like a change that drops the build fingerprints
+  and forces a full re-lint. Reported in #73.
+
 ## [0.4.0] — 2026-08-26
 
 ### Fixed
