@@ -461,24 +461,35 @@ fn const_scalar(operand: &Operand) -> Option<u128> {
     ) {
         return None;
     }
-    // Known limitation: a *named* const operand (`ballot_sync(FULL_MASK,
-    // …)`) reaches analysis MIR as `ConstantKind::Unevaluated` and stays
-    // unknown, while the same mask spelled as a literal arrives as
-    // `Allocated` and evaluates. Re-tested at the pin (#32), against the
-    // driver rather than from memory:
+    // A *named* const operand (`ballot_sync(FULL_MASK, …)`) reaches analysis
+    // MIR as `ConstantKind::Unevaluated` and is deliberately left unknown,
+    // while the same mask spelled as a literal arrives as `Allocated` and
+    // evaluates. This is a precision choice, not just a missing reader —
+    // re-tested at the pin twice:
     //
-    //   - `ConstDef` exposes no `body`, `has_body`, `eval`, `const_value`
-    //     or `ty` — there is nothing to read the initializer from.
-    //   - `MirConst` exposes exactly one evaluation entry point,
-    //     `eval_target_usize()`. It is not a door for a mask: on a `u32`
-    //     const it ICEs the compiler with "expected int of size 8, but got
-    //     size 4". The assertion fires *after* the value is resolved, so
-    //     the value is reachable in principle — what is missing is an API
-    //     that returns it at its own width.
+    //   - #32 (the direct API surface, against the driver): correct about
+    //     what `ConstDef` and `MirConst` expose *directly* — `MirConst`'s one
+    //     evaluation entry point, `eval_target_usize()`, forces `usize` and
+    //     ICEs on a `u32` mask ("expected int of size 8, but got size 4").
+    //     It predates the `Instance` route below, so it read the boundary as
+    //     a missing API rather than a value reachable another way.
+    //   - #80 (2026-08-28, against the driver): the value *is* reachable
+    //     another way. RC004's route reads it — resolve the const item to an
+    //     `Instance` (`Instance::try_from(CrateItem(uneval.def.0))`) and
+    //     `try_const_eval` at the mask's own width. The named-const mask then
+    //     evaluates, and an RC002 under divergence witness-promotes it exactly
+    //     like the literal.
     //
-    // So the boundary is the exposed surface, not the compiler's ability.
-    // Downstream this is why an RC002 with a named-const mask reports the
-    // mask as not evaluable and is never witness-promoted.
+    // But evaluating it is not a pure win, which is why it stays off. The
+    // witness compares a mask against the lanes it finds present; a *partial*
+    // named-const mask is how upstream writes the correct guarded partial-warp
+    // idiom, and promoting it flags that idiom. On the mutation corpus the
+    // route lifts wrapcol recall (23→37 of 42) — and wrapbar incidentally
+    // (47→48 of 67) — but drops precision below 1.0: `m_wrapcol_lanemask_scan_03`,
+    // kernel `warp_compact_rank`, gains three unattributable gating RC002s.
+    // Precision at default confidence is a release invariant, so the mask is
+    // left unevaluable on purpose — the boundary is the guarded-partial-warp
+    // idiom, not the compiler's ability.
     if let rustc_public::ty::ConstantKind::Allocated(allocation) = constant.const_.kind()
         && allocation.provenance.ptrs.is_empty()
         && !allocation.bytes.is_empty()
