@@ -21,4 +21,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # Same version as reconverge-tui (see its Cargo.toml for the pinning
 # policy): the end-to-end tests drive the TUI subcommands through a PTY.
-termlens = { version = "0.6.1", default-features = false }
+termlens = { version = "0.7.0", default-features = false }

@@ -29,4 +29,4 @@ unicode-width = "0.2"
 # deliberately via Cargo.lock, never `*` — the golden frames make any
 # behavior change visible. default-features off: no insta, goldens are
 # plain files.
-termlens = { version = "0.6.1", default-features = false }
+termlens = { version = "0.7.0", default-features = false }
