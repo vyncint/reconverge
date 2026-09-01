@@ -37,8 +37,9 @@ on:
       version:
         description: "Version to verify (default: the newest published)"
         required: false
-  schedule:
-    - cron: "43 7 * * 1" # Mondays
+  # Scheduled runs are disabled. Uncomment the block below to restore them.
+  # schedule:
+  #   - cron: "43 7 * * 1" # Mondays
 
 permissions:
   contents: read

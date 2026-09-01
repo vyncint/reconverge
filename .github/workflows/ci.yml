@@ -4,11 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
-  # workflow_dispatch and schedule exist for the macOS job (see below); the
-  # Linux gates simply run again on those events.
+  # workflow_dispatch exists for the macOS job (see below); the Linux gates
+  # simply run again on that event. The weekly schedule that also drove it is
+  # disabled below, so dispatch is now the only way to reach the macOS job.
   workflow_dispatch:
-  schedule:
-    - cron: "17 6 * * 1"
+  # Scheduled runs are disabled. Uncomment the block below to restore them.
+  # schedule:
+  #   - cron: "17 6 * * 1"
 
 permissions:
   contents: read
