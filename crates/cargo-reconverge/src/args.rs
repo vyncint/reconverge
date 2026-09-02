@@ -61,6 +61,50 @@ impl From<&str> for ArgError {
     }
 }
 
+/// Split `--flag` / `--flag=value`. Every command goes through here so
+/// the two loop shapes cannot drift: a `split_once('=')` parser used to
+/// ignore an inline value on booleans, while a plain `for arg in args`
+/// treated `--ascii=false` as unrecognized. Both now share the same two
+/// rules — a boolean rejects `=value`, a value-taking flag refuses a
+/// following token that looks like a flag.
+pub(crate) fn split_flag(arg: &str) -> (&str, Option<&str>) {
+    match arg.split_once('=') {
+        Some((flag, value)) => (flag, Some(value)),
+        None => (arg, None),
+    }
+}
+
+/// A boolean flag: presence is enough. An inline `=value` is an error
+/// even when the value would have been ignored — `--strict=false` used
+/// to enable strict, which is the opposite of what it reads as.
+pub(crate) fn reject_value(name: &str, inline: Option<&str>) -> Result<(), ArgError> {
+    match inline {
+        Some(_) => Err(ArgError::Value(format!("`{name}` takes no value"))),
+        None => Ok(()),
+    }
+}
+
+/// A required value. An inline `--flag=value` is accepted as-is, so a
+/// path that itself starts with `--` is written `--sarif=--weird`. A
+/// separate token that starts with `--` is not a value — that is how
+/// `--sarif --strict` used to write a report to a file named `--strict`.
+pub(crate) fn require_value(
+    name: &str,
+    inline: Option<&str>,
+    next: impl FnOnce() -> Option<String>,
+) -> Result<String, ArgError> {
+    if let Some(value) = inline {
+        return Ok(value.to_string());
+    }
+    match next() {
+        Some(token) if token.starts_with("--") => Err(ArgError::Value(format!(
+            "`{name}` requires a value (got the flag `{token}`)"
+        ))),
+        Some(value) => Ok(value),
+        None => Err(ArgError::Value(format!("`{name}` requires a value"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +125,46 @@ mod tests {
         assert_eq!(
             ArgError::from("bad value".to_string()).to_string(),
             "bad value"
+        );
+    }
+
+    #[test]
+    fn a_boolean_rejects_an_inline_value() {
+        assert_eq!(
+            reject_value("--strict", Some("false"))
+                .unwrap_err()
+                .to_string(),
+            "`--strict` takes no value"
+        );
+        assert!(
+            !reject_value("--strict", Some("false"))
+                .unwrap_err()
+                .wants_usage()
+        );
+        assert!(reject_value("--strict", None).is_ok());
+    }
+
+    #[test]
+    fn a_value_flag_refuses_a_following_flag() {
+        let err = require_value("--sarif", None, || Some("--strict".into())).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--sarif` requires a value (got the flag `--strict`)"
+        );
+        assert!(!err.wants_usage());
+        assert_eq!(
+            require_value("--sarif", None, || None)
+                .unwrap_err()
+                .to_string(),
+            "`--sarif` requires a value"
+        );
+        // Inline is the escape hatch: a path beginning with `--` is fine.
+        assert_eq!(
+            require_value("--sarif", Some("--weird"), || Some(
+                "--must-not-consume".into()
+            ))
+            .unwrap(),
+            "--weird"
         );
     }
 }

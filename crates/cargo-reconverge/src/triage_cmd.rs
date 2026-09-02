@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::check;
 use crate::inspect::locate_tui;
 use crate::review::DEFAULT_BASELINE;
@@ -25,19 +25,19 @@ impl TriageOptions {
         };
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
-            let (flag, inline_value) = match arg.split_once('=') {
-                Some((flag, value)) => (flag, Some(value.to_string())),
-                None => (arg.as_str(), None),
-            };
-            let mut value = |name: &str| {
-                inline_value
-                    .clone()
-                    .or_else(|| iter.next().cloned())
-                    .ok_or_else(|| format!("`{name}` requires a value"))
-            };
+            let (flag, inline_value) = args::split_flag(arg);
             match flag {
-                "--ascii" => options.ascii = true,
-                "--baseline" => options.baseline = Some(PathBuf::from(value("--baseline")?)),
+                "--ascii" => {
+                    args::reject_value("--ascii", inline_value)?;
+                    options.ascii = true;
+                }
+                "--baseline" => {
+                    options.baseline = Some(PathBuf::from(args::require_value(
+                        "--baseline",
+                        inline_value,
+                        || iter.next().cloned(),
+                    )?));
+                }
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -101,4 +101,44 @@ fn discover_findings(metadata: &check::Metadata) -> Result<Vec<PathBuf>, String>
         ));
     }
     Ok(artifacts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn baseline_does_not_swallow_the_next_flag() {
+        let err = TriageOptions::parse(&argv(&["--baseline", "--ascii"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--baseline` requires a value (got the flag `--ascii`)"
+        );
+        assert!(!err.wants_usage());
+    }
+
+    #[test]
+    fn ascii_rejects_an_inline_value() {
+        let err = TriageOptions::parse(&argv(&["--ascii=false"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--ascii` takes no value");
+        assert!(!err.wants_usage());
+    }
+
+    #[test]
+    fn documented_flags_still_parse() {
+        let options = TriageOptions::parse(&argv(&["--ascii", "--baseline", "bl.json"])).unwrap();
+        assert!(options.ascii);
+        assert_eq!(
+            options.baseline.as_deref(),
+            Some(std::path::Path::new("bl.json"))
+        );
+    }
 }

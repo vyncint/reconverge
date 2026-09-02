@@ -16,7 +16,7 @@ use std::process::Command;
 
 use reconverge_artifacts::findings::FindingsArtifact;
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::review::{DEFAULT_BASELINE, Review};
 use crate::{render, sarif};
 
@@ -49,18 +49,14 @@ impl CheckOptions {
         };
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
-            let (flag, inline_value) = match arg.split_once('=') {
-                Some((flag, value)) => (flag, Some(value.to_string())),
-                None => (arg.as_str(), None),
-            };
-            let mut value = |name: &str| {
-                inline_value
-                    .clone()
-                    .or_else(|| iter.next().cloned())
-                    .ok_or_else(|| format!("`{name}` requires a value"))
-            };
+            let (flag, inline_value) = args::split_flag(arg);
+            let mut value =
+                |name: &str| args::require_value(name, inline_value, || iter.next().cloned());
             match flag {
-                "--strict" => options.strict = true,
+                "--strict" => {
+                    args::reject_value("--strict", inline_value)?;
+                    options.strict = true;
+                }
                 "--cc" => {
                     let raw = value("--cc")?;
                     let parsed = reconverge_dialect_oxide_cc_check(&raw)?;
@@ -79,7 +75,10 @@ impl CheckOptions {
                 }
                 "--sarif" => options.sarif_path = Some(PathBuf::from(value("--sarif")?)),
                 "--baseline" => options.baseline = Some(PathBuf::from(value("--baseline")?)),
-                "--show-suppressed" => options.show_suppressed = true,
+                "--show-suppressed" => {
+                    args::reject_value("--show-suppressed", inline_value)?;
+                    options.show_suppressed = true;
+                }
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -503,5 +502,89 @@ mod tests {
         let collected = collect_artifacts(&dir, &["helper_macros".to_string()]).unwrap();
         assert_eq!(collected.len(), 1, "proc-macro artifact must be collected");
         assert_eq!(collected[0].krate, "helper_macros");
+    }
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_value_flag_does_not_swallow_the_next_flag() {
+        // `--sarif --strict` used to write a report to a file named
+        // `--strict` and drop strict mode. Same shape for `--baseline`.
+        let err = CheckOptions::parse(&argv(&["--sarif", "--strict"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--sarif` requires a value (got the flag `--strict`)"
+        );
+        assert!(!err.wants_usage(), "a missing value is not unknown: {err}");
+
+        let err = CheckOptions::parse(&argv(&["--baseline", "--sarif", "out.json"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--baseline` requires a value (got the flag `--sarif`)"
+        );
+        assert!(!err.wants_usage());
+
+        let err = CheckOptions::parse(&argv(&["--sarif"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--sarif` requires a value");
+    }
+
+    #[test]
+    fn a_boolean_rejects_an_inline_value() {
+        let err = CheckOptions::parse(&argv(&["--strict=false"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--strict` takes no value");
+        assert!(!err.wants_usage());
+
+        let err = CheckOptions::parse(&argv(&["--show-suppressed=no"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--show-suppressed` takes no value");
+        assert!(!err.wants_usage());
+
+        let err = CheckOptions::parse(&argv(&["--show-suppressed="]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--show-suppressed` takes no value");
+    }
+
+    #[test]
+    fn an_inline_value_may_look_like_a_flag() {
+        // `--sarif=--weird` is the documented escape hatch for a path
+        // that begins with `--`. The next-token guard must not apply.
+        let options = CheckOptions::parse(&argv(&["--sarif=--weird", "--strict"])).unwrap();
+        assert_eq!(options.sarif_path.as_deref(), Some(Path::new("--weird")));
+        assert!(options.strict);
+    }
+
+    #[test]
+    fn documented_flags_still_parse() {
+        let options = CheckOptions::parse(&argv(&[
+            "--strict",
+            "--show-suppressed",
+            "--sarif",
+            "out.sarif",
+            "--baseline",
+            "bl.json",
+            "--message-format",
+            "json",
+            "--cc",
+            "8.6",
+        ]))
+        .unwrap();
+        assert!(options.strict);
+        assert!(options.show_suppressed);
+        assert_eq!(options.sarif_path.as_deref(), Some(Path::new("out.sarif")));
+        assert_eq!(options.baseline.as_deref(), Some(Path::new("bl.json")));
+        assert!(matches!(options.message_format, MessageFormat::Json));
+        assert_eq!(options.cc.as_deref(), Some("8.6"));
     }
 }

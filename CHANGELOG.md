@@ -21,6 +21,18 @@ the corpus; found-in-the-wild is the true north.
 
 ### Fixed
 
+- **Value-taking flags no longer swallow the next flag.** `--sarif --strict`
+  used to write the SARIF report to a file named `--strict` and drop
+  strict mode; `--baseline --sarif` then tried to read that leftover as a
+  baseline. A following token that starts with `--` is now rejected as a
+  missing value (`--sarif` requires a value (got the flag `--strict`)),
+  with no usage block. Boolean flags reject an inline value the same way
+  (`--strict=false` and `--show-suppressed=no` used to enable the flag).
+  `--sarif=--weird` still writes to a path named `--weird`. The same two
+  rules apply to `watch --max-runs`, `witness --kernel`, `triage
+  --baseline`, and the `--ascii` flags on `inspect` / `learn` / `witness`
+  / `triage`. Reported in #98.
+
 - **`learn` wraps the verdict instead of truncating it.** The replay panel
   built the verdict as a single line and fit it to the terminal width, so
   the message — the line the lesson exists to deliver — was cut off with an

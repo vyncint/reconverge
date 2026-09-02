@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::check;
 use crate::inspect::locate_tui;
 
@@ -27,19 +27,17 @@ impl WitnessOptions {
         };
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
-            let (flag, inline_value) = match arg.split_once('=') {
-                Some((flag, value)) => (flag, Some(value.to_string())),
-                None => (arg.as_str(), None),
-            };
-            let mut value = |name: &str| {
-                inline_value
-                    .clone()
-                    .or_else(|| iter.next().cloned())
-                    .ok_or_else(|| format!("`{name}` requires a value"))
-            };
+            let (flag, inline_value) = args::split_flag(arg);
             match flag {
-                "--ascii" => options.ascii = true,
-                "--kernel" => options.kernel = Some(value("--kernel")?),
+                "--ascii" => {
+                    args::reject_value("--ascii", inline_value)?;
+                    options.ascii = true;
+                }
+                "--kernel" => {
+                    options.kernel = Some(args::require_value("--kernel", inline_value, || {
+                        iter.next().cloned()
+                    })?);
+                }
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -105,4 +103,43 @@ fn discover_witnesses(kernel: Option<&str>) -> Result<Vec<PathBuf>, String> {
         ));
     }
     Ok(artifacts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn kernel_does_not_swallow_the_next_flag() {
+        // `witness --kernel --ascii` used to treat `--ascii` as the kernel
+        // name, then advise dropping `--kernel --ascii` to see every witness.
+        let err = WitnessOptions::parse(&argv(&["--kernel", "--ascii"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--kernel` requires a value (got the flag `--ascii`)"
+        );
+        assert!(!err.wants_usage());
+    }
+
+    #[test]
+    fn ascii_rejects_an_inline_value() {
+        let err = WitnessOptions::parse(&argv(&["--ascii=false"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--ascii` takes no value");
+        assert!(!err.wants_usage());
+    }
+
+    #[test]
+    fn documented_flags_still_parse() {
+        let options = WitnessOptions::parse(&argv(&["--ascii", "--kernel", "reduce"])).unwrap();
+        assert!(options.ascii);
+        assert_eq!(options.kernel.as_deref(), Some("reduce"));
+    }
 }

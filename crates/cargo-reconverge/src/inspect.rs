@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::check;
 
 pub struct InspectOptions {
@@ -18,8 +18,12 @@ impl InspectOptions {
     pub fn parse(args: &[String]) -> Result<InspectOptions, ArgError> {
         let mut options = InspectOptions { ascii: false };
         for arg in args {
-            match arg.as_str() {
-                "--ascii" => options.ascii = true,
+            let (flag, inline_value) = args::split_flag(arg);
+            match flag {
+                "--ascii" => {
+                    args::reject_value("--ascii", inline_value)?;
+                    options.ascii = true;
+                }
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -114,4 +118,27 @@ pub(crate) fn locate_tui() -> Result<PathBuf, String> {
          RECONVERGE_TUI",
         sibling.display()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn ascii_rejects_an_inline_value() {
+        // The other four commands used to accept `--flag=value` and ignore
+        // it; inspect used to call the same input unrecognized. Both now
+        // reject it as a value error, so `--ascii=false` does not enable
+        // `--ascii` and does not print the usage block.
+        let err = InspectOptions::parse(&argv(&["--ascii=false"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--ascii` takes no value");
+        assert!(!err.wants_usage());
+        assert!(InspectOptions::parse(&argv(&["--ascii"])).unwrap().ascii);
+    }
 }

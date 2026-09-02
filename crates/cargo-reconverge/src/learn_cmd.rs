@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::inspect::locate_tui;
 
 pub struct LearnOptions {
@@ -18,8 +18,12 @@ impl LearnOptions {
     pub fn parse(args: &[String]) -> Result<LearnOptions, ArgError> {
         let mut options = LearnOptions { ascii: false };
         for arg in args {
-            match arg.as_str() {
-                "--ascii" => options.ascii = true,
+            let (flag, inline_value) = args::split_flag(arg);
+            match flag {
+                "--ascii" => {
+                    args::reject_value("--ascii", inline_value)?;
+                    options.ascii = true;
+                }
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -39,4 +43,23 @@ pub fn run(options: &LearnOptions) -> Result<u8, String> {
         .status()
         .map_err(|e| format!("cannot launch reconverge-tui: {e}"))?;
     Ok(u8::try_from(status.code().unwrap_or(2)).unwrap_or(2))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn ascii_rejects_an_inline_value() {
+        let err = LearnOptions::parse(&argv(&["--ascii=false"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "`--ascii` takes no value");
+        assert!(!err.wants_usage());
+        assert!(LearnOptions::parse(&argv(&["--ascii"])).unwrap().ascii);
+    }
 }
