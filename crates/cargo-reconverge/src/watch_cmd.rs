@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::{fs, thread};
 
-use crate::args::ArgError;
+use crate::args::{self, ArgError};
 use crate::check::{self, CheckOptions};
 use reconverge_artifacts::plural;
 
@@ -44,14 +44,9 @@ impl WatchOptions {
         let mut max_runs = None;
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
-            let (flag, inline_value) = match arg.split_once('=') {
-                Some((flag, value)) => (flag, Some(value.to_string())),
-                None => (arg.as_str(), None),
-            };
+            let (flag, inline_value) = args::split_flag(arg);
             if flag == "--max-runs" {
-                let raw = inline_value
-                    .or_else(|| iter.next().cloned())
-                    .ok_or("`--max-runs` requires a value")?;
+                let raw = args::require_value("--max-runs", inline_value, || iter.next().cloned())?;
                 let runs: usize = raw
                     .parse()
                     .map_err(|_| format!("--max-runs {raw} is not a number"))?;
@@ -231,5 +226,14 @@ mod tests {
         assert!(WatchOptions::parse(&argv(&["--max-runs"])).is_err());
         // Unknown flags are still rejected — by `check`'s own parser.
         assert!(WatchOptions::parse(&argv(&["--bogus"])).is_err());
+
+        let err = WatchOptions::parse(&argv(&["--max-runs", "--strict"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`--max-runs` requires a value (got the flag `--strict`)"
+        );
+        assert!(!err.wants_usage());
     }
 }

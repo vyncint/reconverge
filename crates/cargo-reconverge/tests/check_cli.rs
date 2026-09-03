@@ -325,6 +325,53 @@ fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
             "an unrecognised argument still gets the reference: {argv:?}\n{stderr}"
         );
     }
+
+    // A value-taking flag must not swallow the next flag as its value.
+    // `--sarif --strict` used to write a SARIF report to a file named
+    // `--strict` and silently drop strict mode.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("flag-eats-flag");
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    let eaten = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+        .args(["reconverge", "check", "--sarif", "--strict"])
+        .current_dir(&scratch)
+        .output()
+        .unwrap();
+    assert_eq!(eaten.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&eaten.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "error: `--sarif` requires a value (got the flag `--strict`)",
+        "a swallowed flag is a value error, not usage:\n{stderr}"
+    );
+    assert!(
+        !scratch.join("--strict").exists(),
+        "must not write a report to a file named --strict"
+    );
+
+    let boolean = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+        .args(["reconverge", "check", "--strict=false"])
+        .output()
+        .unwrap();
+    assert_eq!(boolean.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&boolean.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "error: `--strict` takes no value",
+        "a boolean with a value is a value error, not usage:\n{stderr}"
+    );
+
+    let baseline = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
+        .args(["reconverge", "check", "--baseline", "--sarif", "out.json"])
+        .output()
+        .unwrap();
+    assert_eq!(baseline.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&baseline.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "error: `--baseline` requires a value (got the flag `--sarif`)",
+        "a swallowed flag is a value error, not usage:\n{stderr}"
+    );
 }
 
 #[test]
@@ -342,6 +389,10 @@ fn help_explains_that_text_filters_do_not_change_json() {
     assert!(
         stdout.contains("JSON is always the unfiltered record"),
         "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--sarif=--weird"),
+        "help must say how a path beginning with -- is passed:\n{stdout}"
     );
 }
 

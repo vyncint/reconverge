@@ -63,11 +63,14 @@ check options:
   --message-format <FORMAT>   text (default) or json; json prints one
                               findings.v1 document per analyzed crate, one
                               per line
-  --sarif <PATH>              also write a SARIF 2.1.0 report to PATH
+  --sarif <PATH>              also write a SARIF 2.1.0 report to PATH.
+                              A path that begins with `--` is passed with
+                              `=`: `--sarif=--weird`
   --baseline <PATH>           reviewed suppressions to apply. The default,
                               reconverge-baseline.json at the workspace
                               root, is treated as empty when absent; a path
-                              named here must exist
+                              named here must exist. Same `=` form for a
+                              path that begins with `--`
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
   Note: --strict and --show-suppressed affect text output only;
@@ -240,17 +243,43 @@ mod tests {
             run(&argv(&["reconverge", "check", "--message-format", "yaml"])),
             2
         );
+        assert_eq!(
+            run(&argv(&["reconverge", "check", "--sarif", "--strict"])),
+            2
+        );
+        assert_eq!(run(&argv(&["reconverge", "check", "--strict=false"])), 2);
+        assert_eq!(
+            run(&argv(&["reconverge", "check", "--show-suppressed="])),
+            2
+        );
+        assert_eq!(
+            run(&argv(&[
+                "reconverge",
+                "check",
+                "--baseline",
+                "--sarif",
+                "out.json"
+            ])),
+            2
+        );
     }
 
     #[test]
     fn witness_rejects_bad_flags_as_tool_error() {
         assert_eq!(run(&argv(&["reconverge", "witness", "--bogus"])), 2);
         assert_eq!(run(&argv(&["reconverge", "witness", "--kernel"])), 2);
+        assert_eq!(
+            run(&argv(&["reconverge", "witness", "--kernel", "--ascii"])),
+            2
+        );
+        assert_eq!(run(&argv(&["reconverge", "witness", "--ascii=false"])), 2);
     }
 
     #[test]
     fn learn_rejects_bad_flags_as_tool_error() {
         assert_eq!(run(&argv(&["reconverge", "learn", "--bogus"])), 2);
+        assert_eq!(run(&argv(&["reconverge", "learn", "--ascii=false"])), 2);
+        assert_eq!(run(&argv(&["reconverge", "inspect", "--ascii=false"])), 2);
     }
 
     #[test]
