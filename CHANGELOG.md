@@ -21,6 +21,11 @@ the corpus; found-in-the-wild is the true north.
 
 ### Fixed
 
+- **RC005 launch-contract mismatch help spells axis counts once.** A
+  `domain = 2` contract with a 1D index formula no longer says `covers 2 two
+  axes`, and wider contracts now recommend narrowing instead of a nonexistent
+  three-axis index formula. Reported in #100.
+
 - **Value-taking flags no longer swallow the next flag.** `--sarif --strict`
   used to write the SARIF report to a file named `--strict` and drop
   strict mode; `--baseline --sarif` then tried to read that leftover as a
