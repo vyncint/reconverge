@@ -128,6 +128,18 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         stdout.contains("declares `domain = 2` but calls `index_1d()`"),
         "stdout:\n{stdout}"
     );
+    assert!(
+        stdout.contains("use an index formula that covers two axes, or narrow the contract"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("narrow the contract; no recognized index formula covers three axes"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("covers 2 two axes") && !stdout.contains("covers 3 two axes"),
+        "stdout:\n{stdout}"
+    );
 
     // --- JSON mode: exact (code, kernel) inventory.
     let sarif_path = project.join("report.sarif");
@@ -179,6 +191,7 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         ("RC005", "rc004_ok_at_limit"),
         ("RC005", "rc004_named_const_over_budget"),
         ("RC005", "rc004_ok_named_const_under"),
+        ("RC005", "rc005_domain3_index1d"),
         ("RC005", "rc005_mismatch"),
         ("RC005", "rc005_missing_contract"),
     ]
@@ -202,6 +215,14 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
             .clone()
     };
     let rc001 = by("RC001", "rc001_divergent_barrier");
+    assert_eq!(
+        by("RC005", "rc005_mismatch")["help"],
+        "use an index formula that covers two axes, or narrow the contract"
+    );
+    assert_eq!(
+        by("RC005", "rc005_domain3_index1d")["help"],
+        "narrow the contract; no recognized index formula covers three axes"
+    );
     assert_eq!(rc001["confidence"], "confirmed");
     let provenance = rc001["provenance"].as_array().unwrap();
     assert!(
@@ -268,6 +289,28 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         .collect();
     assert_eq!(rule_ids, ["RC001", "RC002", "RC003", "RC004", "RC005"]);
     assert_eq!(run["results"].as_array().unwrap().len(), expected.len());
+    let sarif_messages = run["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|result| result["message"]["text"].as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        sarif_messages
+            .contains("use an index formula that covers two axes, or narrow the contract"),
+        "sarif messages:\n{sarif_messages}"
+    );
+    assert!(
+        sarif_messages
+            .contains("narrow the contract; no recognized index formula covers three axes"),
+        "sarif messages:\n{sarif_messages}"
+    );
+    assert!(
+        !sarif_messages.contains("covers 2 two axes")
+            && !sarif_messages.contains("covers 3 two axes"),
+        "sarif messages:\n{sarif_messages}"
+    );
 }
 
 /// A bad flag *value* answers in one line; an unrecognised *argument* gets

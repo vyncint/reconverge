@@ -415,10 +415,17 @@ fn rc005_launch_contract(kernel: &Kernel, findings: &mut Vec<Finding>) {
                      its runtime shape check and is silently invalid — guarded writes are \
                      skipped with no error"
                 )],
-                help: Some(format!(
-                    "use an index formula that covers {declared} {}, or narrow the contract",
-                    axes(declared)
-                )),
+                help: Some(if declared > 2 {
+                    format!(
+                        "narrow the contract; no recognized index formula covers {}",
+                        axes(declared)
+                    )
+                } else {
+                    format!(
+                        "use an index formula that covers {}, or narrow the contract",
+                        axes(declared)
+                    )
+                }),
                 explain: "RC005".to_string(),
                 provenance: Vec::new(),
             }),
@@ -450,7 +457,11 @@ fn rc005_launch_contract(kernel: &Kernel, findings: &mut Vec<Finding>) {
 }
 
 fn axes(n: u8) -> &'static str {
-    if n == 1 { "one axis" } else { "two axes" }
+    match n {
+        1 => "one axis",
+        2 => "two axes",
+        _ => "three axes",
+    }
 }
 
 /// Collects calls to launch-shape-dependent index-witness functions,

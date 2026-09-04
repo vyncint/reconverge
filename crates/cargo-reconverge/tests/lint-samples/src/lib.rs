@@ -141,6 +141,16 @@ pub fn rc005_mismatch(mut out: DisjointSlice<f32>) {
     }
 }
 
+/// True positive (warning): 3D contract with the 1D-only formula.
+#[kernel]
+#[launch_contract(domain = 3, coordinates = u32, block = (8, 8, 4))]
+pub fn rc005_domain3_index1d(mut out: DisjointSlice<f32>) {
+    let i = thread::index_1d();
+    if let Some(e) = out.get_mut(i) {
+        *e = 3.5;
+    }
+}
+
 /// True positive (warning): shape-dependent formula, no contract at all.
 #[kernel]
 pub fn rc005_missing_contract(mut out: DisjointSlice<f32>) {
