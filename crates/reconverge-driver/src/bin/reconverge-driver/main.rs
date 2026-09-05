@@ -153,8 +153,9 @@ fn run_analyses(
             ));
         }
         eprintln!(
-            "reconverge-driver: detected {} kernel(s) in `{}`",
+            "reconverge-driver: detected {} {} in `{}`",
             kernels.len(),
+            reconverge_artifacts::plural(kernels.len(), "kernel", "kernels"),
             rustc_public::local_crate().name
         );
     }

@@ -21,7 +21,12 @@ hooks:
 ci:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
+    # conformance/extractor is its own workspace, so the lines above stop at
+    # its door; CI gates it separately and so does this.
+    cargo fmt --manifest-path conformance/extractor/Cargo.toml --all --check
+    cargo clippy --manifest-path conformance/extractor/Cargo.toml --locked --all-targets -- -D warnings
     cargo test --workspace
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
     cargo deny check
     ./scripts/check-isolation.sh
+    ./scripts/check-plurals.sh

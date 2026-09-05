@@ -190,15 +190,6 @@ struct Collector<'src> {
     sites: Sites,
 }
 
-fn call_name(expr: &syn::Expr) -> Option<String> {
-    if let syn::Expr::Call(call) = expr
-        && let syn::Expr::Path(path) = call.func.as_ref()
-    {
-        return path.path.segments.last().map(|s| s.ident.to_string());
-    }
-    None
-}
-
 /// Is this statement-expression a call to an execution barrier the dialect
 /// classifies? Asked of the dialect itself (like the collectives), with the
 /// callee's module segment preserved — `grid::sync` is a barrier only under

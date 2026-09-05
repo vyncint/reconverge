@@ -28,6 +28,11 @@ jobs:
           rustup toolchain install
           rustup show
       - run: cargo fmt --all --check
+      # conformance/extractor declares its own `[workspace]`, so every
+      # workspace-scoped gate above stops at its door. It decides what the
+      # published precision table measures, so it is held to the same bar;
+      # a new standalone manifest must be added here too (CONTRIBUTING §7).
+      - run: cargo fmt --manifest-path conformance/extractor/Cargo.toml --all --check
 
   clippy:
     runs-on: ubuntu-latest
@@ -38,6 +43,10 @@ jobs:
           rustup toolchain install
           rustup show
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The second workspace: see the note in the fmt job.
+      - run: >-
+          cargo clippy --manifest-path conformance/extractor/Cargo.toml
+          --locked --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -80,6 +89,10 @@ jobs:
           rustup toolchain install
           rustup show
       - run: ./scripts/check-isolation.sh
+      # No compiler catches a count that disagrees with its noun, and the
+      # last sweep closed without a gate — so `466 gating finding(s)` was
+      # still the headline of the published precision table two releases on.
+      - run: ./scripts/check-plurals.sh
 
   # Zero-FP gate: upstream's example kernels through the tool, diffed
   # against the reviewed baseline (conformance/EXPECTED). Any new finding
@@ -110,6 +123,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The gate scripts are Linux-only for cost, but their portability is
+      # not: both prune with `sed` on every run, and the BSD form macOS
+      # ships took the expression as a backup suffix and died. This is the
+      # cheapest thing that reads them on the platform that broke.
+      - run: bash -n scripts/run-conformance.sh scripts/run-mutation-corpus.sh
 
   # The single required status check: green iff every Linux gate is green.
   required-green:

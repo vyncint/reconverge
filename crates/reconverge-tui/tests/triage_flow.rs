@@ -131,7 +131,9 @@ fn triage_flow_journey() {
 
     // w: write, and check the bytes that landed.
     t.send(Key::Char('w')).expect("send Key::Char('w')");
-    t.wait_until(|s| s.contains("baseline written — 1 entry(ies)") && !s.contains("(unsaved)"))
+    // Both nouns are pinned, here and at the second write below: the
+    // singular is the one that used to read `1 entry(ies)`.
+    t.wait_until(|s| s.contains("baseline written — 1 entry") && !s.contains("(unsaved)"))
         .expect("baseline written");
     let written: BaselineArtifact =
         serde_json::from_str(&fs::read_to_string(&baseline).expect("baseline file exists"))

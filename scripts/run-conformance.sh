@@ -17,8 +17,20 @@ set -euo pipefail
 
 # The singular or the plural of a word, chosen by a count — the shell half of
 # `reconverge_artifacts::plural`. These lines land in CI logs and in issues,
-# and "1 finding(s)" reads there exactly as badly as it did in the tool.
+# and a parenthesized plural reads there exactly as badly as it did in
+# the tool. scripts/check-plurals.sh is the gate that keeps it that way.
 plural() { if [ "$1" = "1" ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
+
+# `sed -i` in place, on GNU and BSD alike. GNU takes an optional suffix
+# attached to the flag; BSD — what macOS ships — takes a mandatory operand
+# after it, so the bare GNU form swallows the expression as a backup suffix,
+# reads the file as the script, and dies with `invalid command code C`. Both
+# gates prune on every run, so macOS could never run either as committed.
+sed_inplace() {
+  local expr=$1 file=$2 tmp
+  tmp=$(mktemp) || return 1
+  sed "$expr" "$file" > "$tmp" && mv "$tmp" "$file"
+}
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK="$ROOT/target/conformance"
@@ -64,7 +76,7 @@ if [ -n "$FAILING" ]; then
     # target names are crate names: conformance_<example, underscored>,
     # which matches the member directory name exactly.
     member=${target#conformance_}
-    sed -i "\#crates/${member}\",#d" Cargo.toml
+    sed_inplace "\#crates/${member}\",#d" Cargo.toml
     echo "${member}	pruned	does not compile device-side-only" >> extraction-report.tsv
     PRUNED=$((PRUNED + 1))
   done <<< "$FAILING"

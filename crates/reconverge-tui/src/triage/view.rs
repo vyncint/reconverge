@@ -243,7 +243,10 @@ fn render_status(frame: &mut Frame<'_>, view: &TriageView<'_>, area: Rect) {
         match &view.state.status {
             Status::None => (String::new(), Color::Reset),
             Status::Wrote(entries) => (
-                format!("baseline written — {entries} entry(ies)"),
+                format!(
+                    "baseline written — {entries} {}",
+                    reconverge_artifacts::plural(*entries, "entry", "entries")
+                ),
                 Color::Green,
             ),
             Status::WriteFailed(error) => (format!("write failed: {error}"), Color::Red),

@@ -13,6 +13,9 @@ publish = false
 
 [dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# `plural` lives here, so a count this tool writes into the published table
+# cannot disagree with its noun the way the published precision headline did.
+reconverge-artifacts = { path = "../../crates/reconverge-artifacts" }
 # The dialect itself decides which collectives the mutation corpus may
 # target, so the corpus can never drift from what the analyzer recognizes.
 reconverge-core = { path = "../../crates/reconverge-core" }
