@@ -38,6 +38,9 @@ impl WitnessOptions {
                         iter.next().cloned()
                     })?);
                 }
+                // Below the value-taking flags, so `--baseline --help` is
+                // still the missing value it was.
+                flag if ArgError::help(flag) => return Err(ArgError::Help),
                 other => return Err(ArgError::unknown(other)),
             }
         }

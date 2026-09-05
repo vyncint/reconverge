@@ -24,8 +24,9 @@ pub struct SetupOptions {}
 
 impl SetupOptions {
     pub fn parse(args: &[String]) -> Result<SetupOptions, ArgError> {
-        match args.first() {
+        match args.first().map(String::as_str) {
             None => Ok(SetupOptions {}),
+            Some(flag) if ArgError::help(flag) => Err(ArgError::Help),
             Some(other) => Err(ArgError::unknown(other)),
         }
     }

@@ -19,12 +19,13 @@
 //! bans in frames.
 
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::{fs, thread};
 
 use crate::args::{self, ArgError};
-use crate::check::{self, CheckOptions};
+use crate::check::{self, CheckOptions, MessageFormat};
 use reconverge_artifacts::plural;
 
 /// How often the watch set is restatted. Cheap: metadata calls only.
@@ -65,10 +66,34 @@ impl WatchOptions {
     }
 }
 
+/// One dashboard line, on the stream that is not the machine record.
+///
+/// `check` nulls cargo's stdout so JSON mode stays clean, and puts even its
+/// stale-baseline notes on stderr. `watch` broke that with three bare
+/// `println!`s that never consulted the format: four of eight stdout lines
+/// were prose, so a strict JSONL reader died on line 1 before a single
+/// finding, and a lenient one silently discarded every run boundary.
+///
+/// stderr keeps the boundary — the one thing a JSON consumer of `watch`
+/// genuinely needs — and costs nothing an interactive user notices, since
+/// both streams land on the same terminal. Routing it here rather than at
+/// three call sites is what stops the next dashboard line reintroducing it.
+fn dashboard(format: MessageFormat, line: &str) -> io::Result<()> {
+    if format == MessageFormat::Json {
+        eprintln!("{line}");
+        return Ok(());
+    }
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "{line}")?;
+    out.flush()
+}
+
 /// Run until `--max-runs` is exhausted, or forever (Ctrl-C). The exit code
 /// is that of the last completed check.
 pub fn run(options: &WatchOptions) -> Result<u8, String> {
     let metadata = check::cargo_metadata()?;
+    let format = options.check.message_format;
     let mut watched = scan(&metadata.workspace_root);
     let mut runs = 0usize;
     // Overwritten by every run; only read after the loop ends.
@@ -76,11 +101,14 @@ pub fn run(options: &WatchOptions) -> Result<u8, String> {
 
     loop {
         runs += 1;
-        println!(
-            "reconverge watch: run #{runs} \u{2014} {} {} watched",
-            watched.len(),
-            plural(watched.len(), "file", "files")
-        );
+        crate::out::finish(dashboard(
+            format,
+            &format!(
+                "reconverge watch: run #{runs} \u{2014} {} {} watched",
+                watched.len(),
+                plural(watched.len(), "file", "files")
+            ),
+        ))?;
         match check::run(&options.check) {
             // A broken build is the normal state mid-edit: report it and
             // keep watching rather than dropping the user back to a shell.
@@ -96,13 +124,16 @@ pub fn run(options: &WatchOptions) -> Result<u8, String> {
             return Ok(exit);
         }
 
-        println!("reconverge watch: waiting for changes (Ctrl-C to stop)");
+        crate::out::finish(dashboard(
+            format,
+            "reconverge watch: waiting for changes (Ctrl-C to stop)",
+        ))?;
         loop {
             thread::sleep(POLL);
             let current = scan(&metadata.workspace_root);
             if current != watched {
                 watched = current;
-                println!();
+                crate::out::finish(dashboard(format, ""))?;
                 break;
             }
         }

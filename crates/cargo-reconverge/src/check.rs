@@ -11,6 +11,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -79,6 +80,9 @@ impl CheckOptions {
                     args::reject_value("--show-suppressed", inline_value)?;
                     options.show_suppressed = true;
                 }
+                // Below the value-taking flags, so `--baseline --help` is
+                // still the missing value it was.
+                flag if ArgError::help(flag) => return Err(ArgError::Help),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -140,25 +144,17 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
         options.baseline.is_some(),
     )?;
 
-    match options.message_format {
+    // The verdict is fully computed by now, so a reader that closes early
+    // costs the report and not the exit code.
+    crate::out::finish(match options.message_format {
         MessageFormat::Text => render::render_text(
             &review,
             &metadata.workspace_root,
             options.strict,
             options.show_suppressed,
         ),
-        MessageFormat::Json => {
-            // The analysis record, unfiltered: the baseline is a review
-            // decision, and machine consumers get the raw findings plus the
-            // baseline file itself rather than a pre-filtered mixture.
-            for artifact in &review.artifacts {
-                println!(
-                    "{}",
-                    serde_json::to_string(artifact).map_err(|e| e.to_string())?
-                );
-            }
-        }
-    }
+        MessageFormat::Json => write_jsonl(&review),
+    })?;
     for entry in review.stale_entries() {
         eprintln!(
             "reconverge: baseline entry `{}` no longer matches any finding; \
@@ -173,6 +169,21 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     }
 
     Ok(review)
+}
+
+/// The analysis record, unfiltered: the baseline is a review decision, and
+/// machine consumers get the raw findings plus the baseline file itself
+/// rather than a pre-filtered mixture.
+fn write_jsonl(review: &Review) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    for artifact in &review.artifacts {
+        // Serializing a document we just deserialized cannot fail; carrying
+        // it as an io error keeps one return type for the caller.
+        let line = serde_json::to_string(artifact).map_err(io::Error::other)?;
+        writeln!(out, "{line}")?;
+    }
+    out.flush()
 }
 
 /// The reconverge driver binary: `$RECONVERGE_DRIVER`, or the sibling of

@@ -160,8 +160,15 @@ impl Review {
 
 impl Counts {
     /// The one-line summary printed after the findings.
+    ///
+    /// Each parenthetical hint retires the moment the run is given the flag
+    /// it recommends: a closing instruction to do what the run just did
+    /// reads as though something were still being withheld, which is
+    /// precisely the doubt `--show-suppressed` exists to remove. The
+    /// *counts* stay unconditional — "still counted in every summary" is a
+    /// documented promise, and only the advice goes away.
     #[must_use]
-    pub fn summary_line(&self, strict: bool) -> String {
+    pub fn summary_line(&self, strict: bool, show_suppressed: bool) -> String {
         use std::fmt::Write as _;
         let total = self.deny + self.confirmed + self.warning;
         let mut line = format!(
@@ -180,11 +187,10 @@ impl Counts {
             );
         }
         if self.suppressed > 0 {
-            let _ = write!(
-                line,
-                "; {} suppressed by the baseline (--show-suppressed to review)",
-                self.suppressed
-            );
+            let _ = write!(line, "; {} suppressed by the baseline", self.suppressed);
+            if !show_suppressed {
+                let _ = write!(line, " (--show-suppressed to review)");
+            }
         }
         line
     }
@@ -278,13 +284,34 @@ mod tests {
             warning: 2,
             suppressed: 3,
         };
-        let line = counts.summary_line(false);
-        assert!(line.contains("2 warning findings (2 hidden"), "{line}");
-        assert!(line.contains("3 suppressed by the baseline"), "{line}");
-        // Even in strict mode the suppressed count stays visible: a
+        // The count is present in all four flag combinations: a
         // suppression is never invisible, only unobtrusive.
-        assert!(counts.summary_line(true).contains("3 suppressed"));
-        assert!(!Counts::default().summary_line(false).contains("suppressed"));
+        for (strict, show) in [(false, false), (true, false), (false, true), (true, true)] {
+            let line = counts.summary_line(strict, show);
+            assert!(line.contains("3 suppressed by the baseline"), "{line}");
+        }
+        let line = counts.summary_line(false, false);
+        assert!(line.contains("2 warning findings (2 hidden"), "{line}");
+        assert!(
+            !Counts::default()
+                .summary_line(false, false)
+                .contains("suppressed")
+        );
+
+        // Each hint retires when the run is given the flag it recommends.
+        // Before, the suppression hint was unconditional by construction —
+        // the function was never told whether `--show-suppressed` was
+        // passed, so this test could not have caught it.
+        for strict in [false, true] {
+            let told = counts.summary_line(strict, true);
+            assert!(
+                !told.contains("--show-suppressed to review"),
+                "the run was given the flag it recommends: {told}"
+            );
+            let untold = counts.summary_line(strict, false);
+            assert!(untold.contains("(--show-suppressed to review)"), "{untold}");
+        }
+        assert!(!counts.summary_line(true, false).contains("--strict to see"));
     }
 
     #[test]

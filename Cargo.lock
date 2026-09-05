@@ -121,6 +121,7 @@ dependencies = [
  "reconverge-dialect-oxide",
  "serde_json",
  "termlens",
+ "unicode-width",
 ]
 
 [[package]]
@@ -1465,9 +1466,9 @@ dependencies = [
 
 [[package]]
 name = "termlens"
-version = "0.7.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "037018c17834c72ff38b952b5de436b67cb396c43e5c12a839cbf79b0ceb0613"
+checksum = "0fca989672430e13284b48504c44b499d88f5b39cb36b0e8dc5b45f06df50b09"
 dependencies = [
  "libc",
  "portable-pty",

@@ -17,6 +17,7 @@ mod check;
 mod explain;
 mod inspect;
 mod learn_cmd;
+mod out;
 mod render;
 mod review;
 mod sarif;
@@ -95,6 +96,13 @@ fn main() -> ExitCode {
 /// and the answer — and put the exit-code legend, rather than the reason, at
 /// the end of stderr where a calling tool looks for it.
 fn report_arg_error(err: &ArgError) -> u8 {
+    // `<subcommand> --help` is the first thing anyone types, and being told
+    // it is an error is a poor greeting. The usage text is one block
+    // covering every subcommand, so printing it whole is the answer.
+    if err.is_help() {
+        print!("{USAGE}");
+        return 0;
+    }
     if err.wants_usage() {
         eprintln!("error: {err}\n\n{USAGE}");
     } else {

@@ -69,6 +69,9 @@ pub fn run(code: &str) -> u8 {
 pub fn parse(args: &[String]) -> Result<String, ArgError> {
     let mut code = None;
     for arg in args {
+        if ArgError::help(arg) {
+            return Err(ArgError::Help);
+        }
         if arg.starts_with('-') || code.is_some() {
             return Err(ArgError::unknown(arg));
         }
