@@ -708,12 +708,8 @@ fn a_second_identical_run_does_not_rebuild_the_world() {
     check(&project, &[]);
     let second = check(&project, &[]);
     let stderr = String::from_utf8_lossy(&second.stderr);
-    let compiles = stderr
-        .lines()
-        .filter(|l| l.contains("Checking lint-samples") || l.contains("Compiling lint-samples"))
-        .count();
     assert!(
-        compiles <= 1,
+        compiled_lines(&second.stderr) <= 1,
         "a warm re-run must not re-lint twice:\n{stderr}"
     );
 }
@@ -955,6 +951,24 @@ fn a_witness_does_not_outlive_the_finding_it_replays() {
     );
 }
 
+/// How many times cargo says it built the sample crate.
+///
+/// The two words are matched separately on purpose: CI sets
+/// `CARGO_TERM_COLOR: always`, so the line arrives as
+/// `\x1b[1m\x1b[92m    Checking\x1b[0m lint-samples v0.0.0 (…)` and the
+/// literal `"Checking lint-samples"` is not a substring of it. Asserting on
+/// a colored stream with an uncolored needle passes locally and is a
+/// tautology in CI — which is the shape of test this release exists to
+/// stop shipping.
+fn compiled_lines(stderr: &[u8]) -> usize {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .filter(|l| {
+            l.contains("lint-samples") && (l.contains("Checking") || l.contains("Compiling"))
+        })
+        .count()
+}
+
 fn witness_files(project: &Path) -> Vec<String> {
     let dir = project.join("target/reconverge");
     let Ok(entries) = fs::read_dir(&dir) else {
@@ -1043,12 +1057,7 @@ fn replacing_the_driver_in_place_forces_a_relint() {
     // *replays* the previous run's cached compiler output, so the driver's
     // stderr lines appear whether or not it was invoked. That replay is
     // exactly what made this bug look like a re-analysis.
-    let relints = |output: &Output| {
-        String::from_utf8_lossy(&output.stderr)
-            .lines()
-            .filter(|l| l.contains("Checking lint-samples") || l.contains("Compiling lint-samples"))
-            .count()
-    };
+    let relints = |output: &Output| compiled_lines(&output.stderr);
 
     run(&driver);
     assert_eq!(
