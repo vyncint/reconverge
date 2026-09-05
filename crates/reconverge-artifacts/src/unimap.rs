@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{SourceSpan, ToolInfo};
+use crate::read::Artifact;
 use crate::schema;
 
 /// Top-level uniformity-map artifact for one analyzed crate.
@@ -29,6 +30,14 @@ impl UnimapArtifact {
             krate: krate.into(),
             functions,
         }
+    }
+}
+
+impl Artifact for UnimapArtifact {
+    const SCHEMA: &'static str = schema::UNIMAP;
+
+    fn declared_schema(&self) -> &str {
+        &self.schema
     }
 }
 

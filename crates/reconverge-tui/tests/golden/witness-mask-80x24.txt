@@ -3,23 +3,23 @@ size: 80x24  cursor: hidden
 │witness 2/2 — kernel `rc002_divergent_collective` — RC002 — grid (1,1,1) bloc…│
 │                                                                              │
 │          0        8        16       24                                       │
-│lanes     oWoWoWoW oWoWoWoW oWoWoWoW oWoWoWoW                                 │
+│lanes     o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.                                 │
 │mask      ######## ######## ######## ########  0xffffffff                     │
 │active    #.#.#.#. #.#.#.#. #.#.#.#. #.#.#.#.  0x55555555                     │
 │          o active   W waiting   . exited                                     │
 │                                                                              │
-│step 3/3  [==>]                                                               │
-│_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)         │
-│at lib.rs:33                                                                  │
+│step 2/3  [=>.]                                                               │
+│ballot_sync() — active lanes 0x55555555, mask 0xffffffff                      │
+│at lib.rs:229                                                                 │
 │ballot_sync — named in the mask but not active: 0xaaaaaaaa                    │
 │                                                                              │
 │   0  launch                                                                  │
-│   1  _3 = cuda_device::__internal::index_1d(&_2)                             │
-│   2  switchInt(i.get() % 2 == 0) — lanes disagree: 16 take the branch, 16 sk…│
-│▸  3  _5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)   │
+│   1  lanes evaluate the guarding branch — 16 continue toward `ballot_sync`, …│
+│▸  2  ballot_sync() — active lanes 0x55555555, mask 0xffffffff     16 exited  │
+│   3  16 lanes named by the mask never reach the call                         │
 │                                                                              │
 │verdict: undefined behavior (at step 3)                                       │
-│ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are    │
-│active at the call — the named-but-absent lanes make the collective undefined;│
-│on hardware this usually never completes                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

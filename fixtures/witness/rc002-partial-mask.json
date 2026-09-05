@@ -2,95 +2,179 @@
   "schema": "witness.v1",
   "tool": {
     "name": "reconverge",
-    "version": "0.0.0"
+    "version": "0.5.0"
   },
-  "crate": "sample_kernels",
+  "crate": "lint_samples",
   "kernel": "rc002_divergent_collective",
   "finding": {
     "code": "RC002",
     "span": {
       "file": "src/lib.rs",
-      "line_start": 33,
+      "line_start": 229,
       "column_start": 16,
-      "line_end": 33,
+      "line_end": 229,
       "column_end": 52
     }
   },
   "launch": {
-    "grid": [1, 1, 1],
-    "block": [32, 1, 1],
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
     "warp": 0
   },
   "lanes": 32,
   "initial_lane_states": [
-    "active", "active", "active", "active", "active", "active", "active", "active",
-    "active", "active", "active", "active", "active", "active", "active", "active",
-    "active", "active", "active", "active", "active", "active", "active", "active",
-    "active", "active", "active", "active", "active", "active", "active", "active"
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active"
   ],
   "steps": [
     {
       "index": 0,
-      "statement": "_3 = cuda_device::__internal::index_1d(&_2)",
+      "statement": "lanes evaluate the guarding branch — 16 continue toward `ballot_sync`, 16 never will",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 30,
-        "column_start": 13,
-        "line_end": 30,
-        "column_end": 30
+        "line_start": 228,
+        "column_start": 8,
+        "line_end": 228,
+        "column_end": 24
       },
       "lane_changes": []
     },
     {
       "index": 1,
-      "statement": "switchInt(i.get() % 2 == 0) — lanes disagree: 16 take the branch, 16 skip it",
+      "statement": "ballot_sync() — active lanes 0x55555555, mask 0xffffffff",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 32,
-        "column_start": 5,
-        "line_end": 34,
-        "column_end": 5
-      },
-      "lane_changes": [
-        { "lane": 1, "state": "waiting" },
-        { "lane": 3, "state": "waiting" },
-        { "lane": 5, "state": "waiting" },
-        { "lane": 7, "state": "waiting" },
-        { "lane": 9, "state": "waiting" },
-        { "lane": 11, "state": "waiting" },
-        { "lane": 13, "state": "waiting" },
-        { "lane": 15, "state": "waiting" },
-        { "lane": 17, "state": "waiting" },
-        { "lane": 19, "state": "waiting" },
-        { "lane": 21, "state": "waiting" },
-        { "lane": 23, "state": "waiting" },
-        { "lane": 25, "state": "waiting" },
-        { "lane": 27, "state": "waiting" },
-        { "lane": 29, "state": "waiting" },
-        { "lane": 31, "state": "waiting" }
-      ]
-    },
-    {
-      "index": 2,
-      "statement": "_5 = cuda_device::warp::ballot_sync(const 0xffffffff_u32, const true)",
-      "span": {
-        "file": "src/lib.rs",
-        "line_start": 33,
+        "line_start": 229,
         "column_start": 16,
-        "line_end": 33,
+        "line_end": 229,
         "column_end": 52
       },
-      "lane_changes": [],
+      "lane_changes": [
+        {
+          "lane": 1,
+          "state": "exited"
+        },
+        {
+          "lane": 3,
+          "state": "exited"
+        },
+        {
+          "lane": 5,
+          "state": "exited"
+        },
+        {
+          "lane": 7,
+          "state": "exited"
+        },
+        {
+          "lane": 9,
+          "state": "exited"
+        },
+        {
+          "lane": 11,
+          "state": "exited"
+        },
+        {
+          "lane": 13,
+          "state": "exited"
+        },
+        {
+          "lane": 15,
+          "state": "exited"
+        },
+        {
+          "lane": 17,
+          "state": "exited"
+        },
+        {
+          "lane": 19,
+          "state": "exited"
+        },
+        {
+          "lane": 21,
+          "state": "exited"
+        },
+        {
+          "lane": 23,
+          "state": "exited"
+        },
+        {
+          "lane": 25,
+          "state": "exited"
+        },
+        {
+          "lane": 27,
+          "state": "exited"
+        },
+        {
+          "lane": 29,
+          "state": "exited"
+        },
+        {
+          "lane": 31,
+          "state": "exited"
+        }
+      ],
       "warp_op": {
         "op": "ballot_sync",
         "mask": "0xffffffff",
         "active": "0x55555555"
       }
+    },
+    {
+      "index": 2,
+      "statement": "16 lanes named by the mask never reach the call",
+      "span": {
+        "file": "src/lib.rs",
+        "line_start": 228,
+        "column_start": 8,
+        "line_end": 228,
+        "column_end": 24
+      },
+      "lane_changes": []
     }
   ],
   "verdict": {
     "kind": "undefined-behavior",
-    "message": "ballot_sync names all 32 lanes in its mask, but only the 16 even lanes are active at the call — the named-but-absent lanes make the collective undefined; on hardware this usually never completes",
+    "message": "`ballot_sync()` executes with active lanes 0x55555555 but its mask 0xffffffff names 16 lanes that never arrive — undefined behavior on hardware, usually a kernel that never finishes",
     "step": 2
   }
 }

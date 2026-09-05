@@ -13,6 +13,8 @@
 //! expected code on the labeled kernel than the original example did, so
 //! pre-existing upstream findings are never claimed as catches.
 
+use reconverge_artifacts::plural;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
@@ -160,8 +162,13 @@ pub fn score(
             }
             if counts.gating > allowed {
                 false_positives.push(format!(
-                    "{}: {} on kernel `{}` — {} gating finding(s), {} attributable",
-                    label.mutant, key.0, key.1, counts.gating, allowed
+                    "{}: {} on kernel `{}` — {} gating {}, {} attributable",
+                    label.mutant,
+                    key.0,
+                    key.1,
+                    counts.gating,
+                    plural(counts.gating, "finding", "findings"),
+                    allowed
                 ));
             }
         }
@@ -216,9 +223,10 @@ pub fn score(
     if precision_ok {
         let _ = writeln!(
             md,
-            "**Precision at default confidence: 1.000** — {gating_total} gating finding(s)\n\
+            "**Precision at default confidence: 1.000** — {gating_total} gating {}\n\
              across all compiling mutants, every one attributed to its injected bug\n\
              or to the reviewed conformance baseline of its source example.",
+            plural(gating_total, "finding", "findings"),
         );
     } else {
         let _ = writeln!(md, "**Precision at default confidence: FAILED**\n");

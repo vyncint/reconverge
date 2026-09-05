@@ -17,7 +17,7 @@ hand; rerun the script and review the diff.
 | shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 17 | 17 | 0/17 (0%) | 0/17 (0%) |
 | mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 414 | 393 | 393/393 (100%) | 393/393 (100%) |
 
-**Precision at default confidence: 1.000** — 466 gating finding(s)
+**Precision at default confidence: 1.000** — 466 gating findings
 across all compiling mutants, every one attributed to its injected bug
 or to the reviewed conformance baseline of its source example.
 

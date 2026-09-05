@@ -55,6 +55,14 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
   `vX.Y.Z — short theme` to match the existing ones, with an `## Install`
   block carrying both commands (`cargo install cargo-reconverge` and
   `cargo reconverge setup`).
+- **Read the finished release run's job list, and explain every job that is
+  not green.** A `skipped` job is something to account for, not something to
+  scroll past: `notify-testing-repo` carried a guard on an event this
+  workflow cannot receive, so it had never run once — and a skipped job
+  beside three green ones looks exactly like a job that worked.
+  ```sh
+  gh run view --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+  ```
 - **Verify what was published, not what was built:**
   ```sh
   gh workflow run install.yml

@@ -1,14 +1,23 @@
 //! `findings.v1` — the diagnostics artifact (`schemas/findings.v1.json`).
 //!
-//! One document per analyzed crate. Additive-only within v1: adding a field
-//! requires a `#[serde(default)]` (or `Option`) so every existing fixture
-//! still parses, and the fixtures must be updated in the same PR.
+//! One document per analyzed **target**. A package with a lib and a bin
+//! compiles twice under one crate name, and each compilation writes its own
+//! document; `target` is what tells them apart. It was added in 0.5.0,
+//! because before it a consumer keyed on `crate` — as the driver's own
+//! comment told it to — silently kept one of the two, and in the ordinary
+//! GPU-project shape (kernels in the lib, a thin host binary beside them)
+//! the one it kept could be the empty one.
+//!
+//! Additive-only within v1: adding a field requires a `#[serde(default)]`
+//! (or `Option`) so every existing fixture still parses, and the fixtures
+//! must be updated in the same PR.
 
 use serde::{Deserialize, Serialize};
 
+use crate::read::Artifact;
 use crate::schema;
 
-/// Top-level findings artifact for one analyzed crate.
+/// Top-level findings artifact for one analyzed target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindingsArtifact {
     /// Always [`schema::FINDINGS`].
@@ -17,6 +26,24 @@ pub struct FindingsArtifact {
     /// Name of the analyzed crate.
     #[serde(rename = "crate")]
     pub krate: String,
+    /// The compiled target's crate types, as cargo spells them — `lib`,
+    /// `bin`, `proc-macro`. Absent only in a document written before 0.5.0,
+    /// which is why it is an `Option` rather than a defaulted `String`: a
+    /// reader can tell "the bin target" from "a document that predates the
+    /// field" instead of being handed a plausible-looking empty string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// What the analyzer could and could not read across this whole target.
+    ///
+    /// Coverage used to reach the user only as a note on an RC001 finding,
+    /// so it was missing in exactly the run where it is load-bearing: a
+    /// kernel whose divergent barrier is spelled in `asm!` has no finding to
+    /// hang the note on, and `--strict` exited 0 on it with no mention that
+    /// a twentieth of the body was never read. Here it is a property of the
+    /// analysis, so the JSON surface and SARIF carry it structurally rather
+    /// than a script string-matching a note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<RunCoverage>,
     pub findings: Vec<Finding>,
 }
 
@@ -26,8 +53,65 @@ impl FindingsArtifact {
             schema: schema::FINDINGS.to_string(),
             tool: ToolInfo::current(),
             krate: krate.into(),
+            target: None,
+            coverage: None,
             findings,
         }
+    }
+
+    /// The same document, naming the compiled target it came from.
+    #[must_use]
+    pub fn for_target(mut self, crate_types: impl Into<String>) -> Self {
+        self.target = Some(crate_types.into());
+        self
+    }
+
+    /// The same document, carrying the analysis's own coverage.
+    #[must_use]
+    pub fn with_coverage(mut self, coverage: RunCoverage) -> Self {
+        self.coverage = Some(coverage);
+        self
+    }
+
+    /// Sort key that is total across the documents of one run.
+    ///
+    /// `crate` alone is not: `sort_by` is stable, so two documents sharing a
+    /// crate name fell through to whatever `read_dir` handed back — stable
+    /// within a project, different between two projects of identical shape.
+    #[must_use]
+    pub fn sort_key(&self) -> (&str, &str) {
+        (&self.krate, self.target.as_deref().unwrap_or(""))
+    }
+}
+
+impl Artifact for FindingsArtifact {
+    const SCHEMA: &'static str = schema::FINDINGS;
+
+    fn declared_schema(&self) -> &str {
+        &self.schema
+    }
+}
+
+/// How much of an analyzed target the engine could actually read.
+///
+/// Counted over every analyzed function, kernels and callees alike, so it
+/// answers the question a clean run raises: is this kernel clean, or was a
+/// fifth of it never looked at?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCoverage {
+    /// Statements the uniformity engine modeled.
+    pub analyzed_statements: usize,
+    /// Statements it could not (`asm!`, unmodeled intrinsics).
+    pub opaque_statements: usize,
+    /// Analyzed functions carrying at least one opaque statement.
+    pub opaque_functions: usize,
+}
+
+impl RunCoverage {
+    /// Whether anything at all was left unread.
+    #[must_use]
+    pub fn is_degraded(&self) -> bool {
+        self.opaque_statements > 0
     }
 }
 

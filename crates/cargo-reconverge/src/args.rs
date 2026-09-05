@@ -23,6 +23,11 @@ pub enum ArgError {
     Unknown(String),
     /// A recognised argument whose value cannot be used.
     Value(String),
+    /// `--help` or `-h`. Not a failure at all: it travels this way because
+    /// every subcommand already returns a parse result to one place, so the
+    /// request reaches the printer without seven new signatures. `main`
+    /// prints the usage text and exits 0.
+    Help,
 }
 
 impl ArgError {
@@ -30,6 +35,24 @@ impl ArgError {
     #[must_use]
     pub fn wants_usage(&self) -> bool {
         matches!(self, ArgError::Unknown(_))
+    }
+
+    /// Whether this is a request for the usage text rather than a failure.
+    #[must_use]
+    pub fn is_help(&self) -> bool {
+        matches!(self, ArgError::Help)
+    }
+
+    /// `Some(ArgError::Help)` when `flag` asks for the usage text.
+    ///
+    /// Every subcommand's parse loop calls this above its unknown-argument
+    /// fallthrough, so `cargo reconverge check --help` — the first thing
+    /// anyone types — is answered rather than rejected. It sits *below* the
+    /// value-taking flags in each loop, so `--baseline --help` is still the
+    /// missing value it was.
+    #[must_use]
+    pub fn help(flag: &str) -> bool {
+        matches!(flag, "--help" | "-h")
     }
 
     /// An unrecognised argument, phrased the one way every command phrases it.
@@ -43,6 +66,7 @@ impl fmt::Display for ArgError {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ArgError::Unknown(message) | ArgError::Value(message) => out.write_str(message),
+            ArgError::Help => out.write_str("help requested"),
         }
     }
 }
@@ -113,6 +137,14 @@ mod tests {
     fn only_an_unknown_argument_asks_for_the_usage_text() {
         assert!(ArgError::unknown("--bogus").wants_usage());
         assert!(!ArgError::from("`80` is not a compute capability".to_string()).wants_usage());
+    }
+
+    #[test]
+    fn help_is_recognised_and_is_not_a_failure() {
+        assert!(ArgError::help("--help") && ArgError::help("-h"));
+        assert!(!ArgError::help("--helpful") && !ArgError::help("--strict"));
+        assert!(ArgError::Help.is_help());
+        assert!(!ArgError::unknown("--x").is_help());
     }
 
     #[test]

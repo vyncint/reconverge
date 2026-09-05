@@ -10,7 +10,7 @@ use std::process::Command;
 use crate::args::{self, ArgError};
 use crate::check;
 use crate::inspect::locate_tui;
-use crate::review::DEFAULT_BASELINE;
+use crate::review::{DEFAULT_BASELINE, Review};
 
 pub struct TriageOptions {
     pub ascii: bool,
@@ -38,6 +38,9 @@ impl TriageOptions {
                         || iter.next().cloned(),
                     )?));
                 }
+                // Below the value-taking flags, so `--baseline --help` is
+                // still the missing value it was.
+                flag if ArgError::help(flag) => return Err(ArgError::Help),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -53,6 +56,13 @@ pub fn run(options: &TriageOptions) -> Result<u8, String> {
         .baseline
         .clone()
         .unwrap_or_else(|| metadata.workspace_root.join(DEFAULT_BASELINE));
+    // The same file, behind the same flag, must mean the same thing to both
+    // subcommands. `check` exits 2 naming the path and the serde error;
+    // `triage` opened on it looking entirely normal, and one keystroke
+    // replaced every reviewed acceptance with an empty document — which is
+    // the loop a maintainer walks precisely *because* `check` complained
+    // about that file. `Review::load` is the reader and the wording both.
+    Review::load(Vec::new(), baseline.clone(), options.baseline.is_some())?;
     let artifacts = discover_findings(&metadata)?;
     let tui = locate_tui()?;
 

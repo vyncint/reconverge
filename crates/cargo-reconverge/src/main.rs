@@ -17,6 +17,7 @@ mod check;
 mod explain;
 mod inspect;
 mod learn_cmd;
+mod out;
 mod render;
 mod review;
 mod sarif;
@@ -61,8 +62,10 @@ check options:
   --cc <X.Y>                  target compute capability for shared-memory
                               capacity context (e.g. 8.6)
   --message-format <FORMAT>   text (default) or json; json prints one
-                              findings.v1 document per analyzed crate, one
-                              per line
+                              findings.v1 document per analyzed *target*,
+                              one per line. A package with a lib and a bin
+                              compiles twice under one crate name, so
+                              `crate` is not a key — read `target` too
   --sarif <PATH>              also write a SARIF 2.1.0 report to PATH.
                               A path that begins with `--` is passed with
                               `=`: `--sarif=--weird`
@@ -95,6 +98,13 @@ fn main() -> ExitCode {
 /// and the answer — and put the exit-code legend, rather than the reason, at
 /// the end of stderr where a calling tool looks for it.
 fn report_arg_error(err: &ArgError) -> u8 {
+    // `<subcommand> --help` is the first thing anyone types, and being told
+    // it is an error is a poor greeting. The usage text is one block
+    // covering every subcommand, so printing it whole is the answer.
+    if err.is_help() {
+        print!("{USAGE}");
+        return 0;
+    }
     if err.wants_usage() {
         eprintln!("error: {err}\n\n{USAGE}");
     } else {

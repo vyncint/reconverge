@@ -14,11 +14,14 @@ categories = ["development-tools::cargo-plugins", "development-tools"]
 exclude = ["/tests"]
 
 [dependencies]
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.4.0" }
-reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.4.0" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.5.0" }
+reconverge-dialect-oxide = { path = "../reconverge-dialect-oxide", version = "0.5.0" }
 serde_json = { workspace = true }
+# Same version as reconverge-tui: the text renderer and the TUI must measure
+# a source line in the same cells, or the caret and the frame disagree.
+unicode-width = "0.2"
 
 [dev-dependencies]
 # Same version as reconverge-tui (see its Cargo.toml for the pinning
 # policy): the end-to-end tests drive the TUI subcommands through a PTY.
-termlens = { version = "0.7.0", default-features = false }
+termlens = { version = "0.9", default-features = false }

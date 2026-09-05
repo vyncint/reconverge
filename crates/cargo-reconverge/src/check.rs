@@ -5,12 +5,26 @@
 //! dedicated `<target>/reconverge/build` directory, so wrapped builds never
 //! disturb the user's ordinary build caches. Findings files persist across
 //! runs: cargo's own freshness tracking guarantees a crate is recompiled —
-//! and its findings rewritten — exactly when its inputs changed. The one
-//! input cargo cannot see is `--cc`, so a change there wipes our build
-//! fingerprints to force a re-lint.
+//! and its findings rewritten — exactly when its inputs changed.
+//!
+//! That holds only if two things are true, and until 0.5.0 neither was.
+//!
+//! The build has to cover every member the report gates on. It was a bare
+//! `cargo check`, so cargo's own package selection applied: run the gate
+//! from inside a member directory, or put a `default-members` line in the
+//! workspace, and the sibling was never re-linted while its previous,
+//! clean artifact was still printed and gated on as this run's answer. It
+//! is `--workspace` now, and a member that still produces nothing is named
+//! rather than passed over.
+//!
+//! And the inputs cargo cannot see have to be tracked by hand. `--cc` was;
+//! the driver binary was not, so `cargo install`-ing a driver over the same
+//! path re-linted nothing and CI gated on whatever the old one concluded.
+//! Both now live in the `cc-marker`.
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -79,6 +93,9 @@ impl CheckOptions {
                     args::reject_value("--show-suppressed", inline_value)?;
                     options.show_suppressed = true;
                 }
+                // Below the value-taking flags, so `--baseline --help` is
+                // still the missing value it was.
+                flag if ArgError::help(flag) => return Err(ArgError::Help),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -112,7 +129,12 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     fs::create_dir_all(&reconverge_dir)
         .map_err(|e| format!("cannot create {}: {e}", reconverge_dir.display()))?;
 
-    refresh_cc_marker(&reconverge_dir, &build_dir, options.cc.as_deref())?;
+    refresh_cc_marker(
+        &reconverge_dir,
+        &build_dir,
+        options.cc.as_deref(),
+        &driver_identity(&driver),
+    )?;
 
     run_wrapped_check(&driver, &reconverge_dir, &build_dir, options)?;
     let mut artifacts = collect_artifacts(&reconverge_dir, &metadata.member_crates)?;
@@ -120,15 +142,67 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     // Self-heal: if a workspace member has no findings artifact (for
     // example the artifacts directory was deleted while the build stayed
     // fresh), force one re-lint by dropping our build fingerprints.
-    let missing: Vec<&String> = metadata
-        .member_crates
-        .iter()
-        .filter(|krate| !artifacts.iter().any(|a| &&a.krate == krate))
-        .collect();
-    if !missing.is_empty() {
+    if !unanalyzed(&metadata.member_crates, &artifacts).is_empty() {
         drop_build_fingerprints(&build_dir);
         run_wrapped_check(&driver, &reconverge_dir, &build_dir, options)?;
         artifacts = collect_artifacts(&reconverge_dir, &metadata.member_crates)?;
+    }
+
+    // And then *read* the result of that re-lint, which is the half that was
+    // missing: `missing` was computed, used to force a rebuild, and dropped
+    // on the floor whether or not the rebuild helped. A member with no
+    // artifact was silently absent from the report, so a two-member
+    // workspace with a `default-members` line read as a clean one-member
+    // one — and paid two full builds every run to accomplish it.
+    //
+    // Exit 2 rather than 1: the analysis did not run, which is a different
+    // statement from "it ran and found something", and it is the code
+    // consumers already treat as a hard stop for a candidate.
+    let missing = unanalyzed(&metadata.member_crates, &artifacts);
+    if !missing.is_empty() {
+        return Err(format!(
+            "{} {} produced no findings artifact and {} not analyzed this \
+             run: {}\n\
+             the wrapped build covers the whole workspace, so this means the \
+             member is excluded from it, failed to build, or has no target \
+             the driver sees. Fix that, or exclude it from the workspace — \
+             a member the gate cannot read is never a pass.",
+            missing.len(),
+            reconverge_artifacts::plural(missing.len(), "member", "members"),
+            reconverge_artifacts::plural(missing.len(), "was", "were"),
+            missing.join(", "),
+        ));
+    }
+
+    // Version skew: an artifact this build did not produce is one it cannot
+    // vouch for. Not fatal — an explicit RECONVERGE_DRIVER against a
+    // deliberately different toolchain is supported, and the driver-identity
+    // marker above already forces a re-lint on an in-place upgrade — but it
+    // is never rendered silently as this run's own answer again.
+    for artifact in &artifacts {
+        if artifact.tool.version != env!("CARGO_PKG_VERSION") {
+            eprintln!(
+                "reconverge: `{}` was analyzed by {} {}, but this is \
+                 cargo-reconverge {}; run `cargo reconverge setup` to install \
+                 the matching driver",
+                artifact.krate,
+                artifact.tool.name,
+                artifact.tool.version,
+                env!("CARGO_PKG_VERSION"),
+            );
+        }
+    }
+
+    // `--strict` and `--show-suppressed` are deliberate no-ops in JSON mode
+    // — machine consumers get the unfiltered record plus the baseline file,
+    // never a pre-filtered mixture — but nothing said so, and a script
+    // author who passes one reasonably believes it took effect.
+    if options.message_format == MessageFormat::Json && (options.strict || options.show_suppressed)
+    {
+        eprintln!(
+            "reconverge: --strict and --show-suppressed affect text output \
+             only; --message-format json is always the unfiltered record"
+        );
     }
 
     let review = Review::load(
@@ -140,25 +214,17 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
         options.baseline.is_some(),
     )?;
 
-    match options.message_format {
+    // The verdict is fully computed by now, so a reader that closes early
+    // costs the report and not the exit code.
+    crate::out::finish(match options.message_format {
         MessageFormat::Text => render::render_text(
             &review,
             &metadata.workspace_root,
             options.strict,
             options.show_suppressed,
         ),
-        MessageFormat::Json => {
-            // The analysis record, unfiltered: the baseline is a review
-            // decision, and machine consumers get the raw findings plus the
-            // baseline file itself rather than a pre-filtered mixture.
-            for artifact in &review.artifacts {
-                println!(
-                    "{}",
-                    serde_json::to_string(artifact).map_err(|e| e.to_string())?
-                );
-            }
-        }
-    }
+        MessageFormat::Json => write_jsonl(&review),
+    })?;
     for entry in review.stale_entries() {
         eprintln!(
             "reconverge: baseline entry `{}` no longer matches any finding; \
@@ -173,6 +239,21 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     }
 
     Ok(review)
+}
+
+/// The analysis record, unfiltered: the baseline is a review decision, and
+/// machine consumers get the raw findings plus the baseline file itself
+/// rather than a pre-filtered mixture.
+fn write_jsonl(review: &Review) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    for artifact in &review.artifacts {
+        // Serializing a document we just deserialized cannot fail; carrying
+        // it as an io error keeps one return type for the caller.
+        let line = serde_json::to_string(artifact).map_err(io::Error::other)?;
+        writeln!(out, "{line}")?;
+    }
+    out.flush()
 }
 
 /// The reconverge driver binary: `$RECONVERGE_DRIVER`, or the sibling of
@@ -252,21 +333,61 @@ fn cargo_bin() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// Re-linting is keyed to `--cc`: cargo cannot see that input, so when it
-/// changes we drop our (dedicated) build dir's fingerprints.
+/// Re-linting is keyed to the inputs cargo cannot see: `--cc`, and the
+/// driver binary itself. When either changes we drop our (dedicated) build
+/// dir's fingerprints.
+///
+/// The driver goes in as `RUSTC_WORKSPACE_WRAPPER`, and cargo does not
+/// notice a same-path wrapper whose *contents* changed — so
+/// `cargo install reconverge-driver` over the top re-linted nothing, and
+/// the next run reprinted the previous build's verdict, witness note and
+/// all. Upgrading to a driver that closes a missed detection therefore
+/// changed nothing about the next run, and where the old verdict was clean
+/// the build stayed green on a crate that now has a finding.
 fn refresh_cc_marker(
     reconverge_dir: &Path,
     build_dir: &Path,
     cc: Option<&str>,
+    driver: &str,
 ) -> Result<(), String> {
     let marker = reconverge_dir.join("cc-marker");
-    let current = cc.unwrap_or("(none)");
+    let current = format!("{}\n{driver}\n", cc.unwrap_or("(none)"));
     let previous = fs::read_to_string(&marker).ok();
-    if previous.as_deref() != Some(current) {
+    if previous.as_deref() != Some(current.as_str()) {
         drop_build_fingerprints(build_dir);
-        fs::write(&marker, current).map_err(|e| format!("cannot write cc marker: {e}"))?;
+        fs::write(&marker, &current).map_err(|e| format!("cannot write cc marker: {e}"))?;
     }
     Ok(())
+}
+
+/// A cheap identity for the driver binary: path, size and mtime.
+///
+/// Path plus size plus mtime is what cargo itself keys a wrapper on, and it
+/// is enough for the case that matters — an install over the top. A content
+/// hash would be more correct and costs a read of the whole binary on every
+/// run; if the metadata is unavailable the identity degrades to the path,
+/// which is what the marker held before.
+fn driver_identity(driver: &Path) -> String {
+    let mut identity = driver.display().to_string();
+    if let Ok(meta) = fs::metadata(driver) {
+        use std::fmt::Write as _;
+        let _ = write!(identity, " {}", meta.len());
+        if let Ok(mtime) = meta.modified()
+            && let Ok(since) = mtime.duration_since(std::time::UNIX_EPOCH)
+        {
+            let _ = write!(identity, " {}", since.as_nanos());
+        }
+    }
+    identity
+}
+
+/// Workspace members with no findings artifact from this run.
+fn unanalyzed(member_crates: &[String], artifacts: &[FindingsArtifact]) -> Vec<String> {
+    member_crates
+        .iter()
+        .filter(|krate| !artifacts.iter().any(|a| &&a.krate == krate))
+        .cloned()
+        .collect()
 }
 
 /// Drop cargo's freshness fingerprints in our dedicated build directory,
@@ -305,6 +426,13 @@ fn run_wrapped_check(
     let mut command = Command::new(cargo_bin());
     command
         .arg("check")
+        // The report has always been workspace-wide -- `cargo_metadata`
+        // returns every member from any cwd -- so the build has to be too.
+        // A bare `cargo check` took cargo's own package selection, which
+        // narrows to the cwd's package or to `default-members`, and the two
+        // sets disagreeing is what let a deny finding in an unbuilt crate
+        // pass with the sibling's previous, clean artifact still printed.
+        .arg("--workspace")
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env("RECONVERGE_ARTIFACTS_OUT", reconverge_dir)
         .env("CARGO_TARGET_DIR", build_dir)
@@ -410,7 +538,7 @@ fn collect_artifacts(
         else {
             continue;
         };
-        let Some((krate_in_name, _types)) = stem.split_once('-') else {
+        let Some((krate_in_name, types)) = stem.split_once('-') else {
             continue;
         };
         if !members.contains(&krate_in_name.to_string()) {
@@ -418,13 +546,28 @@ fn collect_artifacts(
         }
         let text = fs::read_to_string(&path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let artifact: FindingsArtifact = serde_json::from_str(&text)
+        // The schema tag, at last. The error text below has always promised
+        // this check; until 0.5.0 the only validation was the filename, so a
+        // `findings.v99` document — from a driver this build has never met —
+        // was merged, rendered, gated on and re-published on stdout while
+        // the SARIF from the same invocation stamped a different producer.
+        let mut artifact: FindingsArtifact = reconverge_artifacts::read::deserialize_checked(&text)
             .map_err(|e| format!("{} is not a findings.v1 artifact: {e}", path.display()))?;
         if artifact.krate == krate_in_name {
+            // A document written before 0.5.0 has no `target`; the filename
+            // has carried the crate types all along, so fill it in rather
+            // than leave two lib+bin documents indistinguishable.
+            if artifact.target.is_none() {
+                artifact.target = Some(types.to_string());
+            }
             artifacts.push(artifact);
         }
     }
-    artifacts.sort_by(|a, b| a.krate.cmp(&b.krate));
+    // Total, so stream order stops depending on `read_dir`: `crate` alone
+    // left two documents of one package ordered by directory iteration,
+    // which is stable within a project and differs between two projects
+    // whose package names differ and nothing else does.
+    artifacts.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     Ok(artifacts)
 }
 

@@ -12,6 +12,7 @@ mod mutate;
 mod score;
 mod util;
 
+use reconverge_artifacts::plural;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -32,9 +33,11 @@ fn main() -> ExitCode {
             let input = Path::new(&args[1]);
             let out = Path::new(&args[2]);
             if input.is_dir() {
-                mutate::run_corpus(input, out).map(|n| format!("{n} mutant crate(s)"))
+                mutate::run_corpus(input, out)
+                    .map(|n| format!("{n} mutant {}", plural(n, "crate", "crates")))
             } else {
-                mutate::run_file(input, out).map(|n| format!("{n} mutant file(s)"))
+                mutate::run_file(input, out)
+                    .map(|n| format!("{n} mutant {}", plural(n, "file", "files")))
             }
         }
         Some("score") if args.len() == 5 => {

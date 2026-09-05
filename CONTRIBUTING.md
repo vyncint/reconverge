@@ -137,8 +137,15 @@ allowlist is a list on purpose, so that widening it is a visible decision.
 - Branch from `main`; name branches `feat/…`, `fix/…`, `docs/…`, `ci/…`.
 - PRs are **squash-merged** — keep the PR title in Conventional Commit form,
   since it becomes the commit subject on `main`. Branches are deleted on merge.
-- Required checks: `required-green` (fmt, clippy, test, docs, deny, isolation, conformance), plus `commit-policy` (DCO + attribution). All
+- Required checks: `required-green` (fmt, clippy, test, docs, deny, isolation, conformance, schemas), plus `commit-policy` (DCO + attribution). All
   must pass before merge; direct pushes to `main` are blocked by a ruleset.
+- **A new crate that declares its own `[workspace]` must be added to the
+  `fmt` and `clippy` jobs by manifest path, and to `just ci`.** Every gate
+  here is workspace-scoped, so a standalone manifest is invisible to all of
+  them by construction — `conformance/extractor` sat outside every one of
+  them with a red clippy for months while `required-green` reported success,
+  and it is the crate that decides what the published precision table
+  measures.
 - **Every change lands with a test, and the test must be able to fail.** If
   you add a guard, break it once and watch it go red before you commit.
 - **Say what you did not do.** A PR that lists what it left out and why is

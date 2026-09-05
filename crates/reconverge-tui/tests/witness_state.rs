@@ -51,10 +51,13 @@ fn jump_to_divergence_lands_on_the_first_warp_split() {
     let data = canonical();
     let mut state = WitnessState::new(&data);
 
-    // rc001: the barrier step (index 3) is the first that changes lanes.
+    // rc001: the barrier step (index 1) is the first that changes lanes.
+    // Three steps, not five: the fixture is recorded from a real `check`
+    // since 0.5.0 rather than hand-written around MIR the driver has never
+    // emitted.
     assert!(state.update(KeyAction::JumpDivergence, &data));
-    assert_eq!(state.position, 4);
-    let states = data.witnesses[0].lane_states_at(Some(3));
+    assert_eq!(state.position, 2);
+    let states = data.witnesses[0].lane_states_at(Some(1));
     assert_eq!(
         states.iter().filter(|s| **s == LaneState::Waiting).count(),
         16,
@@ -78,8 +81,8 @@ fn jump_to_verdict_lands_after_the_verdict_step() {
     let data = canonical();
     let mut state = WitnessState::new(&data);
     assert!(state.update(KeyAction::JumpVerdict, &data));
-    // rc001's verdict.step is 4 (the last of 5 steps) -> position 5.
-    assert_eq!(state.position, 5);
+    // rc001's verdict.step is 2 (the last of 3 steps) -> position 3.
+    assert_eq!(state.position, 3);
 }
 
 #[test]

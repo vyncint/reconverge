@@ -1,6 +1,6 @@
 size: 80x24  cursor: hidden
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 1/2 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
+│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block (…│
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     oooooooo oooooooo oooooooo oooooooo                                 │
@@ -8,18 +8,18 @@ size: 80x24  cursor: hidden
 │                                                                              │
 │          o active   W waiting   . exited                                     │
 │                                                                              │
-│step 0/5  [.....]                                                             │
+│step 0/3  [...]                                                               │
 │launch — before the first event                                               │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 │▸  0  launch                                                                  │
-│   1  _4 = cuda_device::__internal::index_1d(&_3)                             │
-│   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                 │
-│   3  switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it          │
-│   4  _8 = cuda_device::sync_threads()                            16 waiting  │
-│   5  return — the odd lanes leave the kernel without ever reaching the barri…│
+│   1  lanes evaluate the guarding branch — 16 continue toward `sync_threads`,…│
+│   2  sync_threads() — 16 of 32 lanes arrive and wait             16 waiting  │
+│   3  the other 16 lanes exit or move past reconvergence without ever reachin…│
 │                                                                              │
-│verdict: undefined behavior (at step 5)                                       │
+│verdict: undefined behavior (at step 3)                                       │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

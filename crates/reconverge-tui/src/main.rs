@@ -297,11 +297,19 @@ fn run_triage(paths: &[PathBuf], baseline_path: &Path, ascii: bool, color: bool)
                     let mut changed = action.is_some_and(|action| state.update(action, &data));
                     if state.take_write_request() {
                         // The one filesystem write in the whole TUI, to the
-                        // one path the launcher named.
-                        let outcome = state
-                            .baseline
-                            .write_to(&data.baseline_path)
-                            .map_err(|e| e.to_string());
+                        // one path the launcher named — and only when this
+                        // session can actually see what is in it. A baseline
+                        // that did not parse still holds every reviewed
+                        // acceptance, with its date and its ticket number,
+                        // and `w` used to replace all of it with an empty
+                        // document and report success.
+                        let outcome = match &data.baseline_unreadable {
+                            Some(why) => Err(format!("write refused — {why}; fix or delete it")),
+                            None => state
+                                .baseline
+                                .write_to(&data.baseline_path)
+                                .map_err(|e| e.to_string()),
+                        };
                         state.record_write(outcome);
                         changed = true;
                     }

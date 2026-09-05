@@ -24,6 +24,9 @@ impl InspectOptions {
                     args::reject_value("--ascii", inline_value)?;
                     options.ascii = true;
                 }
+                // Below the value-taking flags, so `--baseline --help` is
+                // still the missing value it was.
+                flag if ArgError::help(flag) => return Err(ArgError::Help),
                 other => return Err(ArgError::unknown(other)),
             }
         }

@@ -27,10 +27,17 @@ pub fn load(paths: &[PathBuf]) -> WitnessData {
                 continue;
             }
         };
-        let schema = serde_json::from_str::<serde_json::Value>(&text)
-            .ok()
-            .and_then(|v| v["schema"].as_str().map(str::to_string))
-            .unwrap_or_default();
+        // One sniff, shared with the shell view: a document that does not
+        // parse says so, with its position, instead of collapsing into
+        // `unsupported schema ``` — a version statement about a file that
+        // is merely damaged.
+        let schema = match crate::load::sniff_schema(&name, &text) {
+            Ok(schema) => schema,
+            Err(e) => {
+                data.errors.push(e);
+                continue;
+            }
+        };
         if schema != "witness.v1" {
             data.errors
                 .push(format!("{name}: unsupported schema `{schema}`"));
@@ -91,7 +98,7 @@ mod tests {
         ]);
         assert!(data.errors.is_empty(), "{:?}", data.errors);
         assert_eq!(data.witnesses.len(), 2);
-        assert_eq!(data.witnesses[0].kernel, "divergent_barrier");
+        assert_eq!(data.witnesses[0].kernel, "rc001_divergent_barrier");
         assert_eq!(data.witnesses[1].kernel, "rc002_divergent_collective");
         // Span files are redacted to basenames on load.
         for w in &data.witnesses {
@@ -113,6 +120,30 @@ mod tests {
         assert_eq!(data.witnesses.len(), 0);
         assert_eq!(data.errors.len(), 2);
         assert!(data.errors[0].contains("unsupported schema `findings.v1`"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_damaged_artifact_is_named_a_damaged_artifact() {
+        let (dir, paths) = crate::load::tests_support::damaged_inputs("witness");
+        let data = load(&paths);
+        assert!(data.witnesses.is_empty());
+        assert_eq!(data.errors.len(), 4, "{:?}", data.errors);
+        for error in &data.errors[..3] {
+            assert!(error.contains("not JSON:"), "{error}");
+            assert!(error.contains("line 1"), "position must survive: {error}");
+        }
+        // Valid JSON with no `schema` key is a different thing and says so.
+        assert!(
+            data.errors[3].contains("unsupported schema `(missing)`"),
+            "{}",
+            data.errors[3]
+        );
+        assert!(
+            !data.errors.iter().any(|e| e.contains("schema ``")),
+            "the empty-backtick message names nothing at all: {:?}",
+            data.errors
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

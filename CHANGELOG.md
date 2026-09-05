@@ -12,7 +12,76 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-05
+
+The theme is **reading what the tool wrote**. Nine of these findings reduce
+to the same shape: an artifact, a document or a page was produced correctly
+and then consumed without ever being questioned — so the gate could pass on
+a crate it never built, a baseline could be suppressed by a document that
+said it was something else, and the debugger's evidence panel could argue
+against a true finding.
+
+### Added
+
+- **`reconverge-driver --reconverge-version`.** The driver is a
+  rustc-driver and forwards argv by design, so `--version` prints rustc's —
+  which meant the half that does the analysis and writes the artifact could
+  not be identified at all, while both shipped consumers stamped their
+  corpora with the *CLI's* version. Every other invocation still hands rustc
+  an untouched argv, cargo's `-vV` and `--print` probes included.
+
+- **`findings.v1` gains `target` and `coverage`, additively.** `target` is
+  the compiled target's crate types, so a package with a lib and a bin no
+  longer emits two documents that nothing can tell apart. `coverage` is the
+  run's own tally of what the engine could not read.
+
+- **`witness.v1` documents a multi-warp replay.** `lanes` is now whole warps
+  up to 128 rather than `const: 32`, `initial_lane_states` has no upper
+  bound, and `lane_changes[].lane` reaches 127. This is recording reality:
+  the declared-block replay has written 64, 96 and 128 since 0.1.12, so the
+  schema had been unsatisfiable for exactly the artifacts that gate a build.
+  It also states, for the first time, the invariant its lane strip is drawn
+  from — at any step carrying a `warp_op`, the lanes present are exactly the
+  set bits of `warp_op.active`.
+
+- **Three new gates.** `scripts/check-schemas.sh` validates `fixtures/` and
+  what an end-to-end `check` emits against `schemas/` (round-tripping
+  through serde is not validating: it tolerates anything additive and never
+  sees a `const`). `scripts/record-fixtures.sh` regenerates the witness
+  fixtures from a real run and diffs them, so the API tests test the
+  producer. `scripts/check-plurals.sh` fails on a count printed with a
+  parenthesized plural. `conformance/extractor` — its own workspace, and
+  therefore outside every gate in the repository — is now covered by fmt and
+  clippy in CI and in `just ci`.
+
 ### Changed
+
+- **JSON mode's help names the filters it ignores.** `--strict` and
+  `--show-suppressed` affect text output only; JSON remains the unfiltered
+  analysis record. The behavior was deliberate, but the help text previously
+  implied that both flags changed JSON output, and a run given either flag
+  in JSON mode now says so on stderr. Reported in #74.
+
+- **`witness.v1`'s `statement` is documented as prose, which is what it has
+  always carried.** It was described as a MIR statement or terminator; no
+  released driver has ever emitted one — the replay is built from the site
+  rather than by walking statements, and the model drops the printable form
+  at extraction. All three witness fixtures showed MIR, and all three were
+  stamped `tool.version 0.0.0`, so a front-end author who wrote a MIR parser
+  had it confirmed by the project's own API tests. The fixtures are now
+  recorded from a real `check`; `reconverged-clean.json` is the one that
+  cannot be (a witness is written only for a *confirmed* finding) and
+  `fixtures/README.md` says so. Reported in #92.
+
+- **Coverage is a property of the run, not a note on one rule.** It was
+  built inline in the RC001 site and nowhere else, so four of the five codes
+  never carried it — and the case it exists for could not be reached from a
+  note at all: a kernel whose divergent barrier is spelled in `asm!` has no
+  finding to hang one on, and `--strict` exited 0 over it with a clean bill
+  of health. The tally now rides in `findings.v1`, reaches every code as a
+  note, and closes the summary line whenever anything was left unread.
+  Reported in #96.
+
 
 - **JSON mode's help names the filters it ignores.** `--strict` and
   `--show-suppressed` affect text output only; JSON remains the unfiltered
@@ -20,6 +89,189 @@ the corpus; found-in-the-wild is the true north.
   implied that both flags changed JSON output.
 
 ### Fixed
+
+- **The gate compiles every member it gates on.** The wrapped build was a
+  bare `cargo check`, so cargo's own package selection applied while the
+  report and the exit code came from every member `cargo metadata` lists.
+  Run the gate from inside a member directory — which the action's own
+  `working-directory` input exists to do — or add a `default-members` line,
+  and the sibling was never re-linted while its previous, clean artifact was
+  printed as this run's answer, with the right paths, in the right order,
+  exit 0. A deny-tier RC003 and a confirmed RC001 rendered as
+  `0 deny, 0 confirmed`. It is `--workspace` now, and a member that still
+  produces nothing is named and exits 2 rather than passing by omission: the
+  self-heal already computed that set, forced a full rebuild with it, and
+  discarded it unread — which also cost two wrapped builds on every run
+  forever. Reported in #107.
+
+- **A findings artifact that is not one is refused.** `check` read a
+  document out of `target/reconverge/`, rendered it, gated on it and
+  re-published it on stdout without once asking whether it was one of its
+  own; the only validation was the filename, under an error message that
+  already promised the check. A `findings.v99` written by a driver this
+  build has never met was merged and printed while the SARIF from the same
+  invocation stamped a different producer. Reported in #109.
+
+- **A baseline is checked against its own schema tag.** `schema` exists to
+  be checked and nothing checked it, so a document declaring itself
+  `findings.v1`, from a tool that is not this one, suppressed a deny-tier
+  finding as happily as a real baseline — and a future `baseline.v2` whose
+  entries mean something else would be read with v1 semantics, silently, in
+  CI. All four readers now go through one `deserialize_checked`, so a fifth
+  cannot reintroduce the gap. Reported in #68.
+
+- **A driver replaced in place forces a re-lint.** The driver goes in as
+  `RUSTC_WORKSPACE_WRAPPER` and cargo does not notice a same-path wrapper
+  whose contents changed, so `cargo install reconverge-driver` over a warm
+  tree re-analyzed nothing and CI kept gating on whatever the old driver
+  concluded — including a clean verdict on a crate that now has a finding.
+  Its path, size and mtime live in the `cc-marker` beside `--cc`. Reported
+  in #109.
+
+- **A package with a lib and a bin emits two documents that name their
+  targets.** Both carried the same `crate`, and the driver's own comment
+  told consumers to key on it — so a dictionary keyed by `crate` keeps
+  whichever `read_dir` handed back last, which in the ordinary GPU-project
+  shape (kernels in the lib, a thin host binary beside them) can be the
+  empty one. The sort key is total now, so two projects of identical shape
+  stop emitting their documents in different orders. Reported in #93.
+
+- **`check` into a reader that closes early is not a crash.** Rust sets
+  `SIGPIPE` to `SIG_IGN`, so `println!` into a closed pipe panicked and the
+  process exited 101 — outside the documented set — reporting a rustc panic
+  notice as though the analyzer had crashed on the code under test.
+  `check --strict | head -40` is the most ordinary thing anyone does to a
+  long report. The verdict is computed before anything is rendered, so the
+  run keeps its exit code. Reported in #110.
+
+- **A comment in the analyzed source no longer erases the diagnostics above
+  it.** Two real `ESC` bytes in a source line repainted the terminal from
+  the analyzed file while the summary went on counting the findings it had
+  wiped. C0, DEL and C1 bytes render as Unicode control pictures, tabs
+  expand to a fixed stop, and nothing below `0x20` reaches stdout. Reported
+  in #108.
+
+- **The caret is measured in terminal cells.** A tab or a wide character
+  before the span put it under the wrong column, and a four-character CJK
+  parameter got four carets for the eight cells it occupies. Spans are
+  untouched: `findings.v1`, SARIF and the baseline keep character columns.
+  Reported in #105.
+
+- **The diagnostic block is indented by its own line number's width**,
+  the way rustc does it, rather than pinned at the width that suits a
+  two-digit line. And a source line past 120 cells is trimmed around its
+  span with an ellipsis marking the cut: an 830-column line wrapped ten
+  times on an 80-column terminal and scrolled its own header away. Reported
+  in #71.
+
+- **`--help` on every subcommand prints usage and exits 0.** It was reported
+  as an unrecognized argument, with exit 2 — a poor greeting for the first
+  thing anyone types. `--baseline --help` is still the missing value it was.
+  Reported in #74.
+
+- **`watch` keeps stdout clean in JSON mode.** Its dashboard went to stdout,
+  so half the stream was not JSON. Reported in #89.
+
+- **The summary line stops recommending the flag the run was given.** A
+  closing instruction to rerun with `--show-suppressed` in the run that
+  already passed it reads as though something were still being withheld,
+  which is exactly the doubt the flag exists to remove. The counts stay
+  unconditional. Reported in #103.
+
+- **SARIF carries the provenance walk, a `helpUri`, and a stable rule
+  level.** The chain back to the divergence source was dropped entirely
+  though SARIF has `relatedLocations` for its exact shape; the rules had
+  nothing behind "Learn more"; and a rule's default severity was sampled
+  from whichever result of that code came first, so swapping two kernels in
+  a source file flipped the published default. `--sarif` is how the action
+  delivers findings, so for a CI user this *is* the output. Reported in #70.
+
+- **A witness does not outlive the finding it replays.** Witnesses were
+  created and never removed, so fixing a kernel, re-running to
+  `0 confirmed` and opening the debugger replayed `undefined behavior` on
+  the barrier you had just hoisted — and downstream, where the directory is
+  the interface, a stale witness turned "declined to promote" into
+  "promoted". The driver prunes its own before writing, and `witness`
+  filters on the findings this run still has. Reported in #94.
+
+- **The lane strip agrees with the mask row above it.** At a warp
+  collective the departures were recorded one step *after* the call, so the
+  strip read all 32 lanes active two rows above an `active 0x55555555`
+  saying sixteen — in the one view a user opens because they do not yet
+  believe the finding. Reported in #91.
+
+- **A damaged artifact is named a damaged artifact.** The same half-written
+  file got three different diagnoses depending on which mode read it: the
+  shell view named the parse error and its position, the mode loaders threw
+  it away and printed `unsupported schema ``` — an empty pair of backticks
+  naming nothing — and inspect said nothing at all, because its `errors`
+  field was written at four sites and read at none. "Unsupported schema" is
+  a version statement, and none of what it suggests helps a truncated file.
+  One `sniff_schema`, three callers, and inspect renders its errors.
+  Reported in #97.
+
+- **A baseline triage cannot parse is no longer replaced by an empty one.**
+  The error rendered only in the branch where there is nothing to review, so
+  the screen looked entirely normal — 23 findings, `0 suppressed` — and `w`,
+  which has no dirty guard, wrote an empty document and reported
+  `baseline written`. Every reviewed acceptance, with its date and its
+  ticket number, was gone, and so was the loud exit 2 that would have sent
+  anyone to look at the file. That is the loop a maintainer walks *because*
+  `check` complained about that file. The write is refused, the errors
+  render above the list, `cargo reconverge triage --baseline <broken>` exits
+  2 with the message `check` prints, and `write_to` renames into place so a
+  failed write cannot truncate a *good* baseline either. Reported in #88.
+
+- **The conformance and mutation gates run on macOS.** Both prune a member
+  with GNU `sed -i`; BSD sed takes a mandatory operand after `-i`, so the
+  expression was eaten as a backup suffix and the run died on
+  `invalid command code C`. Neither prune is conditional, so no macOS
+  contributor could run either gate as committed. Reported in #82 and #83.
+
+- **`conformance/extractor` passes the repo's own clippy standard**, and is
+  gated on it. It declares its own `[workspace]` and every gate here is
+  workspace-scoped, so the crate that decides what the published precision
+  table measures had the least scrutiny of anything in the tree — with a
+  dead helper failing `-D warnings` for months while `required-green`
+  reported success. Reported in #101.
+
+- **`notify-testing-repo` can run.** It was guarded on
+  `github.event_name == 'push'` in a workflow with no `push:` trigger, so
+  the condition was unsatisfiable and the job had never executed once —
+  skipped, not failed, beside three green jobs, which looks exactly like a
+  job that worked. It now keys on `!inputs.dry_run`, takes its version from
+  `inputs.tag` rather than a branch name, and names a non-2xx from the
+  dispatch API. Reported in #90.
+
+- **Counts agree with their nouns, and a gate keeps them that way.** The
+  published precision table still read `466 gating finding(s)` — pinned
+  there byte-for-byte by the mutation gate's own diff, because the extractor
+  could not reach `reconverge_artifacts::plural` across the workspace
+  boundary. No compiler catches this class, which is why #62 closed without
+  a gate and it came back. Reported in #102.
+
+- **The multi-warp limitation states itself once.** The README said a warp
+  collective on a lane's path aborts the multi-warp replay, and said the
+  opposite four lines later; the second is the true one and has been since
+  #30. The superseded sentence is deleted rather than negated in place, and
+  a lint-sample kernel pairing a 64-thread contract with a collective on the
+  path sits next to it as the counterexample. Reported in #106.
+
+- **`--explain RC002` describes the analyzer that ships.** It called the
+  unmasked convenience wrappers unchecked — while `warp::ballot` under a
+  divergent guard is the `confirmed` finding that just failed the reader's
+  CI, which makes a baseline entry against a real, gating, correct
+  diagnostic the natural next step. It also called an exactly-matching mask
+  unflagged, and its fix snippet used `thread::lane_id`, which does not
+  exist. A test now derives the coverage claim from the dialect rather than
+  restating it. Reported in #95.
+
+- **The crates.io install page carries the `@VERSION` pins.** It offered an
+  unpinned `cargo install` as "the manual equivalent" of a command that
+  pins, one sentence after saying `setup` installs the companions at the
+  CLI's own version — on the page where the install actually happens. A unit
+  test compares both READMEs against `setup`'s own plan. Reported in #104.
+
 
 - **RC005 launch-contract mismatch help spells axis counts once.** A
   `domain = 2` contract with a 1D index formula no longer says `covers 2 two
@@ -73,6 +325,19 @@ the corpus; found-in-the-wild is the true north.
   normalized `major.minor` form, so two spellings of one capability (`8.6`
   and `+8.6`) no longer look like a change that drops the build fingerprints
   and forces a full re-lint. Reported in #73.
+
+### Numbers
+
+- **Conformance:** 0 false positives at default confidence over the
+  extracted upstream corpus; gating findings match the reviewed baseline
+  exactly.
+- **Mutation corpus:** precision 1.000 at default confidence over 466 gating
+  findings across all compiling mutants — the published table
+  ([`conformance/MUTATION.md`](conformance/MUTATION.md)) regenerates
+  byte-identically.
+- **Found in the wild:** all 27 issues closed here were reported against
+  0.4.0 with a measured reproduction; none came from the corpus.
+
 
 ## [0.4.0] — 2026-08-26
 
@@ -633,6 +898,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.5.0]: https://github.com/vyncint/reconverge/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vyncint/reconverge/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vyncint/reconverge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vyncint/reconverge/releases/tag/v0.2.0

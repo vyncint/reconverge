@@ -16,7 +16,7 @@ exclude = ["/tests"]
 [dependencies]
 # INVARIANT (docs/ARCHITECTURE.md): reconverge-artifacts is the only workspace
 # dependency the TUI may ever have; scripts/check-isolation.sh enforces it.
-reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.4.0" }
+reconverge-artifacts = { path = "../reconverge-artifacts", version = "0.5.0" }
 ratatui = "0.30"
 serde_json = { workspace = true }
 unicode-normalization = "0.1"
@@ -29,4 +29,4 @@ unicode-width = "0.2"
 # deliberately via Cargo.lock, never `*` — the golden frames make any
 # behavior change visible. default-features off: no insta, goldens are
 # plain files.
-termlens = { version = "0.7.0", default-features = false }
+termlens = { version = "0.9", default-features = false }

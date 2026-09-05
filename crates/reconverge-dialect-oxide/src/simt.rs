@@ -2,7 +2,11 @@
 //! definition path, verified against cuda-device at the pinned rev.
 //! Path matching only — no upstream code is vendored.
 
-use reconverge_core::dialect::{CallKind, MaskSource, SimtDialect};
+use reconverge_core::dialect::SimtDialect;
+// Re-exported: `classify_call` is public, so the vocabulary of its return
+// type has to be reachable from the same path. A caller could not name what
+// it was handed.
+pub use reconverge_core::dialect::{CallKind, MaskSource};
 
 /// The cuda-oxide dialect.
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,10 +60,10 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // surface, every one taking the participation mask as its first
         // argument, plus `sync_mask` — the warp barrier, whose mask carries
         // the same contract. The unmasked convenience wrappers (`shuffle`,
-        // `ballot`, `all`, `any`, `reduce_*`, …) hide the collective — and
-        // an implicit full mask — inside cuda-device, where the analysis
-        // cannot see the mask argument; they are a documented v1 recall gap
-        // (explain/RC002.md), never misread as mask-first calls.
+        // `ballot`, `all`, `any`, …) hide the collective — and an implicit
+        // full mask — inside cuda-device; they are classified below as
+        // `ImplicitFull` rather than misread as mask-first calls. They have
+        // been covered since #21, and explain/RC002.md now says so.
         // The partial-warp reducers build their mask from a runtime
         // `live_lanes` argument, so it is neither full nor the first
         // argument. Classified anyway: a warning naming an unevaluable

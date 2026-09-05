@@ -131,7 +131,9 @@ fn triage_flow_journey() {
 
     // w: write, and check the bytes that landed.
     t.send(Key::Char('w')).expect("send Key::Char('w')");
-    t.wait_until(|s| s.contains("baseline written — 1 entry(ies)") && !s.contains("(unsaved)"))
+    // Both nouns are pinned, here and at the second write below: the
+    // singular is the one that used to read `1 entry(ies)`.
+    t.wait_until(|s| s.contains("baseline written — 1 entry") && !s.contains("(unsaved)"))
         .expect("baseline written");
     let written: BaselineArtifact =
         serde_json::from_str(&fs::read_to_string(&baseline).expect("baseline file exists"))
@@ -238,4 +240,92 @@ fn matrix_80x24() {
 #[test]
 fn matrix_120x40() {
     matrix_leg((120, 40));
+}
+
+/// A baseline that does not parse must survive every keystroke, byte for
+/// byte, and the refusal must say so.
+///
+/// This is the coverage gap that let it ship: all four journeys above and
+/// all three unit tests in `triage/data.rs` start from either a
+/// nonexistent baseline or the valid `fixtures/baseline/minimal.json`, so
+/// the `Err` arm of the loader had no test at all — while `w` has no
+/// `dirty` guard and the error line rendered only in the branch where
+/// there is nothing to review and nothing to write.
+#[test]
+fn an_unparseable_baseline_survives_a_full_review_pass() {
+    // Four corruption shapes, each reachable without doing anything
+    // unusual: a truncated tail, a trailing comma, git conflict markers,
+    // and an entry hand-added without a reason.
+    let cases: [(&str, &str); 4] = [
+        (
+            "trunc",
+            "{\n  \"schema\": \"baseline.v1\",\n  \"entries\": [\n",
+        ),
+        (
+            "comma",
+            "{\"schema\":\"baseline.v1\",\"tool\":{\"name\":\"reconverge\",\"version\":\"0\"},\
+             \"entries\":[],}",
+        ),
+        ("conflict", "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n"),
+        (
+            "noreason",
+            "{\"schema\":\"baseline.v1\",\"tool\":{\"name\":\"reconverge\",\"version\":\"0\"},\
+             \"entries\":[{\"crate\":\"k\",\"code\":\"RC003\"}]}",
+        ),
+    ];
+
+    for (tag, body) in cases {
+        let dir = scratch(&format!("refuse-{tag}"));
+        let baseline = dir.join("reconverge-baseline.json");
+        fs::write(&baseline, body).unwrap();
+        let before = fs::read(&baseline).unwrap();
+
+        let mut t = spawn((100, 26), &[], &[], &baseline);
+        // The findings are still listed — the load is lenient on purpose —
+        // and the reason the write will be refused is on screen beside
+        // them, not only in the branch where the list is empty.
+        let frame = t
+            .wait_frame(|s| s.contains("2 findings") && s.contains("not a baseline.v1 document"))
+            .unwrap_or_else(|e| panic!("{tag}: the parse error must be in frame: {e}"));
+        if tag == "trunc" {
+            // A golden of exactly that pairing, so the line cannot be
+            // gated back inside the empty-list branch it used to live in.
+            assert_golden(
+                "triage-unreadable-baseline-100x26.txt",
+                &frame.to_string(),
+                "unreadable baseline",
+            );
+        }
+
+        // A full review pass: accept a finding, give it a reason, write.
+        t.send(Key::Char('s')).expect("send Key::Char('s')");
+        t.wait_until(|s| s.contains("reason:"))
+            .unwrap_or_else(|e| panic!("{tag}: {e}"));
+        for ch in "reviewed".chars() {
+            t.send(Key::Char(ch)).expect("send a reason character");
+        }
+        t.wait_until(|s| s.contains("reviewed"))
+            .unwrap_or_else(|e| panic!("{tag}: {e}"));
+        t.send(Key::Enter).expect("send Key::Enter");
+        t.wait_until(|s| s.contains("1 suppressed"))
+            .unwrap_or_else(|e| panic!("{tag}: {e}"));
+        t.send(Key::Char('w')).expect("send Key::Char('w')");
+        t.wait_until(|s| s.contains("write refused"))
+            .unwrap_or_else(|e| panic!("{tag}: `w` must be refused, not reported: {e}"));
+
+        t.send(Key::Char('q')).expect("send Key::Char('q')");
+        // The edit is unsaved, so `q` asks first — which it should, and
+        // which is also the proof nothing was written.
+        t.wait_until(|s| s.contains("unsaved") || s.contains("again"))
+            .unwrap_or_else(|e| panic!("{tag}: {e}"));
+        t.send(Key::Char('q')).expect("send Key::Char('q')");
+        let status = t.wait_exit().unwrap_or_else(|e| panic!("{tag}: {e}"));
+        assert!(status.success(), "{tag}: exited with {status:?}");
+
+        assert_eq!(
+            before,
+            fs::read(&baseline).unwrap(),
+            "{tag}: the baseline must be unchanged, byte for byte"
+        );
+    }
 }

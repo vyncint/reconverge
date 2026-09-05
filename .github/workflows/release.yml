@@ -139,7 +139,11 @@ jobs:
   notify-testing-repo:
     name: notify-testing-repo
     needs: publish
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    # NOT `github.event_name == 'push'`: this workflow has no `push:` trigger
+    # (see the header), so that condition was unsatisfiable and the job had
+    # never run once. What distinguishes a real publish here is the dispatch
+    # input, so that is what it asks.
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -148,14 +152,26 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.TESTING_REPO_DISPATCH_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          # `inputs.tag`, like every other step in this file: a dispatch
+          # runs from a branch, so `github.ref_name` here is `main`.
+          TAG: ${{ inputs.tag }}
         run: |
           if [ -z "${GH_TOKEN:-}" ]; then
             echo "::notice::TESTING_REPO_DISPATCH_TOKEN is not set; simt-diff will pick this up on its own schedule instead"
             exit 0
           fi
-          gh api repos/vyncint/simt-diff/dispatches \
+          # A non-2xx is named rather than swallowed: the job stays
+          # `continue-on-error`, so a broken notification still cannot fail
+          # a release, but "it worked" and "it never ran" stop looking the
+          # same from the outside.
+          out=$(gh api repos/vyncint/simt-diff/dispatches \
             -f event_type=tool-published \
-            -F "client_payload[version]=${TAG#v}" \
-            && echo "dispatched tool-published to simt-diff" \
-            || echo "::warning::could not dispatch to simt-diff; it will pick this up on its own schedule"
+            -F "client_payload[version]=${TAG#v}" 2>&1)
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "dispatched tool-published to simt-diff for ${TAG#v}"
+          else
+            echo "::warning::could not dispatch to simt-diff (gh exit $status): $out"
+            echo "::warning::simt-diff will pick ${TAG#v} up on its own schedule instead"
+            exit 1
+          fi

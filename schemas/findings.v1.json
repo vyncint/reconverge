@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/findings.v1.json",
   "title": "findings.v1",
-  "description": "Findings artifact: one document per analyzed crate. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::findings is the Rust binding; fixtures/findings/ are the API tests.",
+  "description": "Findings artifact: one document per analyzed target. A package with a lib and a bin compiles twice under one crate name and writes one document each; `target` is what tells them apart, so `crate` is not a primary key. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::findings is the Rust binding; fixtures/findings/ are the API tests.",
   "type": "object",
   "required": ["schema", "tool", "crate", "findings"],
   "properties": {
@@ -16,12 +16,27 @@
       }
     },
     "crate": { "type": "string" },
+    "target": {
+      "type": "string",
+      "description": "The compiled target's crate types, as cargo spells them (`lib`, `bin`, `proc-macro`). Added in 0.5.0; absent only in a document written before it."
+    },
+    "coverage": { "$ref": "#/$defs/coverage" },
     "findings": {
       "type": "array",
       "items": { "$ref": "#/$defs/finding" }
     }
   },
   "$defs": {
+    "coverage": {
+      "type": "object",
+      "description": "What the analysis could and could not read across this whole target. A property of the run rather than of a finding, so it is present on a clean document too -- which is the case it exists for: a kernel whose divergent barrier is spelled in `asm!` produces no finding to hang a note on. Added in 0.5.0.",
+      "required": ["analyzed_statements", "opaque_statements", "opaque_functions"],
+      "properties": {
+        "analyzed_statements": { "type": "integer", "minimum": 0 },
+        "opaque_statements": { "type": "integer", "minimum": 0, "description": "Statements the engine could not model (`asm!`, unmodeled intrinsics)." },
+        "opaque_functions": { "type": "integer", "minimum": 0, "description": "Analyzed functions carrying at least one opaque statement." }
+      }
+    },
     "finding": {
       "type": "object",
       "required": ["code", "confidence", "message", "span", "explain"],

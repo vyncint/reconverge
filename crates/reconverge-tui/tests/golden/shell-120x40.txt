@@ -4,7 +4,7 @@ size: 120x40  cursor: hidden
 │                                                                                                                      │
 │findings.v1  rc003-minimal.json  crate sample_kernels — 2 findings: 1 deny, 0 confirmed, 1 warning                    │
 │unimap.v1  divergent-barrier.json  crate sample_kernels — 1 function, 3 values, 2 divergent                           │
-│witness.v1  rc001-divergent-barrier.json  kernel divergent_barrier — verdict: undefined behavior at step 4 (5 steps, …│
+│witness.v1  rc001-divergent-barrier.json  kernel rc001_divergent_barrier — verdict: undefined behavior at step 2 (3 s…│
 │                                                                                                                      │
 │views: inspect · witness · learn · triage                                                                             │
 │                                                                                                                      │

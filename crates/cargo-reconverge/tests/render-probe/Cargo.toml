@@ -1,0 +1,16 @@
+[package]
+name = "render-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone, like `lint-samples`: the CLI tests compile this crate through
+# `cargo reconverge check` exactly the way a user's kernel crate is compiled.
+# It is deliberately separate from `lint-samples` because every kernel here
+# exists for how its *source line* renders, not for what the analysis finds —
+# an escape byte in a comment, a tab, a wide identifier, an 800-column line.
+[workspace]
+
+[dependencies]
+# Same pinned rev as the driver's sample crate; conformance/PIN records it.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/witness.v1.json",
   "title": "witness.v1",
-  "description": "Witness artifact: a concrete 32-lane replay of one finding under one launch configuration. Lane states are delta-encoded per step (only changes are recorded), so a 10k-step trace stays small. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::witness is the Rust binding; fixtures/witness/ are the API tests.",
+  "description": "Witness artifact: a concrete replay of one finding under one launch configuration -- one warp, or the declared block when a #[launch_contract] names several whole warps (64, 96, 128). Blocks that are 2D, not whole warps, or wider than 128 threads stay at the one-warp replay. Lane states are delta-encoded per step (only changes are recorded), so a 10k-step trace stays small. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::witness is the Rust binding; fixtures/witness/ are the API tests.",
   "type": "object",
   "required": ["schema", "tool", "crate", "kernel", "launch", "lanes", "initial_lane_states", "steps", "verdict"],
   "properties": {
@@ -36,11 +36,11 @@
         "warp": { "type": "integer", "minimum": 0, "description": "Index of the replayed warp within its block." }
       }
     },
-    "lanes": { "type": "integer", "const": 32 },
+    "lanes": { "type": "integer", "minimum": 32, "maximum": 128, "multipleOf": 32, "description": "32 for the ordinary one-warp replay, or the declared block when the contract names several whole warps. This was `const: 32` through 0.4.0 while the driver had been writing 64, 96 and 128 since 0.1.12 -- so the artifacts that failed validation were exactly the gating ones." },
     "initial_lane_states": {
       "type": "array",
+      "description": "One entry per lane: `lanes` long.",
       "minItems": 32,
-      "maxItems": 32,
       "items": { "$ref": "#/$defs/lane_state" }
     },
     "steps": {
@@ -50,16 +50,16 @@
         "required": ["index", "statement", "lane_changes"],
         "properties": {
           "index": { "type": "integer", "minimum": 0 },
-          "statement": { "type": "string", "description": "The MIR statement or terminator executed at this step." },
+          "statement": { "type": "string", "description": "What happens at this step, in prose: \"sync_threads() - 16 of 32 lanes arrive and wait\". Documented as a MIR statement through 0.4.0, which no released driver has ever emitted: the replay is built from the site rather than by walking statements, and the model drops the printable form at extraction. If the MIR line is ever carried through, it belongs in a second field beside this one." },
           "span": { "$ref": "#/$defs/span" },
           "lane_changes": {
             "type": "array",
-            "description": "Delta encoding: only lanes whose state changed at this step.",
+            "description": "Delta encoding: only lanes whose state changed at this step. Invariant: at any step carrying a `warp_op`, the lanes still present after replaying the deltas up to and including that step are exactly the set bits of `warp_op.active` -- so the lane strip a debugger draws agrees with the mask row beneath it.",
             "items": {
               "type": "object",
               "required": ["lane", "state"],
               "properties": {
-                "lane": { "type": "integer", "minimum": 0, "maximum": 31 },
+                "lane": { "type": "integer", "minimum": 0, "maximum": 127 },
                 "state": { "$ref": "#/$defs/lane_state" }
               }
             }

@@ -40,13 +40,37 @@ pub fn display_name(path: &Path) -> String {
     ))
 }
 
+/// The schema a document *claims*, without committing to a shape.
+///
+/// One place, because there were four and they had drifted. The shell view
+/// got it right; the three mode loaders each rolled the same five lines
+/// with `.ok()` and `.unwrap_or_default()`, which threw the parse error
+/// away and printed `unsupported schema ``` — an empty pair of backticks
+/// naming nothing at all, for a file that is simply damaged.
+///
+/// The distinction matters because "unsupported schema" is a *version*
+/// statement: it sends the reader to reinstall the driver, check the pin,
+/// go read `schemas/`. None of that helps a half-written artifact, and a
+/// half-written artifact is easy to get — the driver writes with
+/// `File::create` and no atomic rename, so a Ctrl-C during `check` leaves
+/// one behind.
+///
+/// # Errors
+///
+/// `not JSON: {e}`, with the position, when the text does not parse at all.
+/// A well-formed document with no `schema` key is `Ok("(missing)")`, which
+/// is a different thing and says so.
+pub fn sniff_schema(name: &str, text: &str) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("{name}: not JSON: {e}"))?;
+    Ok(value["schema"].as_str().unwrap_or("(missing)").to_string())
+}
+
 /// Load one artifact file of any supported schema.
 pub fn load(path: &Path) -> Result<LoadedArtifact, String> {
     let name = display_name(path);
     let text = fs::read_to_string(path).map_err(|e| format!("{name}: {e}"))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("{name}: not JSON: {e}"))?;
-    let schema = value["schema"].as_str().unwrap_or("(missing)").to_string();
+    let schema = sniff_schema(&name, &text)?;
 
     let summary = match schema.as_str() {
         "findings.v1" => {
@@ -131,6 +155,36 @@ fn summarize_witness(artifact: &WitnessArtifact) -> String {
 }
 
 #[cfg(test)]
+pub(crate) mod tests_support {
+    /// The five shapes a damaged artifact arrives in. Each must be named
+    /// for what it is — a parse failure with a position — rather than
+    /// collapsing into `unsupported schema ``, which is a *version*
+    /// statement about a file that is merely half-written.
+    ///
+    /// This is the coverage gap that let it ship: every loader test here
+    /// only ever handed the loader a well-formed document with the wrong
+    /// `schema` string, which is the one damaged shape that already worked.
+    pub(crate) fn damaged_inputs(tag: &str) -> (std::path::PathBuf, Vec<std::path::PathBuf>) {
+        let dir = std::env::temp_dir().join(format!("rc-tui-damaged-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cases = [
+            ("empty.json", ""),
+            ("trunc.json", r#"{"schema":"witness.v1","kern"#),
+            ("notjson.json", "not json at all"),
+            ("noschema.json", r#"{"kernel":"k"}"#),
+        ];
+        let mut paths = Vec::new();
+        for (name, body) in cases {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            paths.push(path);
+        }
+        (dir, paths)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::path::Path;
 
@@ -162,8 +216,17 @@ mod tests {
         assert_eq!(witness.schema, "witness.v1");
         assert_eq!(
             witness.summary,
-            "kernel divergent_barrier — verdict: undefined behavior at step 4 (5 steps, 32 lanes)"
+            "kernel rc001_divergent_barrier — verdict: undefined behavior at step 2 \
+             (3 steps, 32 lanes)"
         );
+
+        // The multi-warp fixture: recorded from a run whose kernel declares
+        // `block = (64, 1, 1)`, which is the shape `witness.v1` used to
+        // reject while the driver had been writing it for four minor
+        // versions. Loading it is the reader half of that.
+        let wide = load(&fixture("witness/rc001-multiwarp-barrier.json")).unwrap();
+        assert_eq!(wide.schema, "witness.v1");
+        assert!(wide.summary.contains("64 lanes"), "{}", wide.summary);
     }
 
     #[test]
