@@ -51,10 +51,17 @@ pub fn load(paths: &[std::path::PathBuf]) -> InspectorData {
                 continue;
             }
         };
-        let schema = serde_json::from_str::<serde_json::Value>(&text)
-            .ok()
-            .and_then(|v| v["schema"].as_str().map(str::to_string))
-            .unwrap_or_default();
+        // One sniff, shared with the shell view: a document that does not
+        // parse says so, with its position, instead of collapsing into
+        // `unsupported schema ``` — a version statement about a file that
+        // is merely damaged.
+        let schema = match crate::load::sniff_schema(&name, &text) {
+            Ok(schema) => schema,
+            Err(e) => {
+                data.errors.push(e);
+                continue;
+            }
+        };
         match schema.as_str() {
             "unimap.v1" => match serde_json::from_str::<UnimapArtifact>(&text) {
                 Ok(artifact) => {
@@ -163,5 +170,49 @@ impl FunctionData {
                 v.span.line_start == span.line_start && v.span.column_start == span.column_start
             })
             .map(|v| v.id.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(rel: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(rel)
+    }
+
+    /// `inspect/data.rs` had no loader test at all, which is how its
+    /// `errors` field came to be written at four sites and read at none:
+    /// a truncated findings file, a nonexistent path and a valid file with
+    /// zero findings all rendered as `no findings loaded`, and the exit
+    /// code was the same as a successful run.
+    #[test]
+    fn a_damaged_artifact_is_named_rather_than_dropped() {
+        let (dir, paths) = crate::load::tests_support::damaged_inputs("inspect");
+        let mut inputs = vec![fixture("inspect/unimap.json")];
+        inputs.extend(paths);
+        let data = load(&inputs);
+        assert!(
+            !data.functions.is_empty(),
+            "the good unimap still loads beside the damaged files"
+        );
+        assert_eq!(data.errors.len(), 4, "{:?}", data.errors);
+        assert!(data.errors[0].contains("not JSON:"), "{:?}", data.errors);
+        assert!(
+            !data.errors.iter().any(|e| e.contains("schema ``")),
+            "{:?}",
+            data.errors
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A path that is not there is distinguishable from having passed none.
+    #[test]
+    fn a_missing_file_is_an_error_not_a_silence() {
+        let data = load(&[fixture("inspect/unimap.json"), fixture("inspect/nope.json")]);
+        assert_eq!(data.errors.len(), 1, "{:?}", data.errors);
+        assert!(data.errors[0].contains("nope.json"), "{:?}", data.errors);
     }
 }

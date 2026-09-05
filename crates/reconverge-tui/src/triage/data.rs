@@ -18,6 +18,14 @@ pub struct TriageData {
     pub baseline_path: PathBuf,
     /// Load problems, rendered in-frame.
     pub errors: Vec<String>,
+    /// Why the baseline could not be read, when it exists and did not parse.
+    ///
+    /// `Some` means the file on disk holds review decisions this session
+    /// cannot see, so writing would replace them with whatever the session
+    /// *can* see — which was an empty document, reported as
+    /// `baseline written`. The load stays lenient so the findings are still
+    /// reviewable; the write is what is refused.
+    pub baseline_unreadable: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,10 +55,17 @@ pub fn load(paths: &[PathBuf], baseline_path: &Path) -> (TriageData, BaselineArt
                 continue;
             }
         };
-        let schema = serde_json::from_str::<serde_json::Value>(&text)
-            .ok()
-            .and_then(|v| v["schema"].as_str().map(str::to_string))
-            .unwrap_or_default();
+        // One sniff, shared with the shell view: a document that does not
+        // parse says so, with its position, instead of collapsing into
+        // `unsupported schema ``` — a version statement about a file that
+        // is merely damaged.
+        let schema = match crate::load::sniff_schema(&name, &text) {
+            Ok(schema) => schema,
+            Err(e) => {
+                data.errors.push(e);
+                continue;
+            }
+        };
         if schema != "findings.v1" {
             data.errors
                 .push(format!("{name}: unsupported schema `{schema}`"));
@@ -81,22 +96,26 @@ pub fn load(paths: &[PathBuf], baseline_path: &Path) -> (TriageData, BaselineArt
     });
 
     let baseline = match fs::read_to_string(baseline_path) {
-        Ok(text) => match serde_json::from_str::<BaselineArtifact>(&text) {
-            Ok(mut parsed) => {
-                for entry in &mut parsed.entries {
-                    entry.reason = nfc(&entry.reason);
+        Ok(text) => {
+            match reconverge_artifacts::read::deserialize_checked::<BaselineArtifact>(&text) {
+                Ok(mut parsed) => {
+                    for entry in &mut parsed.entries {
+                        entry.reason = nfc(&entry.reason);
+                    }
+                    parsed.normalize();
+                    parsed
                 }
-                parsed.normalize();
-                parsed
+                Err(e) => {
+                    let message = format!(
+                        "{}: not a baseline.v1 document: {e}",
+                        display_name(baseline_path)
+                    );
+                    data.errors.push(message.clone());
+                    data.baseline_unreadable = Some(message);
+                    BaselineArtifact::empty()
+                }
             }
-            Err(e) => {
-                data.errors.push(format!(
-                    "{}: not a baseline.v1 document: {e}",
-                    display_name(baseline_path)
-                ));
-                BaselineArtifact::empty()
-            }
-        },
+        }
         Err(_) => BaselineArtifact::empty(),
     };
 
@@ -155,5 +174,72 @@ mod tests {
         assert!(data.items.is_empty());
         assert_eq!(data.errors.len(), 1);
         assert!(data.errors[0].contains("unsupported schema `witness.v1`"));
+    }
+
+    #[test]
+    fn a_damaged_findings_file_is_named_a_damaged_file() {
+        let (dir, paths) = crate::load::tests_support::damaged_inputs("triage");
+        let (data, _) = load(&paths, &fixture("baseline/minimal.json"));
+        assert!(data.items.is_empty());
+        assert_eq!(data.errors.len(), 4, "{:?}", data.errors);
+        assert!(data.errors[0].contains("not JSON:"), "{:?}", data.errors);
+        assert!(
+            !data.errors.iter().any(|e| e.contains("schema ``")),
+            "{:?}",
+            data.errors
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A baseline that does not parse must leave the write refused, not
+    /// merely visible. The load stays lenient so the findings are still
+    /// reviewable; `baseline_unreadable` is what stops `w`.
+    #[test]
+    fn a_baseline_that_does_not_parse_blocks_the_write() {
+        let dir = std::env::temp_dir().join(format!("rc-tui-badbl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Four corruption shapes, all reachable without doing anything
+        // unusual: a truncated tail, a trailing comma, git conflict
+        // markers, and a wrong-but-valid schema tag.
+        for (name, body) in [
+            (
+                "trunc.json",
+                "{\n \"schema\": \"baseline.v1\",\n \"entries\": [\n",
+            ),
+            (
+                "comma.json",
+                "{\"schema\":\"baseline.v1\",\"tool\":{\"name\":\"reconverge\",\
+                 \"version\":\"0\"},\"entries\":[],}",
+            ),
+            (
+                "conflict.json",
+                "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n",
+            ),
+            (
+                "wrongtag.json",
+                "{\"schema\":\"findings.v1\",\"tool\":{\"name\":\"x\",\"version\":\"9\"},\
+                 \"entries\":[]}",
+            ),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            let (data, baseline) = load(&[fixture("findings/rc003-minimal.json")], &path);
+            assert!(
+                !data.items.is_empty(),
+                "{name}: the findings stay reviewable"
+            );
+            assert!(
+                data.baseline_unreadable.is_some(),
+                "{name}: the write must be refused"
+            );
+            assert!(
+                data.errors.iter().any(|e| e.contains(name)),
+                "{name}: and the reason must be on screen: {:?}",
+                data.errors
+            );
+            assert!(baseline.entries.is_empty());
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

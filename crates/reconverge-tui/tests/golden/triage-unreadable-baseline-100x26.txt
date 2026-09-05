@@ -1,0 +1,27 @@
+size: 100x26  cursor: hidden
+┌ reconverge triage ───────────────────────────────────────────────────────────────────────────────┐
+│2 findings — 0 suppressed — baseline: reconverge-baseline.json                                    │
+│                                                                                                  │
+│reconverge-baseline.json: not a baseline.v1 document: EOF while parsing a list at line 4 column 0 │
+│>[ ] deny      RC003 bad_mut_slice            kernel `bad_mut_slice` takes `&mut [f32]` as a para…│
+│ [ ] warning   RC005 scale                    kernel `scale` uses `index_1d()` without a launch c…│
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│sample_kernels RC003 — lib.rs:4 — open                                                            │
+│kernel `bad_mut_slice` takes `&mut [f32]` as a parameter                                          │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└ j/k move  s suppress  u unsuppress  w write  q quit ─────────────────────────────────────────────┘

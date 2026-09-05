@@ -110,6 +110,25 @@ jobs:
       - run: ./scripts/run-conformance.sh
       - run: ./scripts/run-mutation-corpus.sh
 
+  # The artifacts are the contract between the engine and every front-end,
+  # and until 0.5.0 nothing validated one against a schema: the Rust
+  # round-trip tests go through serde, which tolerates anything additive and
+  # never sees a `const`. Both corpora, because they fail differently --
+  # `fixtures/` is what a front-end author validates against, and an
+  # end-to-end `check` is what the driver actually emits.
+  schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - run: ./scripts/check-schemas.sh
+      # And the fixtures are recorded from a real run rather than written by
+      # hand, so they cannot describe an artifact nobody produces.
+      - run: ./scripts/record-fixtures.sh --check
+
   # The TUI suite is the reason macOS runs at all: terminal behavior is
   # where the platforms actually differ.
   macos:
@@ -133,7 +152,7 @@ jobs:
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, docs, deny, isolation, conformance]
+    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every gate succeeded

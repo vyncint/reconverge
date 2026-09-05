@@ -104,31 +104,57 @@ pub fn render(frame: &mut Frame<'_>, view: &InspectorView<'_>) {
     frame.render_widget(block, area);
 
     let Some(function) = view.data.functions.get(view.state.function) else {
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from("no unimap loaded"),
-                Line::from("usage: reconverge-tui inspect [--ascii] <unimap.json> [findings.json]"),
-            ]),
-            inner,
-        );
+        let mut lines = vec![
+            Line::from("no unimap loaded"),
+            Line::from("usage: reconverge-tui inspect [--ascii] <unimap.json> [findings.json]"),
+        ];
+        for error in &view.data.errors {
+            lines.push(Line::from(fit(error, inner.width as usize, view.ascii)));
+        }
+        frame.render_widget(Paragraph::new(lines), inner);
         return;
     };
 
+    // `data.errors` was written at four sites in this mode's loader and read
+    // at none, so a truncated findings file, a nonexistent path and a valid
+    // file with zero findings all rendered as a working inspector with
+    // nothing to show — the state that means "you passed no findings file".
+    // Nothing was printed, nothing logged, and the exit code was a success.
+    let error_rows = u16::try_from(view.data.errors.len()).unwrap_or(u16::MAX);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // header
-            Constraint::Min(3),    // body
-            Constraint::Length(1), // finding bar
+            Constraint::Length(1),          // header
+            Constraint::Length(error_rows), // load errors, when there are any
+            Constraint::Min(3),             // body
+            Constraint::Length(1),          // finding bar
         ])
         .split(inner);
 
     render_header(frame, view, function, rows[0]);
+    if error_rows > 0 {
+        let width = rows[1].width as usize;
+        frame.render_widget(
+            Paragraph::new(
+                view.data
+                    .errors
+                    .iter()
+                    .map(|error| {
+                        Line::from(Span::styled(
+                            fit(error, width, view.ascii),
+                            view.accent(Style::default().fg(Color::Red)),
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            rows[1],
+        );
+    }
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(rows[1]);
+        .split(rows[2]);
     render_source(frame, view, function, body[0]);
 
     let right = Layout::default()
@@ -138,7 +164,7 @@ pub fn render(frame: &mut Frame<'_>, view: &InspectorView<'_>) {
     render_values(frame, view, function, right[0]);
     render_provenance(frame, view, function, right[1]);
 
-    render_finding_bar(frame, view, rows[2]);
+    render_finding_bar(frame, view, rows[3]);
 }
 
 fn render_header(

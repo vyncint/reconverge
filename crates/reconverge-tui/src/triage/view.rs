@@ -94,20 +94,46 @@ pub fn render(frame: &mut Frame<'_>, view: &TriageView<'_>) {
         return;
     }
 
+    // Above the list, unconditionally. These lines used to render only
+    // inside the `items.is_empty()` branch above — the one case where
+    // triage has nothing to review and nothing to write — so a baseline
+    // that failed to parse looked like an ordinary session with 23 findings
+    // and `0 suppressed`, and `w` replaced the reviewed file with an empty
+    // one and reported success.
+    let error_rows = u16::try_from(view.data.errors.len()).unwrap_or(u16::MAX);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2), // header + blank
-            Constraint::Min(3),    // finding list
-            Constraint::Length(5), // detail + editor
-            Constraint::Length(1), // status
+            Constraint::Length(2),          // header + blank
+            Constraint::Length(error_rows), // load errors, when there are any
+            Constraint::Min(3),             // finding list
+            Constraint::Length(5),          // detail + editor
+            Constraint::Length(1),          // status
         ])
         .split(inner);
 
     render_header(frame, view, rows[0]);
-    render_list(frame, view, rows[1]);
-    render_detail(frame, view, rows[2]);
-    render_status(frame, view, rows[3]);
+    if error_rows > 0 {
+        let width = rows[1].width as usize;
+        frame.render_widget(
+            Paragraph::new(
+                view.data
+                    .errors
+                    .iter()
+                    .map(|error| {
+                        Line::from(Span::styled(
+                            fit(error, width, view.ascii),
+                            view.accent(Style::default().fg(Color::Red)),
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            rows[1],
+        );
+    }
+    render_list(frame, view, rows[2]);
+    render_detail(frame, view, rows[3]);
+    render_status(frame, view, rows[4]);
 }
 
 fn render_header(frame: &mut Frame<'_>, view: &TriageView<'_>, area: Rect) {

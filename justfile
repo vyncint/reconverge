@@ -30,3 +30,5 @@ ci:
     cargo deny check
     ./scripts/check-isolation.sh
     ./scripts/check-plurals.sh
+    ./scripts/check-schemas.sh
+    ./scripts/record-fixtures.sh --check
