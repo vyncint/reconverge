@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "reconverge-artifacts"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -54,11 +54,11 @@ dependencies = [
 
 [[package]]
 name = "reconverge-core"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "reconverge-dialect-oxide"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "reconverge-core",
 ]
@@ -90,7 +90,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -119,9 +119,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
 dependencies = [
  "proc-macro2",
  "quote",

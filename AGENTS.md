@@ -19,10 +19,18 @@ is the full contributor document and wins wherever the two disagree.
 ## Build and test
 
 ```sh
+just ci                       # everything CI gates on
 cargo test --workspace        # needs the pinned nightly with rustc-dev
 cargo test -p reconverge-tui  # the PTY suite alone, no driver needed
 ./scripts/run-conformance.sh  # the corpus, with --locked
+./scripts/check-schemas.sh    # fixtures + an end-to-end run, against schemas/
+./scripts/record-fixtures.sh  # re-record the witness fixtures from a real run
 ```
+
+`cargo test --workspace` does **not** cover `conformance/extractor`: it
+declares its own `[workspace]`, so every workspace-scoped command stops at
+its door. `just ci` runs fmt and clippy against its manifest separately, and
+a new standalone manifest has to be added there and to `ci.yml` by hand.
 
 Pinned nightly with `rustc-dev` (`rust-toolchain.toml`): a rustc-driver tool
 must be built by the same rustc it wraps. Bump it only in lockstep with the
@@ -37,6 +45,23 @@ behaviour.
   driver into the CLI's graph, that check is what will tell you.
 - **Goldens:** regenerate with `RECONVERGE_BLESS=1 cargo test -p reconverge-tui`,
   then read every diff.
+- **The witness fixtures are recorded, not written.**
+  `scripts/record-fixtures.sh` regenerates them from a real `check` over
+  `crates/cargo-reconverge/tests/lint-samples`, and CI diffs them, so editing
+  one by hand turns the `schemas` job red. They were hand-written until
+  0.5.0 and showed MIR statements no driver has ever emitted — which is how
+  a golden frame could stay coherent while the shipping artifact was not.
+  `witness/reconverged-clean.json` is the one exception, and says so.
+- **Round-tripping is not validating.** serde tolerates anything additive and
+  never sees a `const`, so a schema change needs `./scripts/check-schemas.sh`
+  as well as `cargo test`.
+- **PTY tests follow the termlens skill**, vendored at
+  `.claude/skills/termlens/SKILL.md`: content-based waits only, never a
+  sleep; one predicate per instant; `(cols, rows)` for a size and
+  `(row, col)` for a cell. `crates/cargo-reconverge/tests/check_render.rs`
+  is the CLI-side example — an escape byte that erases and a caret in the
+  wrong cell are properties of the rendered grid, which a stdout string
+  cannot see.
 - **The TUI's lane glyphs are shared with the text diagnostics.** The ASCII
   warp diagram a CI log prints is literally a frame of the witness view. That
   equivalence is load-bearing; do not change the glyph language on one side.

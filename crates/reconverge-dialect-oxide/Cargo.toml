@@ -11,4 +11,4 @@ keywords = ["gpu", "cuda", "simt"]
 categories = ["development-tools"]
 
 [dependencies]
-reconverge-core = { path = "../reconverge-core", version = "0.4.0" }
+reconverge-core = { path = "../reconverge-core", version = "0.5.0" }
