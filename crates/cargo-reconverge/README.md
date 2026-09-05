@@ -20,11 +20,13 @@ $ cargo reconverge setup
 `setup` installs the pinned nightly toolchain (a rustc-driver tool must be
 built by the exact rustc it wraps) and `reconverge-driver` +
 `reconverge-tui` at this CLI's own version. It prints every command before
-running it; the manual equivalent is:
+running it; the manual equivalent is (the `@VERSION` pins matter — all
+three binaries must be the same version, so pin both companions to the
+version of `cargo-reconverge` you installed):
 
 ```console
 $ rustup toolchain install nightly-2026-04-03 --profile minimal --component rustc-dev --component llvm-tools
-$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver reconverge-tui
+$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
 ## Use

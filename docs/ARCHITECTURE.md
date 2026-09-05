@@ -116,13 +116,23 @@ model IR the driver builds from Stable MIR.
   witness-promoted.
 - **Degrades are declared.** An irreducible CFG degrades to all-divergent for
   that function and says so; opaque statements (`asm!`, unmodeled
-  intrinsics) are counted and reported as coverage next to the findings.
+  intrinsics) are counted and carried in `findings.v1` as a run-level
+  `coverage` block — printed as a note on every finding in the affected
+  kernel, and on the summary line whenever anything was left unread, so a
+  run with no findings still declares what it could not see.
 
 ## The witness interpreter
 
-Findings above `warning` go to a 32-lane interpreter that runs the same model
+Findings above `warning` go to a lane interpreter that runs the same model
 the engine analyzed. It is deliberately not a kernel runtime: it exists to
 turn "this could hang" into "here is the launch where it does."
+
+One warp is the ordinary replay. When it finds nothing and the kernel's
+`#[launch_contract]` declares a one-dimensional block of several whole warps,
+barrier findings are replayed again at the declared width (64, 96 or 128) —
+so a `warp_id()`-guarded barrier that is safe at one warp and undefined at
+two is promoted exactly when the contract says two. Blocks that are 2D, not
+whole warps, or wider than 128 threads stay at the one-warp replay.
 
 - **It only runs as far as it must.** A lane stops as soon as it either
   reaches the site in question or enters code from which that site can no

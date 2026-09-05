@@ -62,8 +62,10 @@ check options:
   --cc <X.Y>                  target compute capability for shared-memory
                               capacity context (e.g. 8.6)
   --message-format <FORMAT>   text (default) or json; json prints one
-                              findings.v1 document per analyzed crate, one
-                              per line
+                              findings.v1 document per analyzed *target*,
+                              one per line. A package with a lib and a bin
+                              compiles twice under one crate name, so
+                              `crate` is not a key — read `target` too
   --sarif <PATH>              also write a SARIF 2.1.0 report to PATH.
                               A path that begins with `--` is passed with
                               `=`: `--sarif=--weird`

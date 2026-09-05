@@ -194,7 +194,7 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 
 ```
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 1/1 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1…│
+│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block (…│
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo                                 │
@@ -202,19 +202,19 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │                                                                              │
 │          o active   W waiting   . exited                                     │
 │                                                                              │
-│step 4/5  [===>.]                                                             │
-│_8 = cuda_device::sync_threads()                                              │
-│at lib.rs:22                                                                  │
+│step 2/3  [=>.]                                                               │
+│sync_threads() — 16 of 32 lanes arrive and wait                               │
+│at lib.rs:180                                                                 │
 │barrier: 16 of 32 threads arrived                                             │
 │                                                                              │
 │   0  launch                                                                  │
-│   1  _4 = cuda_device::__internal::index_1d(&_3)                             │
-│   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                 │
-│   3  switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it          │
-│▸  4  _8 = cuda_device::sync_threads()                            16 waiting  │
-│   5  return — the odd lanes leave the kernel without ever reaching the barri…│
+│   1  lanes evaluate the guarding branch — 16 continue toward `sync_threads`,…│
+│▸  2  sync_threads() — 16 of 32 lanes arrive and wait             16 waiting  │
+│   3  the other 16 lanes exit or move past reconvergence without ever reachin…│
 │                                                                              │
-│verdict: undefined behavior (at step 5)                                       │
+│verdict: undefined behavior (at step 3)                                       │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
 ```
@@ -266,7 +266,7 @@ $ cargo reconverge check                       # analyze; exit 1 on deny/confirm
 $ cargo reconverge check --strict              # include warning-tier findings
 $ cargo reconverge check --cc 8.6              # target capacity context for RC004
 $ cargo reconverge check --sarif out.sarif     # SARIF 2.1.0 for code scanning
-$ cargo reconverge check --message-format json # one findings.v1 document per crate
+$ cargo reconverge check --message-format json # one findings.v1 document per target
 $ cargo reconverge watch                       # re-run on every save
 $ cargo reconverge --explain RC002             # why it is a bug, and the idiomatic fix
 ```
@@ -399,13 +399,9 @@ one that does less.
   declares a one-dimensional block of several whole warps (64, 96, or
   128), barrier findings are replayed again at that size — so a
   `warp_id()`-guarded barrier that is safe at one warp and undefined at
-  two gates exactly when the contract says two. The multi-warp replay
-  covers barriers only: any warp collective on any lane's path aborts it,
-  because a collective synchronizes within each warp and that per-warp
-  choreography is not modeled. Blocks that are 2D, not whole warps, or
-  wider than 128 threads stay at the one-warp replay.
-
-  A collective on a lane's path no longer stops that replay: collectives
+  two gates exactly when the contract says two. Blocks that are 2D, not
+  whole warps, or wider than 128 threads stay at the one-warp replay.
+  A collective on a lane's path does not stop the replay: collectives
   are modeled per warp, so a warp whose still-running lanes are all at the
   same collective passes it whatever the other warps are doing, while the
   barrier remains the only construct that synchronizes across warps. A
@@ -415,8 +411,15 @@ one that does less.
   warp: a mask comparison is a per-warp question, and an error there would
   produce a witness that looks exactly like a correct one.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
-  intrinsics are counted, and coverage is printed alongside findings so the
-  tool declares its own confidence.
+  intrinsics are counted, and the tally is a property of the *run*, not of
+  a finding: it rides in `findings.v1` as `coverage`, is printed as a note
+  on every finding in the affected kernel, and closes the summary line
+  whenever anything was left unread — including a run with no findings at
+  all. That last case is the one it exists for: a `bar.sync 0` inside an
+  `asm!` block under a divergent guard is a real barrier this tool cannot
+  see, and `0 deny, 0 confirmed, 0 warning findings` on its own does not
+  say whether the kernel is clean or whether a twentieth of it was never
+  read.
 - **Masks that are not literals** — a named `const`, or anything computed —
   cannot be evaluated through `rustc_public` at the pinned toolchain, so
   RC002 reports convergence and says the mask was not evaluable rather than

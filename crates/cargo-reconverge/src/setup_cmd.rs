@@ -123,6 +123,58 @@ mod tests {
         assert_eq!(&install[..3], &["rustup", "run", PINNED_TOOLCHAIN]);
     }
 
+    /// Both READMEs must offer the command `setup` actually runs.
+    ///
+    /// The crates.io page — this crate's own README — offered an *unpinned*
+    /// `cargo install reconverge-driver reconverge-tui` as "the manual
+    /// equivalent" of a command that pins, one sentence after saying setup
+    /// installs the companions "at this CLI's own version". crates.io is
+    /// where the install happens; following that line installs whatever is
+    /// newest against whatever CLI you pinned, which is the exact skew
+    /// `setup` exists to prevent.
+    ///
+    /// The asymmetry is what makes this cheap: this crate's README ships
+    /// inside the package, so that half is unconditional; only the
+    /// repository README needs the source-checkout early return.
+    #[test]
+    fn both_readmes_offer_the_command_setup_runs() {
+        let version = env!("CARGO_PKG_VERSION");
+        // The pages carry `@VERSION` as a placeholder — the real number
+        // belongs to whatever release the reader installed — so compare
+        // against the plan with the same substitution.
+        let expected: Vec<String> = plan()
+            .iter()
+            .map(|command| {
+                command
+                    .join(" ")
+                    .replace(&format!("@{version}"), "@VERSION")
+            })
+            .collect();
+
+        let own = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+        let text = std::fs::read_to_string(&own).expect("this crate's README ships in the package");
+        for command in &expected {
+            assert!(
+                text.contains(command),
+                "{}: the manual steps must match `setup`'s own plan; missing:\n  {command}",
+                own.display()
+            );
+        }
+
+        // Only meaningful in a source checkout.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md");
+        let Ok(text) = std::fs::read_to_string(&root) else {
+            return;
+        };
+        for command in &expected {
+            assert!(
+                text.contains(command),
+                "README.md: the manual steps must match `setup`'s own plan; \
+                 missing:\n  {command}"
+            );
+        }
+    }
+
     #[test]
     fn the_embedded_pin_matches_rust_toolchain_toml() {
         // Only meaningful in a source checkout, which is exactly where the

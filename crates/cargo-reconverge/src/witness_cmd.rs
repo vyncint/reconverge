@@ -6,8 +6,10 @@
 //! artifacts exist only for findings the interpreter replayed (confirmed),
 //! so "none found" gets a hint, not an empty screen.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use reconverge_artifacts::findings::FindingsArtifact;
 
 use crate::args::{self, ArgError};
 use crate::check;
@@ -66,6 +68,42 @@ pub fn run(options: &WitnessOptions) -> Result<u8, String> {
     Ok(u8::try_from(status.code().unwrap_or(2)).unwrap_or(2))
 }
 
+/// The `(kernel, code)` pairs this run's findings artifacts still carry.
+///
+/// Empty when nothing can be read — an unreadable artifacts directory is
+/// not evidence that a witness is stale, so the filter stands down rather
+/// than hiding everything.
+fn live_findings(dir: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut live = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_findings = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("findings-") && n.ends_with(".json"));
+        if !is_findings {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(artifact) =
+            reconverge_artifacts::read::deserialize_checked::<FindingsArtifact>(&text)
+        else {
+            continue;
+        };
+        for finding in artifact.findings {
+            if let Some(kernel) = finding.kernel {
+                live.push((kernel, finding.code));
+            }
+        }
+    }
+    live
+}
+
 /// The witness artifacts of the current workspace members, from
 /// `<target>/reconverge/`.
 fn discover_witnesses(kernel: Option<&str>) -> Result<Vec<PathBuf>, String> {
@@ -93,6 +131,22 @@ fn discover_witnesses(kernel: Option<&str>) -> Result<Vec<PathBuf>, String> {
         if recognized {
             artifacts.push(path);
         }
+    }
+    // Second filter, on the findings this run actually has. The driver
+    // prunes its own witnesses now, which is the fix that also serves a
+    // consumer reading the directory — but a file left by an older
+    // reconverge is not the driver's to remove, and the reader should not
+    // replay a finding that no longer exists whoever wrote it.
+    let live = live_findings(&dir);
+    if !live.is_empty() {
+        artifacts.retain(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| {
+                    live.iter()
+                        .any(|(kernel, code)| name.contains(&format!("-{kernel}-{code}-")))
+                })
+        });
     }
     artifacts.sort();
     if artifacts.is_empty() {
