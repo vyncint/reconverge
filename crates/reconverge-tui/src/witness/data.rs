@@ -91,7 +91,7 @@ mod tests {
         ]);
         assert!(data.errors.is_empty(), "{:?}", data.errors);
         assert_eq!(data.witnesses.len(), 2);
-        assert_eq!(data.witnesses[0].kernel, "divergent_barrier");
+        assert_eq!(data.witnesses[0].kernel, "rc001_divergent_barrier");
         assert_eq!(data.witnesses[1].kernel, "rc002_divergent_collective");
         // Span files are redacted to basenames on load.
         for w in &data.witnesses {

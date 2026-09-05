@@ -2,6 +2,12 @@
 //! real PTY on the canonical RC001/RC002 fixtures, plus the size and color
 //! matrix — {80×24, 120×40} × {color, NO_COLOR}.
 //!
+//! Since 0.5.0 those fixtures are **recorded from a real `check`** rather
+//! than hand-written (`scripts/record-fixtures.sh`), which is why the step
+//! counts here are 3 and not 5: the hand-written documents walked MIR
+//! statements the driver has never emitted, so every golden in this file
+//! was a frame of a document no user could ever produce.
+//!
 //! Sync policy: `wait_frame` after every key, and the frame it returns is
 //! the one asserted on — never `wait_idle`, never sleep. The shell brackets
 //! repaints in DEC 2026 synchronized updates, so a frame is only ever
@@ -84,17 +90,17 @@ fn witness_flow_journey() {
     let frame = t
         .wait_frame(|s| {
             s.contains("witness 1/2")
-                && s.contains("kernel `divergent_barrier`")
-                && s.contains("0/5")
+                && s.contains("kernel `rc001_divergent_barrier`")
+                && s.contains("0/3")
         })
         .expect("initial frame");
     assert_golden("witness-initial-80x24.txt", &frame.to_string(), "initial");
 
-    // l ×4: to the barrier event — 16 lanes park, the strip becomes the
+    // l ×2: to the barrier event — 16 lanes park, the strip becomes the
     // diagnostics' warp diagram.
-    for step in 1..=4 {
+    for step in 1..=2 {
         t.send(Key::Char('l')).expect("send Key::Char('l')");
-        t.wait_until(move |s| s.contains(&format!("step {step}/5")))
+        t.wait_until(move |s| s.contains(&format!("step {step}/3")))
             .expect("stepped forward");
     }
     // 16 even lanes park at the barrier while the odd 16 are still running.
@@ -114,7 +120,7 @@ fn witness_flow_journey() {
     // diagram — and the verdict lands.
     t.send(Key::Char('l')).expect("send Key::Char('l')");
     t.wait_until(|s| {
-        s.contains("step 5/5")
+        s.contains("step 3/3")
             && s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
             && s.contains("verdict: undefined behavior")
     })
@@ -122,28 +128,41 @@ fn witness_flow_journey() {
 
     // h, h: scrub back in time.
     t.send(Key::Char('h')).expect("send Key::Char('h')");
-    t.wait_until(|s| s.contains("step 4/5")).expect("back to 4");
+    t.wait_until(|s| s.contains("step 2/3")).expect("back to 2");
     t.send(Key::Char('h')).expect("send Key::Char('h')");
-    t.wait_until(|s| s.contains("step 3/5")).expect("back to 3");
+    t.wait_until(|s| s.contains("step 1/3")).expect("back to 1");
 
     // g then d: launch instant, then straight to the divergence moment.
     t.send(Key::Char('g')).expect("send Key::Char('g')");
-    t.wait_until(|s| s.contains("step 0/5")).expect("rewound");
+    t.wait_until(|s| s.contains("step 0/3")).expect("rewound");
     t.send(Key::Char('d')).expect("send Key::Char('d')");
-    t.wait_until(|s| s.contains("step 4/5"))
+    t.wait_until(|s| s.contains("step 2/3"))
         .expect("d jumps to the first warp split");
 
-    // n: the RC002 witness; v: its verdict, where the mask panel shows the
-    // named-but-inactive lanes.
+    // n: the RC002 witness, then l ×2 to the collective itself — where the
+    // mask panel lives, and where the lane strip has to agree with it.
+    //
+    // This is the frame the golden existed for and could not catch: the
+    // hand-written fixture put its lane deltas on the *branch* step, so it
+    // rendered `oWoWoWoW …` and passed, while the artifact a real run wrote
+    // carried no deltas at the call at all and showed all 32 lanes active
+    // one row above `active 0x55555555`. Recorded from a driver run, the
+    // strip reads `o.o.o.o. …` — sixteen lanes, the same sixteen the mask
+    // row names.
     t.send(Key::Char('n')).expect("send Key::Char('n')");
     t.wait_until(|s| s.contains("witness 2/2") && s.contains("rc002_divergent_collective"))
         .expect("switched witness");
-    t.send(Key::Char('v')).expect("send Key::Char('v')");
+    for step in 1..=2 {
+        t.send(Key::Char('l')).expect("send Key::Char('l')");
+        t.wait_until(move |s| s.contains(&format!("step {step}/3")))
+            .expect("stepped forward");
+    }
     let frame = t
         .wait_frame(|s| {
-            s.contains("step 3/3")
+            s.contains("step 2/3")
                 && s.contains("0xffffffff")
                 && s.contains("named in the mask but not active: 0xaaaaaaaa")
+                && s.contains("o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.")
         })
         .expect("mask panel at the collective");
     assert_golden("witness-mask-80x24.txt", &frame.to_string(), "mask panel");
@@ -158,7 +177,7 @@ fn witness_ascii_mode_is_pure_ascii() {
     t.wait_until(|s| s.contains("reconverge witness"))
         .expect("initial frame");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    let frame = t.wait_frame(|s| s.contains("step 5/5")).expect("verdict");
+    let frame = t.wait_frame(|s| s.contains("step 3/3")).expect("verdict");
     let screen = frame.to_string();
     assert_golden("witness-verdict-80x24-ascii.txt", &screen, "--ascii");
     for line in normalize(&screen).lines() {
@@ -175,12 +194,12 @@ fn matrix_leg(size: (u16, u16)) {
     let mut screens = Vec::new();
     for extra_env in [&[][..], &[("NO_COLOR", "1")][..]] {
         let mut t = spawn(size, extra_env, &[]);
-        t.wait_until(|s| s.contains("step 0/5"))
+        t.wait_until(|s| s.contains("step 0/3"))
             .expect("initial frame");
         t.send(Key::Char('v')).expect("send Key::Char('v')");
         let frame = t
             .wait_frame(|s| {
-                s.contains("step 5/5")
+                s.contains("step 3/3")
                     && s.contains("verdict")
                     && s.contains("W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.")
             })

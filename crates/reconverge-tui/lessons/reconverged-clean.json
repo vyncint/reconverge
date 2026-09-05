@@ -2,7 +2,7 @@
   "schema": "witness.v1",
   "tool": {
     "name": "reconverge",
-    "version": "0.0.0"
+    "version": "0.4.0"
   },
   "crate": "sample_kernels",
   "kernel": "convergent_barrier",
@@ -57,7 +57,7 @@
   "steps": [
     {
       "index": 0,
-      "statement": "_4 = cuda_device::__internal::index_1d(&_3)",
+      "statement": "lanes read their thread index \u2014 nothing has diverged yet",
       "span": {
         "file": "src/lib.rs",
         "line_start": 33,
@@ -69,7 +69,7 @@
     },
     {
       "index": 1,
-      "statement": "switchInt(i.get() % 2 == 0) \u2014 the even lanes take the branch and do their extra work; the odd lanes wait at the join",
+      "statement": "lanes evaluate the guarding branch \u2014 16 take it and do their extra work, 16 wait at the join",
       "span": {
         "file": "src/lib.rs",
         "line_start": 34,
@@ -223,7 +223,7 @@
     },
     {
       "index": 3,
-      "statement": "_9 = cuda_device::sync_threads()",
+      "statement": "sync_threads() \u2014 all 32 of 32 lanes arrive and wait",
       "span": {
         "file": "src/lib.rs",
         "line_start": 38,

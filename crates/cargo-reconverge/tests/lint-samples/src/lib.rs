@@ -274,3 +274,83 @@ pub fn rc001_divergent_call(mut out: DisjointSlice<u32>) {
         *e = 3;
     }
 }
+
+// ------------------------------------------- multi-warp declared replay
+
+/// True positive (confirmed): a whole-warp deadlock under a declared
+/// two-warp block. The replay runs at the declared 64 lanes, so the witness
+/// artifact this writes is the shape `witness.v1` used to reject — its
+/// schema pinned `lanes` at 32 while the driver had been writing 64, 96 and
+/// 128 since 0.1.12, and the artifacts that broke the bound were exactly
+/// the gating ones.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (64, 1, 1))]
+pub fn rc001_multiwarp_barrier(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if warp::warp_id() == 0 {
+        thread::sync_threads();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 4;
+    }
+}
+
+/// True positive (confirmed): the same shape with a warp collective on the
+/// path. A collective used to abort the multi-warp replay; since #30 they
+/// are modeled per warp and it does not, and the README said both things
+/// four lines apart. This is the counterexample, next to the sentence.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (64, 1, 1))]
+pub fn rc001_multiwarp_barrier_after_collective(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    let vote = warp::ballot_sync(0xffff_ffff, true);
+    if warp::warp_id() == 0 {
+        thread::sync_threads();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = vote;
+    }
+}
+
+// ------------------------------------------------- unmasked RC002 wrappers
+
+/// True positive (confirmed): the ergonomic wrapper under a divergent
+/// guard. `warp::ballot(x)` delegates to `ballot_sync(0xffff_ffff, x)`
+/// inside cuda-device, so it is treated exactly as the explicit full mask —
+/// which `--explain RC002` called "not yet checked" for two releases after
+/// the recognizer learned it. This is the fixture that holds the page to
+/// what the analyzer does.
+#[kernel]
+pub fn rc002_unmasked_wrapper(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    let mut vote = 0u32;
+    if i.get() % 2 == 0 {
+        vote = warp::ballot(true);
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = vote;
+    }
+}
+
+// -------------------------------------------------------- opaque coverage
+
+/// True negative *by omission*, and the reason coverage is a property of the
+/// run rather than a note on a finding: `bar.sync 0` is a real barrier under
+/// a divergent guard, and nothing here can see inside `asm!`. Not looking is
+/// documented and fine; saying nothing about it is what was not. The summary
+/// line now declares the opacity even though this kernel has no finding of
+/// its own.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (128, 1, 1))]
+pub fn opaque_asm_barrier(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if i.get() % 2 == 0 {
+        // SAFETY: a PTX barrier, deliberately opaque to the analysis.
+        unsafe {
+            core::arch::asm!("bar.sync 0;");
+        }
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 5;
+    }
+}

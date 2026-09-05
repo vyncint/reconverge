@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use reconverge_artifacts::baseline::{BaselineArtifact, Entry};
-use reconverge_artifacts::findings::{Confidence, Finding, FindingsArtifact};
+use reconverge_artifacts::findings::{Confidence, Finding, FindingsArtifact, RunCoverage};
 use reconverge_artifacts::plural;
 
 /// Default baseline filename, looked up at the workspace root.
@@ -65,9 +65,17 @@ impl Review {
     ) -> Result<Review, String> {
         let baseline = match fs::read_to_string(&path) {
             Ok(text) => {
-                let mut parsed: BaselineArtifact = serde_json::from_str(&text).map_err(|e| {
-                    format!("{} is not a baseline.v1 document: {e}", path.display())
-                })?;
+                // The tag, not just the shape. `schema` exists to be
+                // checked and nothing checked it: a document declaring
+                // itself `findings.v1`, from a tool that is not this one,
+                // suppressed a deny-tier finding as happily as a real
+                // baseline — and so would a future `baseline.v2` whose
+                // entries mean something else, read with v1 semantics,
+                // silently, in CI.
+                let mut parsed: BaselineArtifact =
+                    reconverge_artifacts::read::deserialize_checked(&text).map_err(|e| {
+                        format!("{} is not a baseline.v1 document: {e}", path.display())
+                    })?;
                 if let Some(bad) = parsed.entries.iter().find(|e| e.reason.trim().is_empty()) {
                     return Err(format!(
                         "{}: entry `{}` has no reason; every suppression must say why",
@@ -158,6 +166,33 @@ impl Review {
     }
 }
 
+impl Review {
+    /// What the analysis could not read, across every artifact of this run.
+    ///
+    /// Coverage used to be a note on an RC001 finding and nothing else, so
+    /// it was absent from every other code — and from the case where it is
+    /// load-bearing, a clean run over a kernel whose divergent barrier is
+    /// spelled in `asm!`. `--strict` exited 0 there with no way to tell
+    /// "reconverge read this kernel and it is clean" from "reconverge could
+    /// not read a twentieth of it".
+    #[must_use]
+    pub fn coverage(&self) -> Option<RunCoverage> {
+        let mut total: Option<RunCoverage> = None;
+        for artifact in &self.artifacts {
+            let Some(c) = artifact.coverage else { continue };
+            let sum = total.get_or_insert(RunCoverage {
+                analyzed_statements: 0,
+                opaque_statements: 0,
+                opaque_functions: 0,
+            });
+            sum.analyzed_statements += c.analyzed_statements;
+            sum.opaque_statements += c.opaque_statements;
+            sum.opaque_functions += c.opaque_functions;
+        }
+        total
+    }
+}
+
 impl Counts {
     /// The one-line summary printed after the findings.
     ///
@@ -167,8 +202,18 @@ impl Counts {
     /// precisely the doubt `--show-suppressed` exists to remove. The
     /// *counts* stay unconditional — "still counted in every summary" is a
     /// documented promise, and only the advice goes away.
+    /// The coverage clause is unconditional on there being a finding — that
+    /// is the whole point of it. It is the run's own declaration of
+    /// confidence, and the run it was missing from is the one that printed
+    /// `0 deny, 0 confirmed, 0 warning findings` over a kernel a fifth of
+    /// which was never modeled.
     #[must_use]
-    pub fn summary_line(&self, strict: bool, show_suppressed: bool) -> String {
+    pub fn summary_line(
+        &self,
+        strict: bool,
+        show_suppressed: bool,
+        coverage: Option<RunCoverage>,
+    ) -> String {
         use std::fmt::Write as _;
         let total = self.deny + self.confirmed + self.warning;
         let mut line = format!(
@@ -191,6 +236,17 @@ impl Counts {
             if !show_suppressed {
                 let _ = write!(line, " (--show-suppressed to review)");
             }
+        }
+        if let Some(c) = coverage.filter(RunCoverage::is_degraded) {
+            let total = c.analyzed_statements + c.opaque_statements;
+            let _ = write!(
+                line,
+                "; {} of {total} {} opaque in {} {}",
+                c.opaque_statements,
+                plural(total, "statement", "statements"),
+                c.opaque_functions,
+                plural(c.opaque_functions, "function", "functions"),
+            );
         }
         line
     }
@@ -287,14 +343,14 @@ mod tests {
         // The count is present in all four flag combinations: a
         // suppression is never invisible, only unobtrusive.
         for (strict, show) in [(false, false), (true, false), (false, true), (true, true)] {
-            let line = counts.summary_line(strict, show);
+            let line = counts.summary_line(strict, show, None);
             assert!(line.contains("3 suppressed by the baseline"), "{line}");
         }
-        let line = counts.summary_line(false, false);
+        let line = counts.summary_line(false, false, None);
         assert!(line.contains("2 warning findings (2 hidden"), "{line}");
         assert!(
             !Counts::default()
-                .summary_line(false, false)
+                .summary_line(false, false, None)
                 .contains("suppressed")
         );
 
@@ -303,15 +359,19 @@ mod tests {
         // the function was never told whether `--show-suppressed` was
         // passed, so this test could not have caught it.
         for strict in [false, true] {
-            let told = counts.summary_line(strict, true);
+            let told = counts.summary_line(strict, true, None);
             assert!(
                 !told.contains("--show-suppressed to review"),
                 "the run was given the flag it recommends: {told}"
             );
-            let untold = counts.summary_line(strict, false);
+            let untold = counts.summary_line(strict, false, None);
             assert!(untold.contains("(--show-suppressed to review)"), "{untold}");
         }
-        assert!(!counts.summary_line(true, false).contains("--strict to see"));
+        assert!(
+            !counts
+                .summary_line(true, false, None)
+                .contains("--strict to see")
+        );
     }
 
     #[test]

@@ -20,6 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, ToolInfo};
+use crate::read::Artifact;
 use crate::schema;
 
 /// Top-level baseline document.
@@ -110,6 +111,10 @@ impl BaselineArtifact {
     /// Write the document — normalized, pretty-printed, newline-terminated
     /// — so the CLI and the triage view always produce the same bytes for
     /// the same decisions, and the file stays reviewable in a diff.
+    /// Written beside the target and renamed into place: a bare
+    /// `fs::write` truncates first, so a full disk or a killed process
+    /// destroyed a *good* baseline — the one checked-in record of which
+    /// findings a human looked at and why.
     pub fn write_to(&self, path: &std::path::Path) -> std::io::Result<()> {
         let mut normalized = self.clone();
         normalized.normalize();
@@ -118,7 +123,17 @@ impl BaselineArtifact {
         }
         let mut text = serde_json::to_string_pretty(&normalized)?;
         text.push('\n');
-        std::fs::write(path, text)
+        // Same directory, so the rename is on one filesystem and therefore
+        // atomic. A failure before it leaves the original untouched.
+        let temp = path.with_extension("json.tmp");
+        std::fs::write(&temp, text)?;
+        match std::fs::rename(&temp, path) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&temp);
+                Err(e)
+            }
+        }
     }
 
     /// Drop the suppression covering this finding, returning true when the
@@ -128,6 +143,14 @@ impl BaselineArtifact {
         self.entries
             .retain(|entry| !entry.covers(krate, &finding.code, finding.kernel.as_deref()));
         self.entries.len() != before
+    }
+}
+
+impl Artifact for BaselineArtifact {
+    const SCHEMA: &'static str = schema::BASELINE;
+
+    fn declared_schema(&self) -> &str {
+        &self.schema
     }
 }
 

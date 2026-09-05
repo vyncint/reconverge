@@ -4,7 +4,7 @@ size: 80x24  cursor: hidden
 |                                                                              |
 |findings.v1  rc003-minimal.json  crate sample_kernels -- 2 findings: 1 deny...|
 |unimap.v1  divergent-barrier.json  crate sample_kernels -- 1 function, 3 va...|
-|witness.v1  rc001-divergent-barrier.json  kernel divergent_barrier -- verdi...|
+|witness.v1  rc001-divergent-barrier.json  kernel rc001_divergent_barrier --...|
 |                                                                              |
 |views: inspect * witness * learn * triage                                     |
 |                                                                              |

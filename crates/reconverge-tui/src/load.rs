@@ -162,8 +162,17 @@ mod tests {
         assert_eq!(witness.schema, "witness.v1");
         assert_eq!(
             witness.summary,
-            "kernel divergent_barrier — verdict: undefined behavior at step 4 (5 steps, 32 lanes)"
+            "kernel rc001_divergent_barrier — verdict: undefined behavior at step 2 \
+             (3 steps, 32 lanes)"
         );
+
+        // The multi-warp fixture: recorded from a run whose kernel declares
+        // `block = (64, 1, 1)`, which is the shape `witness.v1` used to
+        // reject while the driver had been writing it for four minor
+        // versions. Loading it is the reader half of that.
+        let wide = load(&fixture("witness/rc001-multiwarp-barrier.json")).unwrap();
+        assert_eq!(wide.schema, "witness.v1");
+        assert!(wide.summary.contains("64 lanes"), "{}", wide.summary);
     }
 
     #[test]

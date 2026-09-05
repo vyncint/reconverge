@@ -102,7 +102,11 @@ fn learn_flow_journey() {
 
     // n: the interactive page; v: the hang verdict on the embedded replay.
     t.send(Key::Char('n')).expect("send Key::Char('n')");
-    t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
+    // 3 steps, not 5: the embedded replay is the recorded fixture, which is
+    // what a user's own `check` writes. The 5-step version walked MIR the
+    // driver has never emitted, so the lesson taught a frame nobody could
+    // reproduce from their own kernel.
+    t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/3"))
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
     let frame = t
@@ -128,6 +132,9 @@ fn learn_flow_journey() {
     t.send(Key::Enter).expect("send Key::Enter");
     t.wait_until(|s| s.contains("lesson 4/4")).expect("opened");
     t.send(Key::Char('n')).expect("send Key::Char('n')");
+    // Still 5: `reconverged-clean.json` is the one fixture no run can
+    // record, because a witness is only written for a *confirmed* finding
+    // and this kernel has none. fixtures/README.md says so.
     t.wait_until(|s| s.contains("page 2/3") && s.contains("step 0/5"))
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
@@ -165,6 +172,10 @@ fn learn_ascii_mode_is_pure_ascii() {
 
 /// One matrix leg: the masks lesson at its collective moment; the NO_COLOR
 /// run of the same leg must produce the identical character grid.
+///
+/// "Collective moment" is now the step carrying the `warp_op`, not the last
+/// step: the recorded fixture has the driver's trailing narration step,
+/// which the hand-written one did not.
 fn matrix_leg(size: (u16, u16)) {
     let golden = format!("learn-masks-{}x{}.txt", size.0, size.1);
 
@@ -182,16 +193,29 @@ fn matrix_leg(size: (u16, u16)) {
         t.send(Key::Char('n')).expect("send Key::Char('n')");
         t.wait_until(|s| s.contains("page 2/3"))
             .expect("interactive page");
-        // v: in this witness the collective IS the verdict step, so one
-        // jump shows the mask against the active lanes and the verdict.
-        t.send(Key::Char('v')).expect("send Key::Char('v')");
+        // l ×2 to the collective. `v` used to land here because the
+        // hand-written fixture made the call the last step; the recorded
+        // one has the trailing narration the driver writes, so the mask
+        // panel is one step before the verdict.
+        for step in 1..=2 {
+            t.send(Key::Char('l')).expect("send Key::Char('l')");
+            t.wait_until(move |s| s.contains(&format!("step {step}/3")))
+                .expect("stepped forward");
+        }
         let frame = t
             .wait_frame(|s| {
-                s.contains("verdict")
-                    && s.contains("######## ######## ######## ########")
+                s.contains("######## ######## ######## ########")
                     && s.contains("#.#.#.#.")
+                    // The strip agrees with the active row below it, which
+                    // is the whole point of this panel and the one thing
+                    // the previous golden could not see: the hand-written
+                    // fixture put its deltas on the branch step, so it
+                    // rendered coherently while the shipping artifact did
+                    // not. The verdict is one step on and is goldened by
+                    // the narrow-width case and by witness_flow.
+                    && s.contains("o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.")
             })
-            .expect("mask, active lanes, and verdict together");
+            .expect("the lane strip and the active mask agree at the collective");
         screens.push(normalize(&frame.to_string()));
         quit(t, "matrix leg");
     }
@@ -257,9 +281,10 @@ fn masks_verdict_is_whole_at_a_narrow_width() {
     t.wait_until(|s| s.contains("step 0/3"))
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
-    // Its final word fell off the panel before the fix.
+    // Its final word fell off the panel before the fix — `finishes` here,
+    // the last word of the verdict the driver actually writes.
     let frame = t
-        .wait_frame(|s| s.contains("verdict") && s.contains("completes"))
+        .wait_frame(|s| s.contains("verdict") && s.contains("finishes"))
         .expect("the masks verdict must appear in full at 46 columns");
     assert_golden(
         "learn-masks-46x24.txt",

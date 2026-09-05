@@ -1,6 +1,8 @@
 //! RC001 and the `unimap.v1` artifact, from the core engine's results.
 
-use reconverge_artifacts::findings::{Confidence, Finding, ProvenanceStep, SourceSpan};
+use reconverge_artifacts::findings::{
+    Confidence, Finding, ProvenanceStep, RunCoverage, SourceSpan,
+};
 use reconverge_artifacts::unimap;
 use reconverge_artifacts::witness::{
     FindingRef, LaneChange, LaneState, Launch, Step, Verdict, WitnessArtifact,
@@ -307,14 +309,6 @@ pub fn rc001_divergent_barriers(
                         .to_string(),
                 );
             }
-            let total = analysis.analyzed_statements + analysis.opaque_statements;
-            if analysis.opaque_statements > 0 && total > 0 {
-                notes.push(format!(
-                    "coverage: {} of {total} statements analyzed ({} opaque)",
-                    analysis.analyzed_statements, analysis.opaque_statements
-                ));
-            }
-
             let mut provenance = vec![ProvenanceStep {
                 what: "thread-divergent branch".to_string(),
                 span: span_of(models, cause.span),
@@ -496,6 +490,70 @@ pub fn rc002_nonconvergent_warp_ops(
             findings.push(finding);
         }
     }
+}
+
+/// Attach the coverage note to every finding whose kernel was read only in
+/// part — all five codes, not just RC001.
+///
+/// It used to be built inline inside `rc001_divergent_barriers` and nowhere
+/// else, so an RC002 on a kernel with two opaque statements said nothing
+/// about them, and the RC003/RC004/RC005 sites in `analysis.rs` could not
+/// have: they run before the uniformity engine and never see an `Analysis`.
+/// Attaching it here, once, after every rule has run, is what makes it a
+/// property of the analysis rather than of one rule.
+///
+/// The case a note cannot reach at all — a kernel with no finding, whose
+/// divergent barrier is spelled in `asm!` — is answered by the run-level
+/// tally in [`run_coverage`], which the summary line reads.
+pub fn annotate_coverage(
+    models: &CrateModels,
+    results: &[(FnId, Analysis)],
+    findings: &mut [Finding],
+) {
+    for (fn_id, analysis) in results {
+        if analysis.opaque_statements == 0 {
+            continue;
+        }
+        let total = analysis.analyzed_statements + analysis.opaque_statements;
+        if total == 0 {
+            continue;
+        }
+        let name = &models.fns[*fn_id].name;
+        let note = format!(
+            "coverage: {} of {total} statements analyzed ({} opaque)",
+            analysis.analyzed_statements, analysis.opaque_statements
+        );
+        for finding in findings.iter_mut() {
+            if finding.kernel.as_deref() == Some(name.as_str())
+                && !finding.notes.iter().any(|n| n.starts_with("coverage: "))
+            {
+                finding.notes.push(note.clone());
+            }
+        }
+    }
+}
+
+/// The whole target's coverage, for the `findings.v1` document.
+///
+/// This is the number that answers a *clean* run: `--strict` exiting 0 over
+/// a kernel whose `bar.sync 0` sits inside an `asm!` block used to read as
+/// a clean bill of health, and the tally that would have distinguished it
+/// was sitting in `unimap.v1` a few bytes away.
+#[must_use]
+pub fn run_coverage(results: &[(FnId, Analysis)]) -> RunCoverage {
+    let mut coverage = RunCoverage {
+        analyzed_statements: 0,
+        opaque_statements: 0,
+        opaque_functions: 0,
+    };
+    for (_, analysis) in results {
+        coverage.analyzed_statements += analysis.analyzed_statements;
+        coverage.opaque_statements += analysis.opaque_statements;
+        if analysis.opaque_statements > 0 {
+            coverage.opaque_functions += 1;
+        }
+    }
+    coverage
 }
 
 /// A chain hop that only shuffles one unnamed temporary into another adds

@@ -59,8 +59,27 @@ const CC_ENV: &str = "RECONVERGE_CC";
 /// Directory to write `<kernel>.mir` files and the detection manifest into.
 const MIR_OUT_ENV: &str = "RECONVERGE_MIR_OUT";
 
+/// The one flag this binary answers itself.
+///
+/// Everything else is forwarded to rustc untouched, by design — it is a
+/// rustc-driver, and cargo sends `-vV` and `--print` probes through the
+/// wrapper that must come back as rustc's own answers. The consequence was
+/// that the half doing the analysis and writing the artifact could not be
+/// identified at all: `reconverge-driver --version` prints rustc's version,
+/// and no other flag existed to ask. Both shipped consumers stamp their
+/// corpora with the *CLI's* version while the finding came from here.
+///
+/// Deliberately not `--version`: that one belongs to rustc.
+const VERSION_FLAG: &str = "--reconverge-version";
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
+    // Before the rustc handoff, and only for an exact match, so an argv
+    // that merely contains the string still reaches rustc unchanged.
+    if args.len() == 2 && args[1] == VERSION_FLAG {
+        println!("reconverge-driver {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     // RUSTC_WORKSPACE_WRAPPER contract: argv[1] is the real rustc. Drop it
     // so rustc_driver sees a normal argv (argv[0] stays as program name).
     if args.get(1).map(Path::new).and_then(Path::file_stem) == Some(OsStr::new("rustc")) {
@@ -169,6 +188,9 @@ fn run_analyses(
         let mut witnesses = Vec::new();
         uniformity::rc001_divergent_barriers(&models, &results, &mut findings, &mut witnesses);
         uniformity::rc002_nonconvergent_warp_ops(&models, &results, &mut findings, &mut witnesses);
+        // After every rule, so all five codes carry it — coverage is a
+        // property of the analysis, not of one lint.
+        uniformity::annotate_coverage(&models, &results, &mut findings);
         analysis::sort_findings(&mut findings);
         if let Err(err) = emit::write_witnesses(dir, crate_types, witnesses) {
             return ControlFlow::Break(format!(
@@ -177,7 +199,12 @@ fn run_analyses(
             ));
         }
 
-        match emit::write_findings(dir, crate_types, &findings) {
+        match emit::write_findings(
+            dir,
+            crate_types,
+            &findings,
+            uniformity::run_coverage(&results),
+        ) {
             Ok(path) => eprintln!(
                 "reconverge-driver: {} {} in `{}` -> {}",
                 findings.len(),

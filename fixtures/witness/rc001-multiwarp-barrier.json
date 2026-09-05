@@ -4,8 +4,18 @@
     "name": "reconverge",
     "version": "0.4.0"
   },
-  "crate": "sample_kernels",
-  "kernel": "convergent_barrier",
+  "crate": "lint_samples",
+  "kernel": "rc001_multiwarp_barrier",
+  "finding": {
+    "code": "RC001",
+    "span": {
+      "file": "src/lib.rs",
+      "line_start": 291,
+      "column_start": 9,
+      "line_end": 291,
+      "column_end": 31
+    }
+  },
   "launch": {
     "grid": [
       1,
@@ -13,14 +23,45 @@
       1
     ],
     "block": [
-      32,
+      64,
       1,
       1
-    ],
-    "warp": 0
+    ]
   },
-  "lanes": 32,
+  "lanes": 64,
   "initial_lane_states": [
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
+    "active",
     "active",
     "active",
     "active",
@@ -57,179 +98,25 @@
   "steps": [
     {
       "index": 0,
-      "statement": "lanes read their thread index \u2014 nothing has diverged yet",
+      "statement": "lanes evaluate the guarding branch — 32 continue toward `sync_threads`, 32 never will",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 33,
-        "column_start": 13,
-        "line_end": 33,
-        "column_end": 30
+        "line_start": 290,
+        "column_start": 8,
+        "line_end": 290,
+        "column_end": 28
       },
       "lane_changes": []
     },
     {
       "index": 1,
-      "statement": "lanes evaluate the guarding branch \u2014 16 take it and do their extra work, 16 wait at the join",
+      "statement": "sync_threads() — 32 of 64 lanes arrive and wait",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 34,
-        "column_start": 8,
-        "line_end": 34,
-        "column_end": 25
-      },
-      "lane_changes": [
-        {
-          "lane": 1,
-          "state": "waiting"
-        },
-        {
-          "lane": 3,
-          "state": "waiting"
-        },
-        {
-          "lane": 5,
-          "state": "waiting"
-        },
-        {
-          "lane": 7,
-          "state": "waiting"
-        },
-        {
-          "lane": 9,
-          "state": "waiting"
-        },
-        {
-          "lane": 11,
-          "state": "waiting"
-        },
-        {
-          "lane": 13,
-          "state": "waiting"
-        },
-        {
-          "lane": 15,
-          "state": "waiting"
-        },
-        {
-          "lane": 17,
-          "state": "waiting"
-        },
-        {
-          "lane": 19,
-          "state": "waiting"
-        },
-        {
-          "lane": 21,
-          "state": "waiting"
-        },
-        {
-          "lane": 23,
-          "state": "waiting"
-        },
-        {
-          "lane": 25,
-          "state": "waiting"
-        },
-        {
-          "lane": 27,
-          "state": "waiting"
-        },
-        {
-          "lane": 29,
-          "state": "waiting"
-        },
-        {
-          "lane": 31,
-          "state": "waiting"
-        }
-      ]
-    },
-    {
-      "index": 2,
-      "statement": "the paths meet again at the branch's post-dominator \u2014 every lane is active before anything synchronizes",
-      "span": {
-        "file": "src/lib.rs",
-        "line_start": 37,
-        "column_start": 5,
-        "line_end": 37,
-        "column_end": 6
-      },
-      "lane_changes": [
-        {
-          "lane": 1,
-          "state": "active"
-        },
-        {
-          "lane": 3,
-          "state": "active"
-        },
-        {
-          "lane": 5,
-          "state": "active"
-        },
-        {
-          "lane": 7,
-          "state": "active"
-        },
-        {
-          "lane": 9,
-          "state": "active"
-        },
-        {
-          "lane": 11,
-          "state": "active"
-        },
-        {
-          "lane": 13,
-          "state": "active"
-        },
-        {
-          "lane": 15,
-          "state": "active"
-        },
-        {
-          "lane": 17,
-          "state": "active"
-        },
-        {
-          "lane": 19,
-          "state": "active"
-        },
-        {
-          "lane": 21,
-          "state": "active"
-        },
-        {
-          "lane": 23,
-          "state": "active"
-        },
-        {
-          "lane": 25,
-          "state": "active"
-        },
-        {
-          "lane": 27,
-          "state": "active"
-        },
-        {
-          "lane": 29,
-          "state": "active"
-        },
-        {
-          "lane": 31,
-          "state": "active"
-        }
-      ]
-    },
-    {
-      "index": 3,
-      "statement": "sync_threads() \u2014 all 32 of 32 lanes arrive and wait",
-      "span": {
-        "file": "src/lib.rs",
-        "line_start": 38,
-        "column_start": 5,
-        "line_end": 38,
-        "column_end": 27
+        "line_start": 291,
+        "column_start": 9,
+        "line_end": 291,
+        "column_end": 31
       },
       "lane_changes": [
         {
@@ -363,154 +250,154 @@
       ],
       "barrier": {
         "arrived": 32,
-        "expected": 32
+        "expected": 64
       }
     },
     {
-      "index": 4,
-      "statement": "the barrier is satisfied and releases every thread; the kernel returns",
+      "index": 2,
+      "statement": "the other 32 lanes exit or move past reconvergence without ever reaching the barrier",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 42,
-        "column_start": 1,
-        "line_end": 42,
-        "column_end": 2
+        "line_start": 290,
+        "column_start": 8,
+        "line_end": 290,
+        "column_end": 28
       },
       "lane_changes": [
         {
-          "lane": 0,
+          "lane": 32,
           "state": "exited"
         },
         {
-          "lane": 1,
+          "lane": 33,
           "state": "exited"
         },
         {
-          "lane": 2,
+          "lane": 34,
           "state": "exited"
         },
         {
-          "lane": 3,
+          "lane": 35,
           "state": "exited"
         },
         {
-          "lane": 4,
+          "lane": 36,
           "state": "exited"
         },
         {
-          "lane": 5,
+          "lane": 37,
           "state": "exited"
         },
         {
-          "lane": 6,
+          "lane": 38,
           "state": "exited"
         },
         {
-          "lane": 7,
+          "lane": 39,
           "state": "exited"
         },
         {
-          "lane": 8,
+          "lane": 40,
           "state": "exited"
         },
         {
-          "lane": 9,
+          "lane": 41,
           "state": "exited"
         },
         {
-          "lane": 10,
+          "lane": 42,
           "state": "exited"
         },
         {
-          "lane": 11,
+          "lane": 43,
           "state": "exited"
         },
         {
-          "lane": 12,
+          "lane": 44,
           "state": "exited"
         },
         {
-          "lane": 13,
+          "lane": 45,
           "state": "exited"
         },
         {
-          "lane": 14,
+          "lane": 46,
           "state": "exited"
         },
         {
-          "lane": 15,
+          "lane": 47,
           "state": "exited"
         },
         {
-          "lane": 16,
+          "lane": 48,
           "state": "exited"
         },
         {
-          "lane": 17,
+          "lane": 49,
           "state": "exited"
         },
         {
-          "lane": 18,
+          "lane": 50,
           "state": "exited"
         },
         {
-          "lane": 19,
+          "lane": 51,
           "state": "exited"
         },
         {
-          "lane": 20,
+          "lane": 52,
           "state": "exited"
         },
         {
-          "lane": 21,
+          "lane": 53,
           "state": "exited"
         },
         {
-          "lane": 22,
+          "lane": 54,
           "state": "exited"
         },
         {
-          "lane": 23,
+          "lane": 55,
           "state": "exited"
         },
         {
-          "lane": 24,
+          "lane": 56,
           "state": "exited"
         },
         {
-          "lane": 25,
+          "lane": 57,
           "state": "exited"
         },
         {
-          "lane": 26,
+          "lane": 58,
           "state": "exited"
         },
         {
-          "lane": 27,
+          "lane": 59,
           "state": "exited"
         },
         {
-          "lane": 28,
+          "lane": 60,
           "state": "exited"
         },
         {
-          "lane": 29,
+          "lane": 61,
           "state": "exited"
         },
         {
-          "lane": 30,
+          "lane": 62,
           "state": "exited"
         },
         {
-          "lane": 31,
+          "lane": 63,
           "state": "exited"
         }
       ]
     }
   ],
   "verdict": {
-    "kind": "completed",
-    "message": "all 32 lanes reconverged at the branch's post-dominator before the barrier, so all 32 arrived and the barrier released \u2014 this is the shape that cannot hang",
-    "step": 4
+    "kind": "undefined-behavior",
+    "message": "32 of 64 lanes wait at `sync_threads()` while 32 never arrive; the barrier cannot be satisfied — undefined behavior on hardware, usually a permanent hang",
+    "step": 2
   }
 }

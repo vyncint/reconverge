@@ -96,7 +96,7 @@ fn col_of(screen: &Screen, row: u16, needle: &str) -> Option<u16> {
         let mut col = start;
         for want in &needle {
             match screen.cell(row, col) {
-                Some(cell) if cell.contents().chars().next() == Some(*want) => {
+                Some(cell) if cell.contents().starts_with(*want) => {
                     col += if cell.is_wide() { 2 } else { 1 };
                 }
                 _ => return false,

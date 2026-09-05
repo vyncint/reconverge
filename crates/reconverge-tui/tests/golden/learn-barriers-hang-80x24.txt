@@ -13,13 +13,13 @@ size: 80x24  cursor: hidden
 │    if i.get() % 2 == 0 {                                                     │
 │        thread::sync_threads(); // <- RC001                                   │
 │                                                                              │
-│replay — step 5/5  [====>]                                                    │
+│replay — step 3/3  [==>]                                                      │
 │          0        8        16       24                                       │
 │lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                 │
 │          o active   W waiting   . exited                                     │
 │                                                                              │
-│return — the odd lanes leave the kernel without ever reaching the barrier     │
-│verdict: undefined behavior — 16 of 32 lanes wait at the barrier while the    │
-│other 16 have exited; the barrier can never be satisfied — undefined behavior │
-│on hardware, usually a permanent hang                                         │
+│the other 16 lanes exit or move past reconvergence without ever reaching the …│
+│verdict: undefined behavior — 16 of 32 lanes wait at `sync_threads()` while 16│
+│never arrive; the barrier cannot be satisfied — undefined behavior on         │
+│hardware, usually a permanent hang                                            │
 └ n/p page  h/l step  d/v jumps  Esc list  q quit ─────────────────────────────┘

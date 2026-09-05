@@ -194,6 +194,18 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         ("RC005", "rc005_domain3_index1d"),
         ("RC005", "rc005_mismatch"),
         ("RC005", "rc005_missing_contract"),
+        // The unmasked wrapper: `warp::ballot(x)` delegates to
+        // `ballot_sync(0xffff_ffff, x)` inside cuda-device, so it is
+        // analyzed exactly as the explicit full mask. `--explain RC002`
+        // called it "not yet checked" for two releases after the
+        // recognizer learned it, and no fixture held the page to the code.
+        ("RC002", "rc002_unmasked_wrapper"),
+        ("RC005", "rc002_unmasked_wrapper"),
+        // The declared two-warp block, with and without a collective on the
+        // path. Both promote: a collective stopped the multi-warp replay
+        // until #30 and the README still said it did.
+        ("RC001", "rc001_multiwarp_barrier"),
+        ("RC001", "rc001_multiwarp_barrier_after_collective"),
     ]
     .into_iter()
     .map(|(code, kernel)| ((code.to_string(), kernel.to_string()), 1))
@@ -255,6 +267,7 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
     // undefined-behavior verdicts.
     let witness_dir = project.join("target/reconverge");
     let mut witness_count = 0;
+    let mut multiwarp = 0;
     for entry in fs::read_dir(&witness_dir).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -265,16 +278,47 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
             serde_json::from_str(&fs::read_to_string(&path).unwrap())
                 .unwrap_or_else(|e| panic!("{name} is not witness.v1: {e}"));
         assert_eq!(artifact.schema, "witness.v1");
-        assert_eq!(artifact.lanes, 32);
+        // Whole warps up to 128, not "always 32": the declared-block
+        // replay has written 64, 96 and 128 since 0.1.12 while the
+        // published schema pinned `lanes` at 32, so the artifacts that
+        // violated the project's own contract were exactly the gating ones.
+        assert!(
+            matches!(artifact.lanes, 32 | 64 | 96 | 128),
+            "{name}: lanes = {}",
+            artifact.lanes
+        );
+        assert_eq!(
+            artifact.initial_lane_states.len(),
+            usize::from(artifact.lanes)
+        );
         assert_eq!(
             artifact.verdict.kind,
             reconverge_artifacts::witness::VerdictKind::UndefinedBehavior
         );
+        // At a collective, the lanes the strip shows present are exactly
+        // the set bits of `warp_op.active`. Asserted on a *driver* artifact:
+        // the hand-written fixtures obeyed it all along, which is why the
+        // golden frame stayed coherent while the shipping one did not.
+        assert_eq!(
+            artifact.first_collective_disagreeing_with_its_mask(),
+            None,
+            "{name}: a collective's lane strip contradicts its own mask"
+        );
+        if artifact.lanes > 32 {
+            multiwarp += 1;
+        }
         witness_count += 1;
     }
-    // Four: the two direct sites, plus the two interprocedural ones that
-    // inlining turned into concrete paths.
-    assert_eq!(witness_count, 4, "one witness per confirmed finding");
+    // Seven: the two direct sites, the two interprocedural ones that
+    // inlining turned into concrete paths, the unmasked wrapper, and the
+    // two multi-warp barriers.
+    assert_eq!(witness_count, 7, "one witness per confirmed finding");
+    assert_eq!(
+        multiwarp, 2,
+        "an ordinary run must emit a witness wider than one warp; without \
+         one, nothing in the suite ever serializes the shape the schema \
+         used to reject"
+    );
 
     // --- SARIF: the full registry of rules, one result per finding.
     let sarif: serde_json::Value =

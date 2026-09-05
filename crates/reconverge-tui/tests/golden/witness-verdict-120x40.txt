@@ -1,6 +1,6 @@
 size: 120x40  cursor: hidden
 ┌ reconverge witness ──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│witness 1/2 — kernel `divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1) warp 0                                 │
+│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block (32,1,1) warp 0                           │
 │                                                                                                                      │
 │          0        8        16       24                                                                               │
 │lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                                                         │
@@ -8,21 +8,21 @@ size: 120x40  cursor: hidden
 │                                                                                                                      │
 │          o active   W waiting   . exited                                                                             │
 │                                                                                                                      │
-│step 5/5  [====>]                                                                                                     │
-│return — the odd lanes leave the kernel without ever reaching the barrier                                             │
-│at lib.rs:27                                                                                                          │
+│step 3/3  [==>]                                                                                                       │
+│the other 16 lanes exit or move past reconvergence without ever reaching the barrier                                  │
+│at lib.rs:179                                                                                                         │
 │                                                                                                                      │
 │                                                                                                                      │
 │   0  launch                                                                                                          │
-│   1  _4 = cuda_device::__internal::index_1d(&_3)                                                                     │
-│   2  _6 = Rem(_5, const 2_usize); _7 = Eq(_6, const 0_usize)                                                         │
-│   3  switchInt(_7) — lanes disagree: 16 take the branch, 16 skip it                                                  │
-│   4  _8 = cuda_device::sync_threads()                                                                    16 waiting  │
-│▸  5  return — the odd lanes leave the kernel without ever reaching the barrier                            16 exited  │
+│   1  lanes evaluate the guarding branch — 16 continue toward `sync_threads`, 16 never will                           │
+│   2  sync_threads() — 16 of 32 lanes arrive and wait                                                     16 waiting  │
+│▸  3  the other 16 lanes exit or move past reconvergence without ever reaching the barrier                 16 exited  │
 │                                                                                                                      │
-│verdict: undefined behavior (at step 5)                                                                               │
-│16 of 32 lanes wait at the barrier while the other 16 have exited; the barrier can never be satisfied — undefined     │
-│behavior on hardware, usually a permanent hang                                                                        │
+│verdict: undefined behavior (at step 3)                                                                               │
+│16 of 32 lanes wait at `sync_threads()` while 16 never arrive; the barrier cannot be satisfied — undefined behavior on│
+│hardware, usually a permanent hang                                                                                    │
+│                                                                                                                      │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

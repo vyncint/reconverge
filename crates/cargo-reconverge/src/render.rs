@@ -60,7 +60,9 @@ pub fn render_text(
     writeln!(
         out,
         "{}",
-        review.counts().summary_line(strict, show_suppressed)
+        review
+            .counts()
+            .summary_line(strict, show_suppressed, review.coverage())
     )?;
     out.flush()
 }

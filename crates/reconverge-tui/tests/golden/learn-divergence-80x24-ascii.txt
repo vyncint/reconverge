@@ -16,7 +16,7 @@ size: 80x24  cursor: hidden
 |                                                                              |
 |                                                                              |
 |                                                                              |
-|replay -- step 0/5  [.....]                                                   |
+|replay -- step 0/3  [...]                                                     |
 |          0        8        16       24                                       |
 |lanes     oooooooo oooooooo oooooooo oooooooo                                 |
 |          o active   W waiting   . exited                                     |

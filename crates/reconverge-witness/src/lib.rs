@@ -950,7 +950,23 @@ fn build_replay(
                     "{site_display}() — active lanes {arrived:#010x}, mask {mask:#010x}"
                 ),
                 span: Some(site_span),
-                lane_changes: Vec::new(),
+                // The deltas belong *at* the call, not one step later.
+                // Deferring them left the lane strip reading `oooooooo …`
+                // for all 32 lanes two rows above an `active 0x55555555`
+                // saying sixteen — the panel a user opens precisely because
+                // they do not yet believe the finding, arguing against it.
+                //
+                // A barrier additionally turns its arriving lanes `Waiting`
+                // at the site, which is why that arm looked right while
+                // deferring its `Exited` deltas identically. A collective
+                // has no such state — it does not block the lanes that did
+                // arrive — so `Exited` is what the absent lanes get, which
+                // matches the text diagnostic's own legend (`.` = never
+                // arrives) and what the driver already wrote one step on.
+                lane_changes: lanes_of(never, lanes)
+                    .into_iter()
+                    .map(|l| (l, LaneState::Exited))
+                    .collect(),
                 barrier: None,
                 warp_op: Some((site_display.clone(), mask, arrived)),
             });
@@ -961,10 +977,8 @@ fn build_replay(
                     plural(named_absent.count_ones(), "lane", "lanes")
                 ),
                 span: Some(cause_span),
-                lane_changes: lanes_of(never, lanes)
-                    .into_iter()
-                    .map(|l| (l, LaneState::Exited))
-                    .collect(),
+                // Pure narration: the departures are recorded above.
+                lane_changes: Vec::new(),
                 barrier: None,
                 warp_op: None,
             });
