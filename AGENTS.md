@@ -22,6 +22,7 @@ is the full contributor document and wins wherever the two disagree.
 just ci                       # everything CI gates on
 cargo test --workspace        # needs the pinned nightly with rustc-dev
 cargo test -p reconverge-tui  # the PTY suite alone, no driver needed
+just termlens-cli             # the #[ignore]d termlens-cli suite (CI runs it)
 ./scripts/run-conformance.sh  # the corpus, with --locked
 ./scripts/check-schemas.sh    # fixtures + an end-to-end run, against schemas/
 ./scripts/record-fixtures.sh  # re-record the witness fixtures from a real run
@@ -58,7 +59,9 @@ behaviour.
 - **PTY tests follow the termlens skill**, vendored at
   `.claude/skills/termlens/SKILL.md`: content-based waits only, never a
   sleep; one predicate per instant; `(cols, rows)` for a size and
-  `(row, col)` for a cell. `crates/cargo-reconverge/tests/check_render.rs`
+  `(row, col)` for a cell. The copy is refreshed by hand and
+  `./scripts/check-skill-version.sh` gates it against both manifests, so a
+  termlens bump and the skill move in the same pull request. `crates/cargo-reconverge/tests/check_render.rs`
   is the CLI-side example — an escape byte that erases and a caret in the
   wrong cell are properties of the rendered grid, which a stdout string
   cannot see.

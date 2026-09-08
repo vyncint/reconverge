@@ -249,5 +249,71 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
         !screen.alternate_screen(),
         "check is not a full-screen view"
     );
+
+    // --- the premise this whole file rests on, which was written at the top
+    // as a comment and asserted nowhere. The erasure case above distinguishes
+    // "the escape wiped the visible grid" from "the report is intact"; if the
+    // report were tall enough to scroll on its own, a diagnostic missing from
+    // the grid would be indistinguishable from one that had simply scrolled
+    // past, and the assertion could not tell the two apart. At 100x24 this
+    // same run puts 83 rows into history; at 160x90 it must put none.
+    assert_eq!(
+        screen.scrollback_rows(),
+        0,
+        "nothing may scroll off on its own at {COLS}x{ROWS}, or the erasure \
+         assertions above cannot tell an erased diagnostic from one that \
+         merely scrolled past"
+    );
+
+    // --- and the grid those assertions read. `check` emits no sequence
+    // termlens fails to implement, so every claim above is made against a
+    // stream the emulator honoured in full rather than a plausible-looking
+    // reconstruction of one.
+    assert!(
+        screen.unsupported().is_empty(),
+        "`check` emitted a sequence termlens does not model, so this grid may \
+         be wrong: {:?}",
+        screen.unsupported()
+    );
+    assert_eq!(screen.unsupported_overflow(), 0);
+    assert!(!screen.insert_mode(), "IRM would shift every row right");
+    assert_eq!(screen.bells(), 0, "a report is text, never a beep");
+    assert_eq!(screen.visual_bells(), 0);
+
+    // --- why this file synchronizes with `snapshot_after` and the TUI suite
+    // with `wait_frame`. `check` is not a full-screen view and brackets
+    // nothing in DEC 2026, so it emits no complete frames at all: pointed at
+    // this binary, `wait_frame` would run out its whole deadline. Pinning the
+    // count keeps the two sync policies from being swapped by mistake.
+    assert_eq!(
+        screen.repaints(),
+        0,
+        "`check` emits no synchronized updates, which is why this file uses \
+         `snapshot_after` rather than `wait_frame` (AGENTS.md, the termlens \
+         skill rule 8)"
+    );
+
+    // --- one report, not two. The erasure bug removed diagnostics; a retry
+    // loop or a doubled writer would add them, and `contains` cannot tell.
+    assert_eq!(
+        screen.find_all("kernel `aaa_first`").len(),
+        1,
+        "each kernel is reported once:\n{screen}"
+    );
+
+    // --- the note text, whole. The `= note:` lines are longer than the
+    // terminal and rely on it to wrap them, so `contains` — which reads one
+    // row at a time — cannot see a sentence that crosses the wrap, and a
+    // reader who tried would wrongly conclude the note had been truncated.
+    // `logical_text` rejoins the wrapped rows, which is the only way to
+    // assert the note reached the grid in full.
+    assert!(
+        screen.logical_text().contains("usually a permanent hang"),
+        "the RC001 note must reach the terminal whole; wrapped rows: {:?}\n{screen}",
+        (0..screen.rows())
+            .filter(|&row| screen.row_wrapped(row))
+            .collect::<Vec<_>>()
+    );
+
     Ok(())
 }

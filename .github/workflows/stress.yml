@@ -89,6 +89,13 @@ jobs:
           ITERS: ${{ inputs.iterations || '100' }}
           THREADS: ${{ matrix.threads }}
           WEIGHT: ${{ matrix.weight }}
+          # The whole point of this workflow is the once-in-fifty failure, and
+          # until now catching one reported `suite flaked at N thread(s),
+          # iteration i/p` and nothing else — the screen that would diagnose
+          # it was gone. With this set, every screen a failing termlens wait
+          # embeds is written here as well, and the `report` step below turns
+          # the caught flake into the picture it actually was (termlens 0.10).
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
         run: |
           per=$(( WEIGHT * ITERS / 100 ))
           # A small `iterations` must still exercise every concurrency, or a
@@ -101,3 +108,10 @@ jobs:
               || { echo "::error::suite flaked at ${THREADS} thread(s), iteration ${i}/${per}"; exit 1; }
             echo "::endgroup::"
           done
+      # Only on a caught flake, which is the run that matters here. The
+      # artifact name carries the OS and the thread count, because which shard
+      # a flake landed on is most of the diagnosis.
+      - uses: vyncint/termlens/.github/actions/report@e1b96c8203fd727fa3458af395719c429966ee82 # v0.10.1
+        if: failure()
+        with:
+          name: termlens-flake-${{ matrix.os }}-${{ matrix.threads }}t

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{env, fs};
 
-use termlens::{Key, Terminal};
+use termlens::{Key, Screen, Style, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -75,10 +75,27 @@ fn assert_golden(name: &str, screen: &str, context: &str) {
     );
 }
 
+/// How many cells carry any styling. Compared against zero or "some" only:
+/// see the NO_COLOR leg below.
+fn styled_cells(frame: &Screen) -> usize {
+    (0..frame.rows())
+        .flat_map(|row| (0..frame.cols()).map(move |col| (row, col)))
+        .filter(|&(row, col)| {
+            frame
+                .cell(row, col)
+                .is_some_and(|cell| *cell.style() != Style::default())
+        })
+        .count()
+}
+
 fn quit(mut t: Terminal, context: &str) {
     t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("learn mode did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
+    assert!(
+        !t.screen().alternate_screen(),
+        "{context}: learn mode must restore the terminal on the way out"
+    );
 }
 
 /// The §9 journey: list → the barriers lesson → step the embedded replay
@@ -216,14 +233,82 @@ fn matrix_leg(size: (u16, u16)) {
                     && s.contains("o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.")
             })
             .expect("the lane strip and the active mask agree at the collective");
-        screens.push(normalize(&frame.to_string()));
+
+        // "Agree" made structural, rather than "both appear somewhere". The
+        // three rows are one picture: lanes, then the mask the call named,
+        // then the lanes that actually arrived — adjacent, in that order, and
+        // starting in the same cell so a reader compares them column by
+        // column. A strip drawn against the wrong mask row satisfies
+        // `contains` and nothing here.
+        let lanes = frame.find_all("o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.");
+        assert_eq!(lanes.len(), 1, "one lane strip per replay:\n{frame}");
+        let (lanes_row, lanes_col) = lanes[0];
+        let active = frame.find_all("#.#.#.#. #.#.#.#. #.#.#.#. #.#.#.#.");
+        assert_eq!(active.len(), 1, "one active-mask row:\n{frame}");
+        let (active_row, active_col) = active[0];
+        assert_eq!(
+            active_col, lanes_col,
+            "the lane strip and the active mask share a left edge:\n{frame}"
+        );
+        assert_eq!(
+            active_row,
+            lanes_row + 2,
+            "lanes, then mask, then active — adjacent and in that order:\n{frame}"
+        );
+        assert!(
+            frame.row_text(lanes_row + 1).contains("0xffffffff"),
+            "the mask row carries the mask the call named:\n{frame}"
+        );
+        assert!(
+            frame.row_text(active_row).contains("0x55555555"),
+            "and the active row the lanes that arrived:\n{frame}"
+        );
+
+        screens.push(frame);
         quit(t, "matrix leg");
     }
+    let (colour, plain) = (&screens[0], &screens[1]);
 
-    assert_golden(&golden, &screens[0], "matrix color leg");
+    assert_golden(&golden, &colour.to_string(), "matrix color leg");
     assert_eq!(
-        screens[0], screens[1],
+        normalize(&colour.to_string()),
+        normalize(&plain.to_string()),
         "NO_COLOR must not change the character grid ({golden})"
+    );
+
+    // Why the equality above means anything, and what NO_COLOR actually did.
+    // Identical grids would also be produced by an emulator that dropped a
+    // cursor-moving sequence in both runs, and by a view that hardcoded a
+    // colour. `unsupported` rules out the first — the one sequence dropped is
+    // `SGR 59`, ratatui's underline-colour reset, which changes no cell — and
+    // the styled-cell counts rule out the second. tests/emulation.rs explains
+    // why the coloured list can be pinned exactly here.
+    assert_eq!(
+        colour
+            .unsupported()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["^[[59m"],
+        "the coloured leg's grid was built from a stream the emulator \
+         implemented apart from the underline-colour reset ({golden})"
+    );
+    assert_eq!(colour.unsupported_overflow(), 0, "the record is complete");
+    assert!(
+        plain.unsupported().is_empty(),
+        "with nothing to style there is nothing left to drop, got {:?}",
+        plain.unsupported()
+    );
+    assert!(
+        styled_cells(colour) > 0,
+        "learn mode styles cells when colour is allowed ({golden})"
+    );
+    assert_eq!(
+        styled_cells(plain),
+        0,
+        "NO_COLOR must leave no styling on the grid, not merely the same \
+         glyphs ({golden}):\n{}",
+        plain.with_styles()
     );
 }
 
