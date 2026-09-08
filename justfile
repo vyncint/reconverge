@@ -32,3 +32,11 @@ ci:
     ./scripts/check-plurals.sh
     ./scripts/check-schemas.sh
     ./scripts/record-fixtures.sh --check
+    ./scripts/check-skill-version.sh
+    # Not run here: `just termlens-cli`. CI runs it, but it `cargo install`s
+    # termlens-cli from crates.io, and `just ci` should not reach the network
+    # or put a binary on a contributor's machine without being asked.
+
+# the `#[ignore]`d termlens-cli suite (installs termlens-cli into target/)
+termlens-cli:
+    cargo test -p reconverge-tui --test cli -- --ignored

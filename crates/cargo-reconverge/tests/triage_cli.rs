@@ -14,7 +14,7 @@ use std::{env, fs};
 
 use reconverge_artifacts::baseline::{BaselineArtifact, Entry};
 use reconverge_artifacts::findings::FindingsArtifact;
-use termlens::{Key, Terminal};
+use termlens::{Key, Location, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -297,6 +297,11 @@ fn watch_reruns_the_check_when_a_source_file_changes() {
     let mut builder = Terminal::builder()
         .size(100, 30)
         .env_clear()
+        // Two full analyses plus their cargo output do not fit the default
+        // 1000 rows of history on a cold runner, and the assertions at the
+        // end read the first run *out of* history. Sized for the whole
+        // session rather than for what a warm local run happens to produce.
+        .scrollback(8000)
         .timeout(Duration::from_secs(180))
         .current_dir(&project)
         .env("RECONVERGE_DRIVER", driver.to_str().unwrap())
@@ -344,13 +349,49 @@ fn watch_reruns_the_check_when_a_source_file_changes() {
     let status = t
         .wait_exit()
         .expect("watch did not stop after --max-runs 2");
+    let screen = t.screen();
     // The visible tail is the second run's own report — the loop analyzed
-    // again rather than exiting on the trigger. (The first run's output has
-    // scrolled off by now: this is a terminal, not a transcript.)
-    let tail = t.screen().to_string();
+    // again rather than exiting on the trigger.
+    let tail = screen.to_string();
     assert!(
         tail.contains("reconverge: ") && tail.contains("deny,"),
         "the second run must end in its own summary:\n{tail}"
+    );
+
+    // "It re-ran, it did not merely reprint" is the claim this test exists
+    // for, and the visible tail alone cannot make it: one summary on screen
+    // looks the same whether the loop analyzed twice or scrolled the first
+    // report back into view. The whole transcript can. The first run's output
+    // has scrolled off — this is a terminal, not a transcript — so it is
+    // reachable only through the retained history, and it is there, before
+    // the second, with exactly two summaries between them.
+    assert!(
+        !screen.contains("run #1"),
+        "the first run has scrolled off the visible grid by now; if it has \
+         not, the report shrank and the history assertions below are no \
+         longer testing anything:\n{tail}"
+    );
+    assert!(
+        matches!(screen.locate("run #1"), Some(Location::History { .. })),
+        "the first run must still be in the retained history, not lost: {:?}",
+        screen.locate("run #1")
+    );
+    let transcript = screen.full_text();
+    let first = transcript
+        .find("run #1")
+        .expect("the first run is in the transcript");
+    let second = transcript
+        .find("run #2")
+        .expect("the second run is in the transcript");
+    assert!(
+        first < second,
+        "the re-run came after the first run, not before it"
+    );
+    assert_eq!(
+        transcript.matches("reconverge: ").count(),
+        2,
+        "exactly two analyses ran — one per `--max-runs`. A loop that \
+         reprinted its last report instead of re-analyzing leaves one."
     );
     assert!(
         !status.success(),

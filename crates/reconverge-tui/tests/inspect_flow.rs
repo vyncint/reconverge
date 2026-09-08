@@ -70,6 +70,13 @@ fn quit(mut t: Terminal, context: &str) {
     t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("inspector did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
+    // The terminal is the caller's again. No golden can see this: a golden is
+    // the *contents* of the alternate screen, so a view that never left it
+    // would still match every frame here and break the next command instead.
+    assert!(
+        !t.screen().alternate_screen(),
+        "{context}: the inspector must restore the terminal on the way out"
+    );
 }
 
 /// The §9 journey: open → step values → walk provenance → back → jump to

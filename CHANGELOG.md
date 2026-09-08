@@ -12,6 +12,51 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Changed
+
+- **The PTY harness moves to termlens 0.10.1** (dev-dependency, both
+  `reconverge-tui` and `cargo-reconverge`, which must stay on one version).
+  No call site changed — nothing here used `drag`, a `Style` literal, the
+  snapshot macro or an `Error` variant — so the whole value is in what 0.10
+  made assertable. One new transitive dependency, `unicode-width 0.2`, which
+  both crates already depend on directly at the same requirement.
+
+### Added
+
+- **`crates/reconverge-tui/tests/emulation.rs`: what the emulator can and
+  cannot see.** Every golden is a grid a VT emulator built from the shell's
+  bytes, and until now nothing said the emulator had implemented that stream.
+  `Screen::unsupported()` is pinned exactly — one entry, `^[[59m`, ratatui's
+  underline-colour reset, which changes no cell — across all four views,
+  beside `insert_mode`, `bells`, `visual_bells`, `mouse_modes` and
+  `row_wrapped`. The DEC 2026 bracketing the suite's `wait_frame` policy
+  depends on is *not* pinned by an assertion, deliberately: `wait_frame`
+  returns only a completed update, so any frame in hand already satisfies it,
+  and were `sync_draw` reverted the wait would time out — naming that exact
+  cause — before an assertion could run.
+
+- **`crates/reconverge-tui/tests/cli.rs`: the goldens through `termlens-cli`.**
+  Every file under `tests/golden/` is already a saved screen in termlens'
+  snapshot text format, because `assert_golden` writes `Screen::to_string()` —
+  so `termlens diff` and `termlens render` open them with no conversion, and
+  `termlens inspect` of the real binary reproduces `shell-80x24.txt` exactly.
+  `#[ignore]`d, because both crates are published and a `cargo test` should
+  not `cargo install` anything unasked; CI runs it with `--ignored`.
+
+- **NO_COLOR is now asserted to strip styling, not merely to preserve the
+  grid.** The three matrix legs compared two character grids, which a view
+  that hardcoded a colour would also pass. They now also require zero styled
+  cells on the NO_COLOR leg and some on the coloured one.
+
+- **`scripts/check-skill-version.sh`**, gating the vendored termlens skill
+  against both manifests and the two manifests against each other. AGENTS.md
+  makes the skill normative, and a stale copy hands the next contributor
+  guidance for a version that is no longer here.
+
+- **`TERMLENS_ARTIFACT_DIR` and the termlens report action** in `ci.yml` and
+  in `stress.yml`'s loop, so a caught flake arrives as the screen it was
+  rather than as `suite flaked at N thread(s)`.
+
 ## [0.5.0] — 2026-09-05
 
 The theme is **reading what the tool wrote**. Nine of these findings reduce

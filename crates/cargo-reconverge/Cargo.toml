@@ -24,4 +24,8 @@ unicode-width = "0.2"
 [dev-dependencies]
 # Same version as reconverge-tui (see its Cargo.toml for the pinning
 # policy): the end-to-end tests drive the TUI subcommands through a PTY.
-termlens = { version = "0.9", default-features = false }
+# The two are held equal by scripts/check-skill-version.sh — termlens is
+# deliberately not a workspace dependency, and deny.toml only *warns* on a
+# duplicate, so bumping one and not the other would otherwise pass CI while
+# rendering the goldens through two different emulators.
+termlens = { version = "0.10", default-features = false }

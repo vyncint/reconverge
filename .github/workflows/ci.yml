@@ -57,6 +57,29 @@ jobs:
           rustup toolchain install
           rustup show
       - run: cargo test --workspace
+        env:
+          # Every screen a failing termlens wait embeds is also written here,
+          # so the `report` step below can put the picture in the job summary
+          # instead of leaving it in a log someone has to scroll (termlens
+          # 0.10). A PTY failure *is* a picture, and a log is the worst place
+          # to read one. With `default-features = false` there is no serde
+          # feature, so these land as `.screen.txt`.
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      # The termlens-cli suite is `#[ignore]`d so a plain `cargo test` never
+      # `cargo install`s anything behind a contributor's or a packager's
+      # back — both crates here are published. CI is where it should run, so
+      # CI asks for it by name. The install is the version Cargo.lock names,
+      # so the tool and the library are one release.
+      - run: cargo test -p reconverge-tui --test cli -- --ignored
+        env:
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      # Renders every screen the suite left behind into the job summary, with
+      # SVG and HTML uploaded. It installs termlens-cli itself, so nothing
+      # else here has to.
+      - uses: vyncint/termlens/.github/actions/report@e1b96c8203fd727fa3458af395719c429966ee82 # v0.10.1
+        if: failure()
+        with:
+          name: termlens-report-linux
 
   docs:
     runs-on: ubuntu-latest
@@ -142,17 +165,43 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+        env:
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      # The one gate whose whole point is a second platform's terminal, run
+      # through the command a maintainer would use by hand: `termlens inspect`
+      # against the real binary, compared with the checked-in golden.
+      - run: cargo test -p reconverge-tui --test cli -- --ignored
+        env:
+          TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
+      - uses: vyncint/termlens/.github/actions/report@e1b96c8203fd727fa3458af395719c429966ee82 # v0.10.1
+        if: failure()
+        with:
+          name: termlens-report-macos
       # The gate scripts are Linux-only for cost, but their portability is
       # not: both prune with `sed` on every run, and the BSD form macOS
       # ships took the expression as a backup suffix and died. This is the
       # cheapest thing that reads them on the platform that broke.
       - run: bash -n scripts/run-conformance.sh scripts/run-mutation-corpus.sh
 
+  # The vendored termlens skill is refreshed by hand and AGENTS.md makes it
+  # normative for every PTY test here, so a stale copy silently instructs the
+  # next contributor to write code that no longer compiles. Nothing can diff
+  # it against upstream — the published crate does not ship the skill — but
+  # the two versions agreeing is checkable, and that is the drift that
+  # happens. The script also holds the two manifests to the same termlens
+  # version, which nothing else does: termlens is deliberately not in
+  # `[workspace.dependencies]`, and deny.toml only warns on duplicates.
+  skill-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ./scripts/check-skill-version.sh
+
   # The single required status check: green iff every Linux gate is green.
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas]
+    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas, skill-version]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every gate succeeded

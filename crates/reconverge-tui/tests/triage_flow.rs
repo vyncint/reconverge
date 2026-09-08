@@ -18,7 +18,7 @@ use std::time::Duration;
 use std::{env, fs};
 
 use reconverge_artifacts::baseline::BaselineArtifact;
-use termlens::{Key, Terminal};
+use termlens::{Key, Screen, Style, Terminal};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -89,10 +89,27 @@ fn type_text(t: &mut Terminal, text: &str) {
     }
 }
 
+/// How many cells carry any styling. Compared against zero or "some" only:
+/// see the NO_COLOR leg below.
+fn styled_cells(frame: &Screen) -> usize {
+    (0..frame.rows())
+        .flat_map(|row| (0..frame.cols()).map(move |col| (row, col)))
+        .filter(|&(row, col)| {
+            frame
+                .cell(row, col)
+                .is_some_and(|cell| *cell.style() != Style::default())
+        })
+        .count()
+}
+
 fn quit(mut t: Terminal, context: &str) {
     t.send(Key::Char('q')).expect("send Key::Char('q')");
     let status = t.wait_exit().expect("triage did not exit after q");
     assert!(status.success(), "{context}: exited with {status:?}");
+    assert!(
+        !t.screen().alternate_screen(),
+        "{context}: triage must restore the terminal on the way out"
+    );
 }
 
 /// The §9 journey: open on an empty baseline → accept a finding with a
@@ -121,8 +138,35 @@ fn triage_flow_journey() {
     // Non-ASCII text in a reason: the editor is a unicode surface, and the
     // grapheme-aware backspace depends on it.
     type_text(&mut t, "reviewed \u{2014} host owns it");
-    t.wait_until(|s| s.contains("reviewed \u{2014} host owns it"))
+    let editing = t
+        .wait_frame(|s| s.contains("reviewed \u{2014} host owns it"))
         .expect("reason echoes as typed");
+
+    // The caret in the reason editor is a glyph triage *draws*; the real
+    // terminal cursor stays hidden the whole time it is accepting text. The
+    // goldens do record the cursor — `Screen`'s Display puts `cursor: hidden`
+    // or `cursor: <row>,<col>` on the header line `assert_golden` compares —
+    // so this is not the only guard. It is the targeted one: a refactor that
+    // parked a live hardware cursor in some other cell would fail here by
+    // name, rather than as one changed header line inside a whole-screen
+    // diff, and it is checked at a moment no golden is taken.
+    let (_, _, cursor_visible) = editing.cursor();
+    assert!(
+        !cursor_visible,
+        "the editor draws its own caret and leaves the terminal cursor \
+         hidden; a visible one at {:?} is a second, disagreeing caret:\n{editing}",
+        editing.cursor()
+    );
+    let (reason_row, _) = editing
+        .find("reason: reviewed \u{2014} host owns it")
+        .unwrap_or_else(|| panic!("the reason line:\n{editing}"));
+    assert!(
+        editing
+            .row_text(reason_row)
+            .contains("reviewed \u{2014} host owns it\u{2588}"),
+        "the drawn caret sits immediately after the text typed so far:\n{editing}"
+    );
+
     t.send(Key::Enter).expect("send Key::Enter");
     let frame = t
         .wait_frame(|s| s.contains("2 findings — 1 suppressed") && s.contains("(unsaved)"))
@@ -221,14 +265,52 @@ fn matrix_leg(size: (u16, u16)) {
         let frame = t
             .wait_frame(|s| s.contains("reason: reviewed:"))
             .expect("reason shown for the accepted finding");
-        screens.push(normalize(&frame.to_string()));
+        screens.push(frame);
         quit(t, "matrix leg");
     }
+    let (colour, plain) = (&screens[0], &screens[1]);
 
-    assert_golden(&golden, &screens[0], "matrix color leg");
+    assert_golden(&golden, &colour.to_string(), "matrix color leg");
     assert_eq!(
-        screens[0], screens[1],
+        normalize(&colour.to_string()),
+        normalize(&plain.to_string()),
         "NO_COLOR must not change the character grid ({golden})"
+    );
+
+    // The equality above can hold for the wrong reason. If the emulator had
+    // silently dropped a cursor-moving sequence, both runs would produce the
+    // same wrong grid and this leg would stay green over a screen neither run
+    // drew; and a view that hardcoded a colour rather than asking the theme
+    // would also produce identical glyphs. `unsupported` names the one
+    // sequence that is dropped — `SGR 59`, ratatui's underline-colour reset,
+    // which changes no cell — and the styled-cell counts say NO_COLOR did
+    // something. tests/emulation.rs has the full argument for the pin.
+    assert_eq!(
+        colour
+            .unsupported()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["^[[59m"],
+        "the coloured leg's grid was built from a stream the emulator \
+         implemented apart from the underline-colour reset ({golden})"
+    );
+    assert_eq!(colour.unsupported_overflow(), 0, "the record is complete");
+    assert!(
+        plain.unsupported().is_empty(),
+        "with nothing to style there is nothing left to drop, got {:?}",
+        plain.unsupported()
+    );
+    assert!(
+        styled_cells(colour) > 0,
+        "triage styles cells when colour is allowed ({golden})"
+    );
+    assert_eq!(
+        styled_cells(plain),
+        0,
+        "NO_COLOR must leave no styling on the grid, not merely the same \
+         glyphs ({golden}):\n{}",
+        plain.with_styles()
     );
 }
 
@@ -312,6 +394,12 @@ fn an_unparseable_baseline_survives_a_full_review_pass() {
         t.send(Key::Char('w')).expect("send Key::Char('w')");
         t.wait_until(|s| s.contains("write refused"))
             .unwrap_or_else(|e| panic!("{tag}: `w` must be refused, not reported: {e}"));
+        // A refusal is a line on the screen, never a beep. The goldens are
+        // blind to a bell, and this is the path a future author is most
+        // likely to reach for one on.
+        let refused = t.screen();
+        assert_eq!(refused.bells(), 0, "{tag}: the refusal rings no bell");
+        assert_eq!(refused.visual_bells(), 0, "{tag}: nor flashes the screen");
 
         t.send(Key::Char('q')).expect("send Key::Char('q')");
         // The edit is unsaved, so `q` asks first — which it should, and

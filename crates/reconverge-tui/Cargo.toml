@@ -28,5 +28,10 @@ unicode-width = "0.2"
 # (the old git pin ecad6dac IS the 0.3.0 release commit). Upgrade
 # deliberately via Cargo.lock, never `*` — the golden frames make any
 # behavior change visible. default-features off: no insta, goldens are
-# plain files.
-termlens = { version = "0.9", default-features = false }
+# plain files; no serde and no regex either, because nothing here needs
+# them — every needle in every PTY test is a literal.
+#
+# A bump moves three things together, and scripts/check-skill-version.sh
+# gates all three: this line, cargo-reconverge's, and the vendored skill at
+# .claude/skills/termlens/SKILL.md that AGENTS.md makes normative.
+termlens = { version = "0.10", default-features = false }
