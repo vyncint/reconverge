@@ -75,9 +75,10 @@ the corpus; found-in-the-wild is the true north.
   version number, the checker treats a 0.x minor bump as a major release
   and skips every check, so a PR that bumps the version in the same change
   as a break is green with zero checks run. A PR that must break a promised
-  item carries the `breaking` label, which runs the gate as a 0.x minor —
-  visible, and per RELEASING.md's rule that a break is a minor release.
-  `baseline-version` is a literal, bumped in each release PR.
+  item carries the `breaking` label, which runs the gate as `major` — the
+  checker's name for what RELEASING.md calls a 0.x minor release — with the
+  diagnostics visible. `baseline-version` is a literal, bumped in a PR after
+  each publish.
 - **An `msrv` gate** building the five library crates on Rust 1.88, which
   they now declare as `rust-version`; only the driver needs the pinned
   nightly.

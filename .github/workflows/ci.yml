@@ -209,9 +209,11 @@ jobs:
   # treats a 0.x minor bump as a major release and skips every check, so a
   # PR that bumps the version in the same change as a break is green with
   # zero checks run. A PR that must break a promised item carries the
-  # `breaking` label, which runs the gate as a 0.x minor instead — visible,
-  # and per docs/RELEASING.md's rule that a break is a minor release.
-  # `baseline-version` is a literal, bumped in each release PR.
+  # `breaking` label, which runs the gate as `major` — the checker's name
+  # for what docs/RELEASING.md calls a 0.x minor release; `minor` would
+  # still fail on the break, which is the point of forcing the type. The
+  # diagnostics stay visible in the job. `baseline-version` is a literal,
+  # bumped in a PR after each publish (the baseline must be on the index).
   semver:
     runs-on: ubuntu-latest
     steps:
@@ -224,7 +226,7 @@ jobs:
         with:
           package: reconverge-core,reconverge-artifacts,reconverge-dialect-oxide,reconverge-witness,reconverge-tui
           baseline-version: 0.5.0
-          release-type: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') && 'minor' || 'patch' }}
+          release-type: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') && 'major' || 'patch' }}
 
   # The five library crates declare `rust-version = "1.88"` (ratatui 0.30's
   # floor); only the driver needs the pinned nightly. Build them on exactly
