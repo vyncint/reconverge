@@ -239,6 +239,13 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         ("RC005", "rc001_cooperative_block_sync"),
         ("RC001", "rc001_cluster_divergent_sync"),
         ("RC005", "rc001_cluster_divergent_sync"),
+        // 0.6.1 (#132): the raw cluster barrier is split, and only the
+        // waiting half blocks. The divergent *wait* is a hang and is
+        // reported; the valid split *arrival* -- one warp through the
+        // aligned form, its sibling through the plain one -- appears in
+        // neither list, which is the regression this pins. Both carry a
+        // launch contract, so neither adds an RC005.
+        ("RC001", "rc001_split_cluster_divergent_wait"),
     ]
     .into_iter()
     .map(|(code, kernel)| ((code.to_string(), kernel.to_string()), 1))
@@ -342,14 +349,18 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         }
         witness_count += 1;
     }
-    // Nine: the two direct sites, the two interprocedural ones that
+    // Ten: the two direct sites, the two interprocedural ones that
     // inlining turned into concrete paths, the unmasked wrapper, the two
-    // multi-warp barriers, and — since 0.6.0 — the cooperative-groups block
-    // sync and the divergent cluster_sync, each replayed as a concrete hang
-    // exactly like `sync_threads`.
-    assert_eq!(witness_count, 9, "one witness per confirmed finding");
+    // multi-warp barriers, the cooperative-groups block sync and the
+    // divergent cluster_sync (both since 0.6.0), and — since 0.6.1 — the
+    // divergent cluster *wait*, each replayed as a concrete hang exactly
+    // like `sync_threads`.
+    assert_eq!(witness_count, 10, "one witness per confirmed finding");
+    // Three since 0.6.1: the two declared-block barriers, plus the split
+    // cluster wait, whose `block = (64, 1, 1)` contract makes its replay
+    // two warps wide.
     assert_eq!(
-        multiwarp, 2,
+        multiwarp, 3,
         "an ordinary run must emit a witness wider than one warp; without \
          one, nothing in the suite ever serializes the shape the schema \
          used to reject"

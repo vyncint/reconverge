@@ -17,7 +17,8 @@
 #   exit 1  unknown names (printed one per line) — classify them in
 #           crates/reconverge-dialect-oxide/src/simt.rs or add them to
 #           conformance/SURFACE_ALLOW with a reason
-#   exit 2  usage / missing checkout
+#   exit 2  usage, missing checkout, or an `include!`d source that is not on
+#           disk — unreadable input is never reported as a clean surface
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 UPSTREAM=${1:?usage: check-surface.sh <upstream-checkout>}
@@ -32,6 +33,7 @@ ALLOW="$ROOT/conformance/SURFACE_ALLOW"
 MODULES=(warp thread barrier grid cooperative_groups cluster)
 
 unknown=0
+missing=0
 for m in "${MODULES[@]}"; do
   f="$DEVICE/$m.rs"
   [ -f "$f" ] || { echo "check-surface: note — upstream has no $m.rs at this pin" >&2; continue; }
@@ -43,7 +45,19 @@ for m in "${MODULES[@]}"; do
   # written in the module — so those files are scanned as part of it.
   sources=("$f")
   while read -r inc; do
-    [ -n "$inc" ] && sources+=("$DEVICE/$inc")
+    [ -n "$inc" ] || continue
+    # A named include that is not on disk means this module's surface was
+    # never enumerated. Saying PASS then is the exact failure this gate
+    # exists to prevent, one level up: `cat ... 2>/dev/null` used to hide
+    # the missing file, the scan silently covered fewer functions than it
+    # claimed, and the script still printed PASS (#134). Unreadable input
+    # is a hard error, never an empty result set.
+    if [ ! -f "$DEVICE/$inc" ]; then
+      echo "check-surface: $m.rs includes \"$inc\", which is not at $DEVICE/$inc" >&2
+      missing=$((missing + 1))
+      continue
+    fi
+    sources+=("$DEVICE/$inc")
   done < <(grep -oE 'include!\("[^"]+"\)' "$f" | sed -E 's/include!\("([^"]+)"\)/\1/')
   while read -r name; do
     [ -n "$name" ] || continue
@@ -51,9 +65,13 @@ for m in "${MODULES[@]}"; do
     if grep -qE "^$name[[:space:]]" "$ALLOW"; then continue; fi
     echo "unknown: cuda_device::$m::$name"
     unknown=$((unknown + 1))
-  done < <(cat "${sources[@]}" 2>/dev/null | grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' | awk '{print $NF}' | sort -u)
+  done < <(cat "${sources[@]}" | grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' | awk '{print $NF}' | sort -u)
 done
 
+if [ "$missing" -gt 0 ]; then
+  echo "check-surface: FAIL — $missing included source file(s) could not be read; the surface was not enumerated" >&2
+  exit 2
+fi
 if [ "$unknown" -gt 0 ]; then
   echo "check-surface: FAIL — $unknown upstream surface function(s) neither classified nor allowlisted" >&2
   exit 1

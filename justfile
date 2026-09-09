@@ -33,6 +33,10 @@ ci:
     ./scripts/check-schemas.sh
     ./scripts/record-fixtures.sh --check
     ./scripts/check-skill-version.sh
+    # The known-unknown gate's own failure paths. `check-surface.sh` itself
+    # needs an upstream checkout and runs in the conformance job; this needs
+    # nothing and proves the gate still fails on input it must reject.
+    ./scripts/check-surface-selftest.sh
     # Not run here: `just termlens-cli`. CI runs it, but it `cargo install`s
     # termlens-cli from crates.io, and `just ci` should not reach the network
     # or put a binary on a contributor's machine without being asked.

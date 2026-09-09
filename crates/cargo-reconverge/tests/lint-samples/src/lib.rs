@@ -217,6 +217,52 @@ pub fn rc001_cluster_divergent_sync(mut out: DisjointSlice<u32>) {
     }
 }
 
+/// True negative (#132): a *valid* split cluster arrival. Each warp arrives
+/// through one of the two arrival instructions — the aligned form needs
+/// warp-uniform control, which `warp_id()` gives it — and every thread then
+/// reaches the common wait. No thread is left un-arrived.
+///
+/// 0.6.0 classified both arrival forms as blocking barriers and reported
+/// this kernel as two `RC001/confirmed` deadlocks. The arrival half is a
+/// signal, not a wait; only `barrier_cluster_wait*` can hang.
+#[kernel]
+#[cluster_launch(2, 1, 1)]
+#[launch_contract(domain = 1, coordinates = u32, block = (64, 1, 1))]
+pub fn rc001_ok_split_cluster_arrival(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    unsafe {
+        if warp::warp_id() == 0 {
+            cluster::barrier_cluster_arrive_aligned();
+        } else {
+            cluster::barrier_cluster_arrive();
+        }
+        cluster::barrier_cluster_wait_aligned();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 3;
+    }
+}
+
+/// True positive: the *waiting* half under divergent control. One warp
+/// arrives and waits for the whole cluster; the other never arrives, so the
+/// waiter waits forever. This is the hang the #132 reclassification must
+/// not lose, and it is why `barrier_cluster_wait*` stays a barrier.
+#[kernel]
+#[cluster_launch(2, 1, 1)]
+#[launch_contract(domain = 1, coordinates = u32, block = (64, 1, 1))]
+pub fn rc001_split_cluster_divergent_wait(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    unsafe {
+        if warp::warp_id() == 0 {
+            cluster::barrier_cluster_arrive();
+            cluster::barrier_cluster_wait();
+        }
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 4;
+    }
+}
+
 /// True negative: the canonical block-uniform barrier.
 #[kernel]
 pub fn rc001_ok_block_uniform(mut out: DisjointSlice<u32>) {

@@ -38,3 +38,7 @@ setmaxnreg_dec	register-file control for warpgroup pipelines; no synchronization
 dsmem_read_u32	distributed shared memory access: memory, not synchronization
 map_shared_rank	distributed shared memory addressing: memory, not synchronization
 map_shared_rank_mut	distributed shared memory addressing: memory, not synchronization
+barrier_cluster_arrive	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
+barrier_cluster_arrive_aligned	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
+barrier_cluster_arrive_relaxed	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
+barrier_cluster_arrive_relaxed_aligned	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
