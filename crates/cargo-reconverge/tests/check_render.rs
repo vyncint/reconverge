@@ -40,6 +40,14 @@ fn copy_dir(from: &Path, to: &Path) {
             copy_dir(&entry.path(), &target);
         } else {
             fs::copy(entry.path(), &target).unwrap();
+            // Backdate the copy: a source written in the same mtime tick as
+            // the first build's fingerprint reads as dirty on the next run,
+            // and these suites assert on cargo's freshness (a warm re-check,
+            // an edit between two runs). CI hit exactly that — a fresh copy,
+            // an out-of-band warm run, then an unexpected `Checking` line.
+            let file = fs::File::options().write(true).open(&target).unwrap();
+            let past = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+            file.set_modified(past).unwrap();
         }
     }
 }
