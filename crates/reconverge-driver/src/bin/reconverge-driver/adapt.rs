@@ -110,7 +110,14 @@ fn adapt_fn(
     let overflow_tuples = overflow_tuple_locals(body);
     let declared_block = body.blocks.iter().find_map(|bb| {
         if let TerminatorKind::Call { func, .. } = &bb.terminator.kind {
-            block_config_dims(func)
+            marker_dims(func, "__launch_contract_block_config")
+        } else {
+            None
+        }
+    });
+    let declared_cluster = body.blocks.iter().find_map(|bb| {
+        if let TerminatorKind::Call { func, .. } = &bb.terminator.kind {
+            marker_dims(func, "__cluster_config")
         } else {
             None
         }
@@ -146,20 +153,22 @@ fn adapt_fn(
         local_spans,
         blocks,
         declared_block,
+        declared_cluster,
     }
 }
 
-/// The `(X, Y, Z)` a `#[launch_contract(block = …)]` declares, read from
-/// the const generics of the `__launch_contract_block_config::<X, Y, Z>()`
-/// marker the macro plants in the kernel body.
-fn block_config_dims(func: &Operand) -> Option<[u32; 3]> {
+/// The `(X, Y, Z)` a geometry marker declares, read from the const generics
+/// of the `<marker>::<X, Y, Z>()` call the macro plants in the kernel body:
+/// `__launch_contract_block_config` for `#[launch_contract(block = …)]`,
+/// `__cluster_config` for `#[cluster_launch(X, Y, Z)]`.
+fn marker_dims(func: &Operand, marker: &str) -> Option<[u32; 3]> {
     let Operand::Constant(constant) = func else {
         return None;
     };
     let TyKind::RigidTy(RigidTy::FnDef(def, args)) = constant.const_.ty().kind() else {
         return None;
     };
-    if !def.name().ends_with("__launch_contract_block_config") {
+    if !def.name().ends_with(marker) {
         return None;
     }
     let dims: Vec<u32> = args
@@ -381,8 +390,8 @@ fn adapt_term(
             target,
             ..
         } => {
-            let (path, display) = callee_path(func);
-            let kind = dialect.classify_call(&path);
+            let (path, display, receiver) = callee_path(func);
+            let kind = dialect.classify_method_call(&path, receiver.as_deref());
             let (dest, mut arg_locals) = write_target(destination);
             arg_locals.extend(args.iter().flat_map(operand_locals));
             arg_locals.extend(operand_locals(func));
@@ -667,15 +676,27 @@ fn model_unop(op: &rustc_public::mir::UnOp) -> Option<model::UnOp> {
     })
 }
 
-/// The definition path and display name of a call target; indirect calls
-/// (function pointers) come back as `Other`-classified placeholders.
-fn callee_path(func: &Operand) -> (String, String) {
+/// The definition path, display name and receiver of a call target;
+/// indirect calls (function pointers) come back as `Other`-classified
+/// placeholders.
+///
+/// The receiver is the first generic argument when it is a type — for a
+/// trait method that is `Self`, which the definition path does not carry:
+/// `cooperative_groups::ThreadGroup::sync` reads the same whether the group
+/// is a `ThreadBlock` or a `WarpTile<16>`, and only one of those is a
+/// block-wide barrier. Rendered with the compiler's own `Display`, so the
+/// dialect sees `cuda_device::cooperative_groups::ThreadBlock`.
+fn callee_path(func: &Operand) -> (String, String, Option<String>) {
     if let Operand::Constant(constant) = func
-        && let TyKind::RigidTy(RigidTy::FnDef(def, _)) = constant.const_.ty().kind()
+        && let TyKind::RigidTy(RigidTy::FnDef(def, args)) = constant.const_.ty().kind()
     {
         let path = def.name();
         let display = def.trimmed_name();
-        return (path, display);
+        let receiver = match args.0.first() {
+            Some(rustc_public::ty::GenericArgKind::Type(ty)) => Some(ty.to_string()),
+            _ => None,
+        };
+        return (path, display, receiver);
     }
-    (String::new(), "<indirect call>".to_string())
+    (String::new(), "<indirect call>".to_string(), None)
 }

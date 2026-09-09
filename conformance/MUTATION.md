@@ -70,8 +70,8 @@ emitted_delbar	78
 emitted_wrapcol	42
 emitted_shrinkmask	17
 emitted_mutslice	447
-skipped_sites_outside_kernels	0
-skipped_unclassified_collectives	2
+skipped_sites_outside_kernels	8
+skipped_unclassified_collectives	0
 skipped_tail_expression_collectives	4
 skipped_extra_disjoint_params	46
 ```

@@ -10,6 +10,19 @@ pub trait SimtDialect {
     /// path as the compiler reports it (e.g.
     /// `cuda_device::thread::__internal::index_1d`).
     fn classify_call(&self, def_path: &str) -> CallKind;
+
+    /// Classify a callee whose meaning depends on the receiver type — a
+    /// trait method such as `cooperative_groups::ThreadGroup::sync`, whose
+    /// definition path names the trait and not the group it is called on.
+    /// `receiver` is the rendered `Self` type when the compiler exposes one.
+    ///
+    /// The default ignores the receiver and defers to
+    /// [`classify_call`](Self::classify_call), so a dialect that has no
+    /// receiver-dependent primitives need not implement it.
+    fn classify_method_call(&self, def_path: &str, receiver: Option<&str>) -> CallKind {
+        let _ = receiver;
+        self.classify_call(def_path)
+    }
 }
 
 /// Where a warp collective's participation mask comes from.

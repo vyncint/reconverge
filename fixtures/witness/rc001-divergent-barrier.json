@@ -10,9 +10,9 @@
     "code": "RC001",
     "span": {
       "file": "src/lib.rs",
-      "line_start": 180,
+      "line_start": 183,
       "column_start": 9,
-      "line_end": 180,
+      "line_end": 183,
       "column_end": 31
     }
   },
@@ -70,9 +70,9 @@
       "statement": "lanes evaluate the guarding branch — 16 continue toward `sync_threads`, 16 never will",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 179,
+        "line_start": 182,
         "column_start": 8,
-        "line_end": 179,
+        "line_end": 182,
         "column_end": 24
       },
       "lane_changes": []
@@ -82,9 +82,9 @@
       "statement": "sync_threads() — 16 of 32 lanes arrive and wait",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 180,
+        "line_start": 183,
         "column_start": 9,
-        "line_end": 180,
+        "line_end": 183,
         "column_end": 31
       },
       "lane_changes": [
@@ -163,9 +163,9 @@
       "statement": "the other 16 lanes exit or move past reconvergence without ever reaching the barrier",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 179,
+        "line_start": 182,
         "column_start": 8,
-        "line_end": 179,
+        "line_end": 182,
         "column_end": 24
       },
       "lane_changes": [

@@ -10,7 +10,7 @@ size: 80x24  cursor: hidden
 │                                                                              │
 │step 2/3  [=>.]                                                               │
 │ballot_sync() — active lanes 0x55555555, mask 0xffffffff                      │
-│at lib.rs:229                                                                 │
+│at lib.rs:262                                                                 │
 │ballot_sync — named in the mask but not active: 0xaaaaaaaa                    │
 │                                                                              │
 │   0  launch                                                                  │

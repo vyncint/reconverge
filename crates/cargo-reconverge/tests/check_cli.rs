@@ -102,6 +102,20 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
     // configuration and the ASCII warp diagram (§7).
     assert!(stdout.contains("error[RC001]"), "stdout:\n{stdout}");
     assert!(stdout.contains("error[RC002]"), "stdout:\n{stdout}");
+    // The cooperative-groups barrier is RC001 by receiver: `ThreadGroup::sync`
+    // on a `ThreadBlock`. Until 0.6.0 it was an unclassified call — a coverage
+    // note, never a finding.
+    assert!(
+        stdout.contains("kernel `rc001_cooperative_block_sync` may execute"),
+        "this_thread_block().sync() under divergence must be RC001:\n{stdout}"
+    );
+    // The declared cluster is read from `#[cluster_launch]`'s marker and
+    // named on the finding.
+    assert!(
+        stdout.contains("kernel `rc001_cluster_divergent_sync` may execute")
+            && stdout.contains("declares a (2, 1, 1) cluster"),
+        "a divergent cluster_sync under #[cluster_launch(2, 1, 1)] names its cluster:\n{stdout}"
+    );
     assert!(
         stdout.contains("witness: replayed with grid (1,1,1) x block (32,1,1)"),
         "stdout:\n{stdout}"
@@ -217,6 +231,14 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         // until #30 and the README still said it did.
         ("RC001", "rc001_multiwarp_barrier"),
         ("RC001", "rc001_multiwarp_barrier_after_collective"),
+        // 0.6.0: the cooperative-groups barrier by receiver, and a divergent
+        // cluster_sync under a declared cluster. Both call `index_1d()`
+        // without a launch contract, so each also carries the RC005 warning
+        // every uncontracted sample here does.
+        ("RC001", "rc001_cooperative_block_sync"),
+        ("RC005", "rc001_cooperative_block_sync"),
+        ("RC001", "rc001_cluster_divergent_sync"),
+        ("RC005", "rc001_cluster_divergent_sync"),
     ]
     .into_iter()
     .map(|(code, kernel)| ((code.to_string(), kernel.to_string()), 1))
@@ -320,10 +342,12 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         }
         witness_count += 1;
     }
-    // Seven: the two direct sites, the two interprocedural ones that
-    // inlining turned into concrete paths, the unmasked wrapper, and the
-    // two multi-warp barriers.
-    assert_eq!(witness_count, 7, "one witness per confirmed finding");
+    // Nine: the two direct sites, the two interprocedural ones that
+    // inlining turned into concrete paths, the unmasked wrapper, the two
+    // multi-warp barriers, and — since 0.6.0 — the cooperative-groups block
+    // sync and the divergent cluster_sync, each replayed as a concrete hang
+    // exactly like `sync_threads`.
+    assert_eq!(witness_count, 9, "one witness per confirmed finding");
     assert_eq!(
         multiwarp, 2,
         "an ordinary run must emit a witness wider than one warp; without \

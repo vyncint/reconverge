@@ -42,6 +42,7 @@ fn model(name: &str, local_count: usize, arg_count: usize, blocks: Vec<Block>) -
         local_spans: vec![None; local_count],
         blocks,
         declared_block: None,
+        declared_cluster: None,
     }
 }
 

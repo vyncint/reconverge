@@ -10,7 +10,7 @@ size: 80x24  cursor: hidden
 │                                                                              │
 │step 2/3  [=>.]                                                               │
 │sync_threads() — 16 of 32 lanes arrive and wait                               │
-│at lib.rs:180                                                                 │
+│at lib.rs:183                                                                 │
 │barrier: 16 of 32 threads arrived                                             │
 │                                                                              │
 │   0  launch                                                                  │

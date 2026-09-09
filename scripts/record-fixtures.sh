@@ -22,10 +22,14 @@ CHECK=0
 # Which driver artifact becomes which fixture. Kept explicit rather than
 # globbed: a fixture is a document somebody chose, and a renamed kernel
 # should fail here rather than silently re-point a fixture.
+# The trailing number is the driver's emission order over kernels sorted
+# by path, so adding a kernel that sorts earlier renumbers everything after
+# it — which is what this mapping is for. 0.6.0 added
+# `rc001_cluster_divergent_sync` (0) and `rc001_cooperative_block_sync` (1).
 RECORDINGS="
-rc001-divergent-barrier|witness-lint_samples-lib-rc001_divergent_barrier-RC001-0.json
-rc002-partial-mask|witness-lint_samples-lib-rc002_divergent_collective-RC002-5.json
-rc001-multiwarp-barrier|witness-lint_samples-lib-rc001_multiwarp_barrier-RC001-2.json
+rc001-divergent-barrier|witness-lint_samples-lib-rc001_divergent_barrier-RC001-2.json
+rc002-partial-mask|witness-lint_samples-lib-rc002_divergent_collective-RC002-7.json
+rc001-multiwarp-barrier|witness-lint_samples-lib-rc001_multiwarp_barrier-RC001-4.json
 "
 
 cargo build -q -p cargo-reconverge -p reconverge-driver

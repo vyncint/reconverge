@@ -54,6 +54,7 @@ fn kernel(local_count: usize, blocks: Vec<Block>) -> FnModel {
         local_spans: vec![None; local_count],
         blocks,
         declared_block: None,
+        declared_cluster: None,
     }
 }
 

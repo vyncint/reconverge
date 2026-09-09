@@ -37,13 +37,21 @@ for m in "${MODULES[@]}"; do
   [ -f "$f" ] || { echo "check-surface: note — upstream has no $m.rs at this pin" >&2; continue; }
   # Module-level `pub fn` only (no indentation): methods are reached through
   # their receiver type and classified by path fragment, not by bare name.
+  # A module also `include!`s generated files (`warp.rs` pulls in
+  # `generated/warp_sreg.rs`, `cluster.rs` its barrier and memory files),
+  # whose functions are called as `warp::warpid()` exactly like the ones
+  # written in the module — so those files are scanned as part of it.
+  sources=("$f")
+  while read -r inc; do
+    [ -n "$inc" ] && sources+=("$DEVICE/$inc")
+  done < <(grep -oE 'include!\("[^"]+"\)' "$f" | sed -E 's/include!\("([^"]+)"\)/\1/')
   while read -r name; do
     [ -n "$name" ] || continue
     if grep -q "\"$name\"" "$SIMT"; then continue; fi
     if grep -qE "^$name[[:space:]]" "$ALLOW"; then continue; fi
     echo "unknown: cuda_device::$m::$name"
     unknown=$((unknown + 1))
-  done < <(grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' "$f" | awk '{print $NF}' | sort -u)
+  done < <(cat "${sources[@]}" 2>/dev/null | grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' | awk '{print $NF}' | sort -u)
 done
 
 if [ "$unknown" -gt 0 ]; then
