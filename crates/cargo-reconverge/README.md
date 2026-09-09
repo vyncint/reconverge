@@ -25,8 +25,8 @@ three binaries must be the same version, so pin both companions to the
 version of `cargo-reconverge` you installed):
 
 ```console
-$ rustup toolchain install nightly-2026-04-03 --profile minimal --component rustc-dev --component llvm-tools
-$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
+$ rustup toolchain install nightly-2026-08-28 --profile minimal --component rustc-dev --component llvm-tools
+$ rustup run nightly-2026-08-28 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
 ## Use

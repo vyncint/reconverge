@@ -1,0 +1,13 @@
+# Upstream cuda_device functions the dialect deliberately leaves as `Other`.
+# Format: "<name><TAB><reason>". Read by scripts/check-surface.sh.
+#
+# An entry here is a decision, reviewed like a baseline suppression: the
+# function is a synchronization- or collective-adjacent primitive whose
+# misuse under divergence is NOT a bug the RC001/RC002 contract can name, and
+# the reason says why. Anything not here and not in simt.rs fails the gate.
+mbarrier_arrive_and_wait	phase-counted split barrier: partial participation is the designed use (explain/RC001.md)
+mbarrier_wait	phase-counted split barrier: partial participation is the designed use (explain/RC001.md)
+coalesced_threads	the active-lane group by construction: partial participation is its definition, not a hazard
+this_grid	returns a handle; the barrier is the method `sync`, classified by receiver type
+this_cluster	returns a handle; the barrier is the method `sync`, classified by receiver type
+this_thread_block	returns a handle; the barrier is the method `sync`, classified by receiver type

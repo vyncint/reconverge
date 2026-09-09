@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# The known-unknown gate: every module-level public function in the
+# synchronization- and collective-bearing modules of upstream `cuda_device`
+# must be either classified by the dialect (named in simt.rs) or listed in
+# conformance/SURFACE_ALLOW with a reason.
+#
+# Why this exists: `classify_call` maps an unrecognized `cuda_device::` call
+# to `CallKind::Other`, which is counted as coverage and never a finding. For
+# a helper that is the right default. For a barrier or a masked collective it
+# is a silent false negative — a divergent call to a primitive we have not
+# named is not RC001/RC002, it is a note. Upstream adds such primitives
+# (eight `redux_sync_*_f32` in one release), so "unknown" has to be a
+# decision someone wrote down, not the state a new name lands in.
+#
+# Usage: scripts/check-surface.sh <upstream-checkout>
+#   exit 0  every surface function is classified or allowlisted
+#   exit 1  unknown names (printed one per line) — classify them in
+#           crates/reconverge-dialect-oxide/src/simt.rs or add them to
+#           conformance/SURFACE_ALLOW with a reason
+#   exit 2  usage / missing checkout
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+UPSTREAM=${1:?usage: check-surface.sh <upstream-checkout>}
+DEVICE="$UPSTREAM/crates/cuda-device/src"
+[ -d "$DEVICE" ] || { echo "check-surface: $DEVICE is not a cuda-oxide checkout" >&2; exit 2; }
+SIMT="$ROOT/crates/reconverge-dialect-oxide/src/simt.rs"
+ALLOW="$ROOT/conformance/SURFACE_ALLOW"
+
+# The modules whose functions are synchronization or collectives (or the
+# markers and index reads the dialect must recognize). Adding a module here
+# widens the gate; removing one is a decision for conformance/README.md.
+MODULES=(warp thread barrier grid cooperative_groups cluster)
+
+unknown=0
+for m in "${MODULES[@]}"; do
+  f="$DEVICE/$m.rs"
+  [ -f "$f" ] || { echo "check-surface: note — upstream has no $m.rs at this pin" >&2; continue; }
+  # Module-level `pub fn` only (no indentation): methods are reached through
+  # their receiver type and classified by path fragment, not by bare name.
+  while read -r name; do
+    [ -n "$name" ] || continue
+    if grep -q "\"$name\"" "$SIMT"; then continue; fi
+    if grep -qE "^$name[[:space:]]" "$ALLOW"; then continue; fi
+    echo "unknown: cuda_device::$m::$name"
+    unknown=$((unknown + 1))
+  done < <(grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' "$f" | awk '{print $NF}' | sort -u)
+done
+
+if [ "$unknown" -gt 0 ]; then
+  echo "check-surface: FAIL — $unknown upstream surface function(s) neither classified nor allowlisted" >&2
+  exit 1
+fi
+echo "check-surface: PASS — every surface function is classified or allowlisted"

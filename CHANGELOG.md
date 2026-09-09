@@ -14,6 +14,19 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
+- **The pinned nightly is `nightly-2026-08-28`** (rustc 1.100, LLVM 23),
+  matching the pin upstream cuda-oxide moved to on 2026-08-29. The driver's
+  `rustc_public` use is ported: `Statement`/`Terminator` spans now live under
+  `source_info`, `Rvalue::Use` carries a retag flag, and the new
+  `Rvalue::Reborrow` reads its place like `Ref`. Every pin site moved
+  together — `rust-toolchain.toml`, `cargo reconverge setup`, the README
+  badge and install lines, the driver README. A kernel crate tracking
+  current cuda-oxide could not be analyzed under the old pin at all.
+- **The conformance pin is cuda-oxide `26754ae5`** (2026-09-06, from
+  `a766fc26` of 2026-08-16, 173 commits). Conformance passes at the new pin
+  with the baseline unchanged: zero false positives at default confidence
+  over the extracted corpus.
+
 - **The PTY harness moves to termlens 0.10.1** (dev-dependency, both
   `reconverge-tui` and `cargo-reconverge`, which must stay on one version).
   No call site changed — nothing here used `drag`, a `Style` literal, the
@@ -21,8 +34,27 @@ the corpus; found-in-the-wild is the true north.
   made assertable. One new transitive dependency, `unicode-width 0.2`, which
   both crates already depend on directly at the same requirement.
 
+### Fixed
+
+- **A driver replaced in place forces a re-lint on cargo 1.100.** cargo
+  moved fingerprints from `<profile>/.fingerprint/` to
+  `<profile>/build/<pkg>/<hash>/fingerprint`, so the sweep that keys
+  re-linting to the driver's identity had become a no-op: an upgraded
+  driver reprinted the previous build's verdict. The wrapped check now pins
+  `CARGO_BUILD_BUILD_DIR` as well as `CARGO_TARGET_DIR`, so its state never
+  lands in the workspace's own `target/`, and the sweep covers both layouts.
+
 ### Added
 
+- **`pins.yml`: a weekly pin watch** that opens one issue when upstream
+  cuda-oxide moves past `conformance/PIN`, when its `rust-toolchain.toml`
+  channel differs from ours, or when a public function in its `warp`,
+  `thread`, `barrier`, `grid`, `cooperative_groups` or `cluster` module is
+  neither classified by the dialect nor allowlisted. The third check is
+  `scripts/check-surface.sh` with `conformance/SURFACE_ALLOW`: an
+  unrecognized `cuda_device::` call is `Other` — a coverage note, never a
+  finding — so a new upstream primitive is a silent false negative until it
+  is named, and "unknown" has to be a written decision rather than a default.
 - **`crates/reconverge-tui/tests/emulation.rs`: what the emulator can and
   cannot see.** Every golden is a grid a VT emulator built from the shell's
   bytes, and until now nothing said the emulator had implemented that stream.

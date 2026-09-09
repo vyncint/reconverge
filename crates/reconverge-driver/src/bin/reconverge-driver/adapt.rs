@@ -126,7 +126,7 @@ fn adapt_fn(
                 .collect();
             let term = adapt_term(
                 &bb.terminator.kind,
-                bb.terminator.span,
+                bb.terminator.source_info.span,
                 dialect,
                 path_to_id,
                 spans,
@@ -253,7 +253,7 @@ fn adapt_stmt(
                 uses,
                 eval,
                 opaque: false,
-                span: intern(spans, stmt.span),
+                span: intern(spans, stmt.source_info.span),
             })
         }
         StatementKind::SetDiscriminant { place, .. } => {
@@ -263,7 +263,7 @@ fn adapt_stmt(
                 uses,
                 eval: None,
                 opaque: false,
-                span: intern(spans, stmt.span),
+                span: intern(spans, stmt.source_info.span),
             })
         }
         // Storage markers, retags, coverage, fake reads, intrinsics like
@@ -319,7 +319,7 @@ fn operand_locals(operand: &Operand) -> Vec<Local> {
 fn rvalue_locals(rvalue: &rustc_public::mir::Rvalue) -> Vec<Local> {
     use rustc_public::mir::Rvalue;
     match rvalue {
-        Rvalue::Use(op)
+        Rvalue::Use(op, _)
         | Rvalue::Repeat(op, _)
         | Rvalue::Cast(_, op, _)
         | Rvalue::UnaryOp(_, op) => operand_locals(op),
@@ -331,6 +331,7 @@ fn rvalue_locals(rvalue: &rustc_public::mir::Rvalue) -> Vec<Local> {
         Rvalue::Aggregate(_, ops) => ops.iter().flat_map(operand_locals).collect(),
         Rvalue::AddressOf(_, place)
         | Rvalue::Ref(_, _, place)
+        | Rvalue::Reborrow(_, _, place)
         | Rvalue::CopyForDeref(place)
         | Rvalue::Discriminant(place)
         | Rvalue::Len(place) => place_locals(place),
@@ -569,7 +570,7 @@ fn rvalue_eval(
 ) -> Option<Eval> {
     use rustc_public::mir::Rvalue;
     match rvalue {
-        Rvalue::Use(op) => Some(Eval::Use(scalar_operand(op, overflow_tuples)?)),
+        Rvalue::Use(op, _) => Some(Eval::Use(scalar_operand(op, overflow_tuples)?)),
         // A cast is not the identity. Widening is, on the store's
         // zero-extended embedding — which is why this used to look right
         // on thread-index values — but narrowing discards high bits the
@@ -585,7 +586,10 @@ fn rvalue_eval(
             let (to_bits, _) = scalar_width(target)?;
             Some(Eval::Cast(scalar_operand(op, overflow_tuples)?, to_bits))
         }
-        Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) | Rvalue::CopyForDeref(place)
+        Rvalue::Ref(_, _, place)
+        | Rvalue::Reborrow(_, _, place)
+        | Rvalue::AddressOf(_, place)
+        | Rvalue::CopyForDeref(place)
             if place.projection.is_empty() =>
         {
             Some(Eval::Use(model::Operand::Local(place.local)))

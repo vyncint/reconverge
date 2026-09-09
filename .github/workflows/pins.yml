@@ -1,0 +1,72 @@
+# Pin watch: reports when upstream cuda-oxide moves past what this repository
+# analyzes against, by opening one issue. It NEVER bumps a pin — a bump is a
+# human decision, its own commit, and a conformance re-run (docs/RELEASING.md:
+# toolchain bumps are minor releases, never mixed with analysis changes).
+#
+# Three things drift independently, and only the first was ever visible:
+#   1. the commit   — conformance/PIN vs upstream HEAD
+#   2. the toolchain — upstream's rust-toolchain.toml channel vs ours
+#      (upstream moved to nightly-2026-08-28 on 2026-08-29 and this
+#      repository did not notice for eleven days; the driver is a
+#      rustc_private tool, so that gap means kernels tracking upstream
+#      cannot be analyzed at all)
+#   3. the analysis surface — a public function in upstream's warp /
+#      cooperative_groups / barrier / grid / cluster modules that the
+#      dialect neither classifies nor allowlists. Unknown means `Other`,
+#      which is a coverage note and never a finding: a silent false negative
+#      until someone updates simt.rs. scripts/check-surface.sh is the gate;
+#      here it runs against HEAD so the drift is reported before the pin moves.
+name: pins
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday morning UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+env:
+  UPSTREAM_REPO: NVlabs/cuda-oxide
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Compare upstream to the pins
+        run: |
+          set -euo pipefail
+          drift=""
+          read -r pin _ < <(grep -v '^#' conformance/PIN | head -1)
+          head_sha=$(gh api "repos/$UPSTREAM_REPO/commits/HEAD" -q '.sha')
+          if [ "$head_sha" != "$pin" ]; then
+            behind=$(gh api "repos/$UPSTREAM_REPO/compare/${pin}...${head_sha}" -q '.ahead_by')
+            drift="$drift- commit: upstream HEAD is \`${head_sha:0:8}\`, conformance/PIN is \`${pin:0:8}\` ($behind commits behind)"$'\n'
+          fi
+          ours=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          theirs=$(gh api "repos/$UPSTREAM_REPO/contents/rust-toolchain.toml" -q '.content' | base64 -d | sed -n 's/^channel *= *"\(.*\)"/\1/p')
+          if [ "$ours" != "$theirs" ]; then
+            drift="$drift- toolchain: upstream pins \`$theirs\`, this repository pins \`$ours\`"$'\n'
+          fi
+          # Surface: a shallow checkout of HEAD, then the same gate CI runs
+          # against the pinned checkout.
+          mkdir -p /tmp/upstream && git -C /tmp/upstream init -q
+          git -C /tmp/upstream fetch -q --depth 1 "https://github.com/$UPSTREAM_REPO" "$head_sha"
+          git -C /tmp/upstream checkout -q FETCH_HEAD
+          if ! surface=$(./scripts/check-surface.sh /tmp/upstream 2>&1); then
+            drift="$drift- surface: functions neither classified nor allowlisted at upstream HEAD:"$'\n'"$(printf '%s\n' "$surface" | sed -n 's/^unknown: /    - `/p' | sed 's/$/`/')"$'\n'
+          fi
+          if [ -z "$drift" ]; then
+            echo "Pins current."
+            exit 0
+          fi
+          printf 'Drift:\n%s' "$drift"
+          title="pins: upstream cuda-oxide moved past the conformance pin"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --search "in:title \"$title\"" --json title -q '.[].title' | grep -qF "$title"; then
+            echo "An open issue already reports this."
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$(printf 'Weekly pin watch found upstream movement:\n\n%s\nPolicy (docs/RELEASING.md): the toolchain and the conformance pin move together, in their own commit, never mixed with an analysis change, and conformance must pass at the new pin before it lands. A surface entry means a new upstream primitive: classify it in simt.rs or allowlist it in conformance/SURFACE_ALLOW with a reason — never leave it as Other by default. This workflow never bumps; a human decides.' "$drift")"

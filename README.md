@@ -6,7 +6,7 @@
 
 ![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
 [![crates.io](https://img.shields.io/crates/v/cargo-reconverge.svg)](https://crates.io/crates/cargo-reconverge)
-![toolchain: nightly-2026-04-03](https://img.shields.io/badge/toolchain-nightly--2026--04--03-orange)
+![toolchain: nightly-2026-08-28](https://img.shields.io/badge/toolchain-nightly--2026--08--28-orange)
 ![GPU: not required](https://img.shields.io/badge/GPU-not%20required-brightgreen)
 [![CI](https://github.com/vyncint/reconverge/actions/workflows/ci.yml/badge.svg)](https://github.com/vyncint/reconverge/actions/workflows/ci.yml)
 
@@ -247,8 +247,8 @@ matter — all three binaries must be the same version, so pin both to the
 version of `cargo-reconverge` you installed):
 
 ```console
-$ rustup toolchain install nightly-2026-04-03 --profile minimal --component rustc-dev --component llvm-tools
-$ rustup run nightly-2026-04-03 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
+$ rustup toolchain install nightly-2026-08-28 --profile minimal --component rustc-dev --component llvm-tools
+$ rustup run nightly-2026-08-28 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
 `rustc-dev` is the component that matters: the driver links rustc's own
