@@ -16,13 +16,17 @@ use crate::schema;
 pub struct UnimapArtifact {
     /// Always [`schema::UNIMAP`].
     pub schema: String,
+    /// Which tool wrote this document, and its version.
     pub tool: ToolInfo,
+    /// Name of the analyzed crate.
     #[serde(rename = "crate")]
     pub krate: String,
+    /// Every analyzed function — kernels and local helpers alike.
     pub functions: Vec<Function>,
 }
 
 impl UnimapArtifact {
+    /// A uniformity map for `krate` under the current tool identity.
     pub fn new(krate: impl Into<String>, functions: Vec<Function>) -> Self {
         UnimapArtifact {
             schema: schema::UNIMAP.to_string(),
@@ -48,19 +52,26 @@ pub struct Function {
     pub name: String,
     /// Fully qualified item path.
     pub item: String,
+    /// Where the function is defined.
     pub span: SourceSpan,
     /// Coverage honesty (docs/ARCHITECTURE.md): how much of the body was analyzed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<Coverage>,
+    /// Every labeled value in the function.
     pub values: Vec<Value>,
     /// Def→use edges: `to` is derived from `from`.
     pub provenance: Vec<ProvenanceEdge>,
+    /// Every basic block, with its divergent-control bit.
     pub blocks: Vec<Block>,
 }
 
+/// How much of a function's body the analysis could read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Coverage {
+    /// Statements the model represents.
     pub analyzed_statements: usize,
+    /// Statements it could not — inline asm, unmodeled intrinsics. Counted,
+    /// never guessed at.
     pub opaque_statements: usize,
 }
 
@@ -72,17 +83,22 @@ pub struct Value {
     /// Source-level name, when one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Uniform or divergent across the lanes of a warp.
     pub uniformity: Uniformity,
     /// Why the value carries its label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ValueSource>,
+    /// Where the value is defined.
     pub span: SourceSpan,
 }
 
+/// The two-point lattice the analysis computes over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Uniformity {
+    /// Every active lane holds the same value.
     Uniform,
+    /// Lanes may hold different values.
     Divergent,
 }
 
@@ -90,20 +106,33 @@ pub enum Uniformity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ValueSource {
+    /// A thread-index witness (`index_1d()` and its kin) or a lane id.
     ThreadIndex,
+    /// A kernel parameter: the same for every thread.
     KernelParam,
+    /// Derived from `blockIdx`, `blockDim` or `gridDim`: uniform within a block.
     BlockIndex,
+    /// A literal.
     Constant,
+    /// A load through a thread-dependent address.
     DivergentLoad,
+    /// The previous value an atomic read-modify-write returns: it differs per
+    /// thread by construction.
     AtomicReturn,
+    /// A merge of values arriving from paths under thread-divergent control.
     DivergentPhi,
+    /// Computed from inputs that already carry a label.
     Derived,
 }
 
+/// One def→use edge of the provenance graph.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProvenanceEdge {
+    /// The value derived from — a [`Value::id`].
     pub from: String,
+    /// The value derived — a [`Value::id`].
     pub to: String,
+    /// What the derivation is, in prose, when the analysis recorded one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub what: Option<String>,
 }
@@ -115,8 +144,10 @@ pub struct Block {
     pub id: String,
     /// True when the block executes under thread-divergent control.
     pub divergent_control: bool,
+    /// Where the block's terminator is, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
+    /// The [`Value::id`]s written in this block.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
 }

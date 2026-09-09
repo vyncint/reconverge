@@ -203,11 +203,47 @@ jobs:
       - uses: actions/checkout@v7
       - run: ./scripts/check-skill-version.sh
 
+  # Public API compatibility of the five published library crates against
+  # the last release on crates.io, on every pull request. The release type
+  # is FORCED: left to infer it from the version number, cargo-semver-checks
+  # treats a 0.x minor bump as a major release and skips every check, so a
+  # PR that bumps the version in the same change as a break is green with
+  # zero checks run. A PR that must break a promised item carries the
+  # `breaking` label, which runs the gate as a 0.x minor instead — visible,
+  # and per docs/RELEASING.md's rule that a break is a minor release.
+  # `baseline-version` is a literal, bumped in each release PR.
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          package: reconverge-core,reconverge-artifacts,reconverge-dialect-oxide,reconverge-witness,reconverge-tui
+          baseline-version: 0.5.0
+          release-type: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') && 'minor' || 'patch' }}
+
+  # The five library crates declare `rust-version = "1.88"` (ratatui 0.30's
+  # floor); only the driver needs the pinned nightly. Build them on exactly
+  # that stable so the declaration is a measurement, not a hope.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.88 --profile minimal
+      - run: >-
+          cargo +1.88 check --locked
+          -p reconverge-core -p reconverge-artifacts -p reconverge-dialect-oxide
+          -p reconverge-witness -p reconverge-tui
+
   # The single required status check: green iff every Linux gate is green.
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas, skill-version]
+    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas, skill-version, semver, msrv]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every gate succeeded

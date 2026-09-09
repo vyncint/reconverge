@@ -13,6 +13,7 @@ use crate::load::{display_name, nfc};
 /// itself lives in the state, because it is what the keystrokes edit.
 #[derive(Debug, Default)]
 pub struct TriageData {
+    /// Every gating finding, with its suppression status.
     pub items: Vec<TriageItem>,
     /// Where the baseline will be written; may not exist yet.
     pub baseline_path: PathBuf,
@@ -28,10 +29,12 @@ pub struct TriageData {
     pub baseline_unreadable: Option<String>,
 }
 
+/// One finding under review.
 #[derive(Debug, Clone)]
 pub struct TriageItem {
     /// Analyzed crate the finding belongs to.
     pub krate: String,
+    /// The finding.
     pub finding: Finding,
 }
 

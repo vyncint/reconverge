@@ -16,7 +16,9 @@ use crate::read::Artifact;
 pub struct WitnessArtifact {
     /// Always [`crate::schema::WITNESS`].
     pub schema: String,
+    /// Which tool wrote this document, and its version.
     pub tool: ToolInfo,
+    /// Name of the analyzed crate.
     #[serde(rename = "crate")]
     pub krate: String,
     /// User-facing kernel name.
@@ -36,38 +38,52 @@ pub struct WitnessArtifact {
     /// that broke the published bound were exactly the gating ones: the
     /// whole-warp deadlocks promoted to `confirmed`.
     pub lanes: u8,
+    /// Every lane's state at the launch instant, one entry per lane.
     pub initial_lane_states: Vec<LaneState>,
+    /// The timeline, in order.
     pub steps: Vec<Step>,
+    /// How the replay ended.
     pub verdict: Verdict,
 }
 
+/// The finding a witness replays, by code and span.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindingRef {
+    /// Diagnostic code, e.g. `"RC001"`.
     pub code: String,
+    /// The finding's span, when it had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
 }
 
+/// The concrete launch shape the replay used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
+    /// Grid dimensions in blocks, `(x, y, z)`.
     pub grid: [u32; 3],
+    /// Block dimensions in threads, `(x, y, z)`.
     pub block: [u32; 3],
     /// Index of the replayed warp within its block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warp: Option<u32>,
 }
 
+/// Where a lane is at one instant of the replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LaneState {
+    /// Executing.
     Active,
+    /// Parked at a barrier or collective, waiting for lanes that may never come.
     Waiting,
+    /// Returned from the kernel.
     Exited,
 }
 
 /// One event in the timeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
+    /// Position in the timeline, from 0.
     pub index: usize,
     /// What happens at this step, in prose: "sync_threads() — 16 of 32
     /// lanes arrive and wait".
@@ -81,6 +97,7 @@ pub struct Step {
     /// carried through the model it belongs in a second field beside this
     /// one, additively.
     pub statement: String,
+    /// Where in the source the step happens, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
     /// Delta encoding: only lanes whose state changed at this step. Always
@@ -94,18 +111,25 @@ pub struct Step {
     pub warp_op: Option<WarpOpEvent>,
 }
 
+/// One lane's state change at a step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaneChange {
+    /// Lane index within the replay, `0..lanes`.
     pub lane: u8,
+    /// The lane's new state.
     pub state: LaneState,
 }
 
+/// A barrier interaction: who arrived, against who was expected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BarrierEvent {
+    /// Lanes that reached the barrier.
     pub arrived: u32,
+    /// Lanes the barrier waits for — the whole block.
     pub expected: u32,
 }
 
+/// A warp collective at a step: the mask it named against the lanes present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WarpOpEvent {
     /// e.g. `shuffle_sync`, `ballot_sync`.
@@ -116,8 +140,10 @@ pub struct WarpOpEvent {
     pub active: String,
 }
 
+/// How a replay ended, and where.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Verdict {
+    /// The outcome class.
     pub kind: VerdictKind,
     /// Calibrated wording; hardware behavior is "usually", never "always".
     pub message: String,
@@ -126,12 +152,17 @@ pub struct Verdict {
     pub step: Option<usize>,
 }
 
+/// The outcome classes a replay can end in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum VerdictKind {
+    /// A barrier that can never be satisfied: the lanes at it wait forever.
     Hang,
+    /// A collective whose mask names lanes that are not there.
     UndefinedBehavior,
+    /// Every lane exited: no failure at this site under this launch.
     Completed,
+    /// The replay could not decide; the finding stays at its static tier.
     NoWitness,
 }
 

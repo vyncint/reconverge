@@ -25,7 +25,11 @@ use crate::model::{BlockId, FnModel, Local, SpanRef, TermKind};
 /// execute a barrier / warp collective, directly or transitively.
 #[derive(Debug, Clone)]
 pub struct Summaries {
+    /// Per function, indexed like the input slice: may execute a barrier,
+    /// directly or through a local callee.
     pub may_contain_barrier: Vec<bool>,
+    /// Per function, indexed like the input slice: may execute a warp
+    /// collective, directly or through a local callee.
     pub may_contain_warp_op: Vec<bool>,
 }
 
@@ -71,7 +75,9 @@ impl Summaries {
 /// Why a local is divergent — the first cause wins and is stable.
 #[derive(Debug, Clone)]
 pub struct Reason {
+    /// What kind of cause this is.
     pub kind: ReasonKind,
+    /// Where the cause is.
     pub span: SpanRef,
     /// Human-readable one-liner, e.g. "thread-index witness `index_1d()`".
     pub detail: String,
@@ -79,6 +85,7 @@ pub struct Reason {
     pub source_call: Option<CallKind>,
 }
 
+/// The kinds of cause a divergent label can have.
 #[derive(Debug, Clone)]
 pub enum ReasonKind {
     /// A divergence source in its own right (index witness, atomic, …).
@@ -86,21 +93,29 @@ pub enum ReasonKind {
     /// Derived from already-divergent inputs.
     DerivedFrom(Vec<Local>),
     /// Written under thread-divergent control.
-    ControlDependent { branch: BlockId },
+    ControlDependent {
+        /// The branch whose condition diverges.
+        branch: BlockId,
+    },
 }
 
 /// The branch that made a block divergent-control.
 #[derive(Debug, Clone, Copy)]
 pub struct BranchCause {
+    /// The block whose terminator branches.
     pub block: BlockId,
+    /// The local the branch tests.
     pub cond: Local,
+    /// Where the branch is.
     pub span: SpanRef,
 }
 
 /// A barrier-relevant call site.
 #[derive(Debug, Clone)]
 pub struct BarrierSite {
+    /// The block whose terminator is the call.
     pub block: BlockId,
+    /// Where the call is.
     pub span: SpanRef,
     /// What was called (`sync_threads`, or a local function for the
     /// interprocedural case).
@@ -115,8 +130,12 @@ pub struct BarrierSite {
 /// A warp-collective call site (RC002's subject).
 #[derive(Debug, Clone)]
 pub struct WarpOpSite {
+    /// The block whose terminator is the call.
     pub block: BlockId,
+    /// Where the call is.
     pub span: SpanRef,
+    /// What was called: `ballot_sync`, or a local function for the
+    /// interprocedural case.
     pub callee_display: String,
     /// True for a call into a local function that may execute a warp
     /// collective, rather than a direct collective.
@@ -131,15 +150,23 @@ pub struct WarpOpSite {
 /// Analysis result for one function.
 #[derive(Debug, Clone)]
 pub struct Analysis {
+    /// Each local's label, indexed by local.
     pub locals: Vec<Uniformity>,
+    /// Why each local is divergent, when it is.
     pub reasons: Vec<Option<Reason>>,
+    /// Per block: executes under thread-divergent control.
     pub block_divergent: Vec<bool>,
+    /// Per block: the branch that made it divergent-control, when one did.
     pub block_cause: Vec<Option<BranchCause>>,
     /// The CFG was irreducible; everything was degraded to divergent.
     pub irreducible: bool,
+    /// Statements the model represents.
     pub analyzed_statements: usize,
+    /// Statements it could not; counted, never guessed at.
     pub opaque_statements: usize,
+    /// Every barrier-relevant call site.
     pub barriers: Vec<BarrierSite>,
+    /// Every warp-collective call site.
     pub warp_ops: Vec<WarpOpSite>,
 }
 
@@ -468,7 +495,9 @@ fn source_detail(kind: CallKind, display: &str) -> String {
 /// One hop of a provenance chain.
 #[derive(Debug, Clone)]
 pub struct ProvenanceStep {
+    /// What this hop is, in prose.
     pub detail: String,
+    /// Where it is.
     pub span: SpanRef,
 }
 

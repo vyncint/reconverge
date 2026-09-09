@@ -10,6 +10,7 @@ use crate::load::{display_name, nfc};
 /// Everything the debugger shows, loaded once up front.
 #[derive(Debug, Default)]
 pub struct WitnessData {
+    /// Every witness loaded, in report order.
     pub witnesses: Vec<WitnessArtifact>,
     /// Load problems, rendered in-frame.
     pub errors: Vec<String>,

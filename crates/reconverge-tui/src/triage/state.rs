@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::data::TriageData;
 
+/// Cursor and editing state of the triage view, over the baseline being edited.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriageState {
     /// Index into `data.items`.
@@ -28,8 +29,10 @@ pub struct TriageState {
     write_requested: bool,
 }
 
+/// A finding's suppression status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
+    /// Not suppressed.
     None,
     /// Baseline written, with the number of entries.
     Wrote(usize),
@@ -39,20 +42,31 @@ pub enum Status {
     ReasonRequired,
 }
 
+/// What a keypress asks the triage view to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
+    /// Select the next finding.
     Next,
+    /// Select the previous finding.
     Prev,
+    /// Start writing a suppression reason for the selected finding.
     BeginSuppress,
+    /// Remove the selected finding's suppression.
     Unsuppress,
+    /// Type one character of the reason.
     ReasonChar(char),
+    /// Delete the last character of the reason.
     ReasonBackspace,
+    /// Accept the reason and suppress the finding.
     ReasonCommit,
+    /// Abandon the reason.
     ReasonCancel,
+    /// Write the baseline to disk.
     RequestWrite,
 }
 
 impl TriageState {
+    /// Triage state over `baseline`, with nothing selected for editing.
     #[must_use]
     pub fn new(baseline: BaselineArtifact) -> TriageState {
         TriageState {

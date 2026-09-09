@@ -30,7 +30,9 @@ pub enum ReadError {
     Parse(serde_json::Error),
     /// Parsed, and declares a schema this build does not implement.
     Schema {
+        /// The `schema` string the document declares.
         declared: String,
+        /// The schema this build implements for that artifact.
         expected: &'static str,
     },
 }

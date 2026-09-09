@@ -24,6 +24,7 @@
 //! never "always" (the project docs).
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use reconverge_artifacts::plural;
 use reconverge_artifacts::witness::{LaneState, VerdictKind};
@@ -46,9 +47,11 @@ const STEP_BUDGET: usize = 4096;
 /// What kind of site is being replayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiteKind {
+    /// A block-wide barrier.
     Barrier,
     /// A warp collective with its constant participation mask, when known.
     Collective {
+        /// The constant participation mask, when the call carried one.
         mask: Option<u64>,
     },
 }
@@ -57,8 +60,11 @@ pub enum SiteKind {
 /// references; the driver maps them to real source spans.
 #[derive(Debug, Clone)]
 pub struct ReplayStep {
+    /// What happens at this step, in prose.
     pub statement: String,
+    /// Where it happens, when known.
     pub span: Option<SpanRef>,
+    /// Lanes whose state changed at this step, delta-encoded.
     pub lane_changes: Vec<(u8, LaneState)>,
     /// (arrived, expected) for barrier steps.
     pub barrier: Option<(u32, u32)>,
@@ -69,11 +75,17 @@ pub struct ReplayStep {
 /// A concrete replay of one finding: launch shape, timeline, verdict.
 #[derive(Debug, Clone)]
 pub struct Replay {
+    /// Block dimensions replayed.
     pub block: [u32; 3],
+    /// Grid dimensions replayed.
     pub grid: [u32; 3],
+    /// The timeline.
     pub steps: Vec<ReplayStep>,
+    /// How it ended.
     pub verdict_kind: VerdictKind,
+    /// The verdict in calibrated prose.
     pub verdict_message: String,
+    /// The step the verdict was reached at.
     pub verdict_step: usize,
     /// Bitmask of lanes that arrived at the site (bit per lane; the block
     /// may be more than one warp, so this is wider than a warp mask).
@@ -99,7 +111,12 @@ pub enum NoWitness {
     /// A collective whose mask names exactly the lanes that arrive: the
     /// guarded partial-warp idiom, which is correct code. The replay
     /// verified it rather than failing to evaluate it.
-    MaskMatchesArrivals { mask: u32, arrived: u32 },
+    MaskMatchesArrivals {
+        /// The mask the call named.
+        mask: u32,
+        /// The lanes that arrived.
+        arrived: u32,
+    },
     /// The replay could not determine what happens. An absence of
     /// knowledge, not a result.
     Indeterminate,
@@ -383,20 +400,20 @@ fn release_collectives(lanes: &mut [Lane], n_lanes: u32) -> WarpRelease {
     let mut released = false;
     for warp in 0..n_lanes.div_ceil(LANES) {
         let range = (warp * LANES) as usize..((warp + 1) * LANES).min(n_lanes) as usize;
-        let at_collective: Vec<usize> = range
+        // Each lane parked at a collective, with the block it is parked at
+        // — carried from the filter, so nothing downstream has to re-derive
+        // it from the stop and reach for an arm that cannot happen.
+        let at_collective: Vec<(usize, BlockId)> = range
             .clone()
-            .filter(|&i| matches!(lanes[i].stop, Some(LaneStop::AtCollective(_))))
+            .filter_map(|i| match lanes[i].stop {
+                Some(LaneStop::AtCollective(b)) => Some((i, b)),
+                _ => None,
+            })
             .collect();
-        if at_collective.is_empty() {
+        let Some(&(_, block)) = at_collective.first() else {
             continue;
-        }
-        let block = match lanes[at_collective[0]].stop {
-            Some(LaneStop::AtCollective(b)) => b,
-            _ => unreachable!(),
         };
-        let same_block = at_collective
-            .iter()
-            .all(|&i| matches!(lanes[i].stop, Some(LaneStop::AtCollective(b)) if b == block));
+        let same_block = at_collective.iter().all(|&(_, b)| b == block);
         let others_running = range.clone().any(|i| {
             !matches!(
                 lanes[i].stop,
@@ -408,7 +425,7 @@ fn release_collectives(lanes: &mut [Lane], n_lanes: u32) -> WarpRelease {
             .any(|i| lanes[i].stop == Some(LaneStop::Arrived));
 
         if same_block && !others_running && !others_arrived {
-            for &i in &at_collective {
+            for &(i, _) in &at_collective {
                 lanes[i].resume_past_terminator = true;
                 lanes[i].stop = Some(LaneStop::AtBarrier(usize::MAX)); // resume marker
             }
@@ -416,7 +433,7 @@ fn release_collectives(lanes: &mut [Lane], n_lanes: u32) -> WarpRelease {
         } else if same_block && !others_running && others_arrived {
             // The rest of this warp is holding the site forever, so the
             // lanes at the collective wait on them and never arrive.
-            for &i in &at_collective {
+            for &(i, _) in &at_collective {
                 lanes[i].stop = Some(LaneStop::NeverArrives);
             }
             released = true;

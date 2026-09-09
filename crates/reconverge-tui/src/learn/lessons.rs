@@ -11,12 +11,16 @@ use reconverge_artifacts::witness::WitnessArtifact;
 
 use crate::load::nfc;
 
+/// One SIMT lesson: an id, a title and its pages.
 pub struct Lesson {
+    /// Stable identifier, e.g. `barriers`.
     pub id: &'static str,
     title: &'static str,
+    /// The lesson's pages, in order.
     pub pages: Vec<Page>,
 }
 
+/// One page of a lesson: prose, and optionally a witness to step through.
 pub struct Page {
     body: String,
     /// A kernel snippet shown under the prose.
@@ -26,6 +30,7 @@ pub struct Page {
 }
 
 impl Lesson {
+    /// The page's title.
     #[must_use]
     pub fn title(&self) -> &str {
         self.title
@@ -33,6 +38,7 @@ impl Lesson {
 }
 
 impl Page {
+    /// The page's prose.
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body

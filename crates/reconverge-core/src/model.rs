@@ -25,13 +25,17 @@ pub struct FnModel {
     pub name: String,
     /// Fully qualified item path.
     pub item_path: String,
+    /// Where the function is defined.
     pub span: SpanRef,
+    /// Number of locals, including the return place and the arguments.
     pub local_count: usize,
     /// Locals `1..=arg_count` are parameters (uniform by docs/ARCHITECTURE.md).
     pub arg_count: usize,
     /// Source-level names, where debug info provides them.
     pub local_names: Vec<Option<String>>,
+    /// Where each local is declared, where debug info provides it.
     pub local_spans: Vec<Option<SpanRef>>,
+    /// Basic blocks, indexed by [`BlockId`]; block 0 is the entry.
     pub blocks: Vec<Block>,
     /// Block dimensions declared by the kernel's `#[launch_contract]`
     /// (`block = (X, Y, Z)`), when present — the launch shape a witness may
@@ -44,9 +48,12 @@ pub struct FnModel {
     pub declared_cluster: Option<[u32; 3]>,
 }
 
+/// One basic block: statements, then a terminator.
 #[derive(Debug, Clone)]
 pub struct Block {
+    /// Statements, in order.
     pub stmts: Vec<Stmt>,
+    /// The terminator.
     pub term: Term,
 }
 
@@ -63,14 +70,19 @@ pub struct Stmt {
     /// the witness interpreter. `None` makes the destination unknown at
     /// replay time (the dataflow above is unaffected).
     pub eval: Option<Eval>,
+    /// The statement could not be modeled (inline asm, an unmodeled
+    /// intrinsic); it is counted as coverage rather than guessed at.
     pub opaque: bool,
+    /// Where the statement is.
     pub span: SpanRef,
 }
 
 /// An interpreter operand: a local slot or an integer literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operand {
+    /// A local slot.
     Local(Local),
+    /// An integer literal, zero-extended to 128 bits.
     Const(u128),
 }
 
@@ -79,6 +91,7 @@ pub enum Operand {
 pub enum Eval {
     /// Plain copy, reference-to-scalar, or literal.
     Use(Operand),
+    /// A binary operation on two operands, wrapping at 128 bits.
     Binary(BinOp, Operand, Operand),
     /// Unary operation evaluated at the operand's own width in bits.
     ///
@@ -113,44 +126,71 @@ pub enum Eval {
 /// carry the width they need.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    /// Addition.
     Add,
+    /// Subtraction.
     Sub,
+    /// Multiplication.
     Mul,
+    /// Division.
     Div,
+    /// Remainder.
     Rem,
+    /// Bitwise and.
     BitAnd,
+    /// Bitwise or.
     BitOr,
+    /// Bitwise exclusive or.
     BitXor,
+    /// Shift left.
     Shl,
+    /// Shift right.
     Shr,
+    /// Equal.
     Eq,
+    /// Not equal.
     Ne,
+    /// Less than.
     Lt,
+    /// Less than or equal.
     Le,
+    /// Greater than.
     Gt,
+    /// Greater than or equal.
     Ge,
 }
 
+/// Unary operators the interpreter evaluates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
+    /// Bitwise complement — boolean negation at width 1.
     Not,
+    /// Arithmetic negation.
     Neg,
 }
 
+/// A block terminator.
 #[derive(Debug, Clone)]
 pub struct Term {
+    /// What the terminator does.
     pub kind: TermKind,
+    /// Where it is.
     pub span: SpanRef,
 }
 
+/// The terminators the model distinguishes.
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    /// An unconditional jump.
     Goto {
+        /// The block jumped to.
         target: BlockId,
     },
     /// A multi-way branch on a local's value.
     Branch {
+        /// The local tested.
         cond: Local,
+        /// Successor blocks, aligned with `values`.
         targets: Vec<BlockId>,
         /// Guard values aligned with `targets` for the interpreter:
         /// `Some(v)` takes its target when the condition equals `v`, `None`
@@ -160,10 +200,14 @@ pub enum TermKind {
     },
     /// A multi-way jump whose discriminant is a constant: never divergent.
     Jump {
+        /// Successor blocks.
         targets: Vec<BlockId>,
     },
+    /// A call; its classification lives in `callee`.
     Call {
+        /// What is called.
         callee: Callee,
+        /// Every local the call reads — flattened; see `const_args`.
         args: Vec<Local>,
         /// Per **original argument position**: the argument's value when it
         /// is a literal integer constant (e.g. a warp participation mask).
@@ -174,15 +218,21 @@ pub enum TermKind {
         /// (a plain local, a reference to one, or a literal), when the
         /// argument is that simple.
         arg_operands: Vec<Option<Operand>>,
+        /// The local the result is written to, when any.
         dest: Option<Local>,
+        /// The block control continues in when the call returns.
         target: Option<BlockId>,
     },
     /// Inline asm or similar: opaque to the analysis.
     Opaque {
+        /// Locals the opaque statement reads.
         uses: Vec<Local>,
+        /// The local it writes, when known.
         dest: Option<Local>,
+        /// The block control continues in.
         target: Option<BlockId>,
     },
+    /// A normal return — the one exit that constrains reconvergence.
     Return,
     /// No successors and no normal return (unreachable, abort, resume).
     Halt,
@@ -191,6 +241,7 @@ pub enum TermKind {
 /// A classified call target.
 #[derive(Debug, Clone)]
 pub struct Callee {
+    /// The dialect's classification.
     pub kind: CallKind,
     /// Human-facing name for diagnostics (a trimmed path).
     pub display: String,

@@ -51,6 +51,14 @@ the corpus; found-in-the-wild is the true north.
 
 ### Fixed
 
+- **Two `unreachable!()` arms on library paths are gone.** The witness's
+  collective-release step re-derived a lane's parked block from a stop it
+  had already matched on; it now carries the block from the filter. The
+  learn view's page state machine matched four replay actions and then
+  matched them again with a catch-all; it has one arm per action, so a new
+  `KeyAction` fails to compile instead of reaching an arm that "cannot
+  happen".
+
 - **A driver replaced in place forces a re-lint on cargo 1.100.** cargo
   moved fingerprints from `<profile>/.fingerprint/` to
   `<profile>/build/<pkg>/<hash>/fingerprint`, so the sweep that keys
@@ -60,6 +68,23 @@ the corpus; found-in-the-wild is the true north.
   lands in the workspace's own `target/`, and the sweep covers both layouts.
 
 ### Added
+
+- **A `semver` gate on every pull request** — `cargo-semver-checks` over the
+  five published library crates against the last release on crates.io,
+  with the release type **forced** to `patch`: left to infer it from the
+  version number, the checker treats a 0.x minor bump as a major release
+  and skips every check, so a PR that bumps the version in the same change
+  as a break is green with zero checks run. A PR that must break a promised
+  item carries the `breaking` label, which runs the gate as a 0.x minor —
+  visible, and per RELEASING.md's rule that a break is a minor release.
+  `baseline-version` is a literal, bumped in each release PR.
+- **An `msrv` gate** building the five library crates on Rust 1.88, which
+  they now declare as `rust-version`; only the driver needs the pinned
+  nightly.
+- **`#![warn(missing_docs)]` on every library crate**, and the 274 public
+  items it reported documented — every field, variant and method of the
+  four artifact documents, the analysis model and the TUI views. The
+  `docs` job's `-D warnings` makes it a gate.
 
 - **Twenty-three upstream names classified** that were `Other` — a coverage
   note, never a finding — at the previous pin. The eight `redux_sync_*_f32`

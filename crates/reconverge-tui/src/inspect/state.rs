@@ -2,6 +2,8 @@
 
 use super::data::InspectorData;
 
+/// Cursor state of the inspector: the selected function, value and finding,
+/// and the provenance walk in progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectorState {
     /// Index into `data.functions`.
@@ -14,14 +16,22 @@ pub struct InspectorState {
     pub finding: Option<usize>,
 }
 
+/// What a keypress asks the inspector to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
+    /// Select the next value.
     NextValue,
+    /// Select the previous value.
     PrevValue,
+    /// Follow the selected value's provenance one hop toward its source.
     WalkProvenance,
+    /// Step back along the provenance walk.
     WalkBack,
+    /// Jump to the next finding.
     NextFinding,
+    /// Jump to the previous finding.
     PrevFinding,
+    /// Switch to the next function.
     NextFunction,
 }
 

@@ -22,6 +22,7 @@ use crate::schema;
 pub struct FindingsArtifact {
     /// Always [`schema::FINDINGS`].
     pub schema: String,
+    /// Which tool wrote this document, and its version.
     pub tool: ToolInfo,
     /// Name of the analyzed crate.
     #[serde(rename = "crate")]
@@ -44,10 +45,13 @@ pub struct FindingsArtifact {
     /// than a script string-matching a note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<RunCoverage>,
+    /// Every finding for this target, in report order.
     pub findings: Vec<Finding>,
 }
 
 impl FindingsArtifact {
+    /// A findings document for `krate` under the current tool identity, with no
+    /// target and no coverage recorded yet.
     pub fn new(krate: impl Into<String>, findings: Vec<Finding>) -> Self {
         FindingsArtifact {
             schema: schema::FINDINGS.to_string(),
@@ -118,11 +122,15 @@ impl RunCoverage {
 /// Identity of the tool that produced an artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolInfo {
+    /// Tool name: `reconverge` for every artifact this workspace writes.
     pub name: String,
+    /// The writing tool's version; a reader compares it with its own before
+    /// trusting the document as its own answer.
     pub version: String,
 }
 
 impl ToolInfo {
+    /// This build's identity.
     pub fn current() -> Self {
         ToolInfo {
             name: "reconverge".to_string(),
@@ -136,12 +144,14 @@ impl ToolInfo {
 pub struct Finding {
     /// Diagnostic code from the registry, e.g. `"RC003"`.
     pub code: String,
+    /// How the finding was established — see [`Confidence`].
     pub confidence: Confidence,
     /// One-line, human-readable statement of the problem.
     pub message: String,
     /// User-facing name of the kernel the finding is about, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<String>,
+    /// Where in the source the finding points.
     pub span: SourceSpan,
     /// Hardware consequences and other context, one note per line.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -165,8 +175,13 @@ pub struct Finding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Confidence {
+    /// Proven from syntax alone. Always shown; gates CI.
     Deny,
+    /// A static finding plus a witness replay of the failure. Always shown;
+    /// gates CI.
     Confirmed,
+    /// A conservative static result with no witness. Hidden unless `--strict`;
+    /// never gates.
     Warning,
 }
 
@@ -187,10 +202,15 @@ impl Confidence {
 /// A source region, 1-based lines and columns, end-inclusive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceSpan {
+    /// Path as the compiler reported it, workspace-relative when it can be.
     pub file: String,
+    /// First line, 1-based.
     pub line_start: usize,
+    /// First column, 1-based.
     pub column_start: usize,
+    /// Last line, 1-based, inclusive.
     pub line_end: usize,
+    /// Last column, 1-based, inclusive.
     pub column_end: usize,
 }
 
@@ -199,6 +219,7 @@ pub struct SourceSpan {
 pub struct ProvenanceStep {
     /// What this hop is, e.g. "condition derives from `index_1d()`".
     pub what: String,
+    /// Where this hop is in the source.
     pub span: SourceSpan,
 }
 

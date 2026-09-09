@@ -12,6 +12,7 @@ use crate::load::{display_name, nfc};
 /// Everything the Inspector shows, loaded once up front.
 #[derive(Debug, Default)]
 pub struct InspectorData {
+    /// Every analyzed function, with the source it points into resolved.
     pub functions: Vec<FunctionData>,
     /// All findings across the loaded findings artifacts, in file order.
     pub findings: Vec<Finding>,
@@ -19,8 +20,10 @@ pub struct InspectorData {
     pub errors: Vec<String>,
 }
 
+/// One function of the uniformity map, with its source file.
 #[derive(Debug)]
 pub struct FunctionData {
+    /// The function's uniformity facts.
     pub function: unimap::Function,
     /// The source file the function's span points at, when readable.
     pub source: Option<SourceFile>,
@@ -32,10 +35,12 @@ pub struct FunctionData {
     pub incoming: BTreeMap<String, Vec<usize>>,
 }
 
+/// A source file the inspector can show, split into lines.
 #[derive(Debug)]
 pub struct SourceFile {
     /// Redacted display name (basename only).
     pub name: String,
+    /// The file's lines, in order, without terminators.
     pub lines: Vec<String>,
 }
 

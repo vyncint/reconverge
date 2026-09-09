@@ -14,10 +14,15 @@ use super::state::{Status, TriageState};
 use crate::view::fit;
 use reconverge_artifacts::plural;
 
+/// Everything one frame of the triage view needs.
 pub struct TriageView<'a> {
+    /// The findings under review.
     pub data: &'a TriageData,
+    /// The cursor and the reason being typed.
     pub state: &'a TriageState,
+    /// Draw with ASCII only — no box drawing or block glyphs.
     pub ascii: bool,
+    /// Use colour; false under `NO_COLOR` or when the terminal has none.
     pub color: bool,
 }
 
@@ -57,6 +62,7 @@ fn tier(confidence: Confidence) -> &'static str {
     }
 }
 
+/// Draw one frame of the triage view.
 pub fn render(frame: &mut Frame<'_>, view: &TriageView<'_>) {
     let area = frame.area();
     let keys = if view.state.editing.is_some() {

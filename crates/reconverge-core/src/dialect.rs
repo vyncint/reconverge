@@ -95,7 +95,10 @@ pub enum CallKind {
     /// not one the program ever held. Counting those bits would be a
     /// confident wrong answer, so the interpreter declines instead —
     /// the same discipline as [`crate::model::Eval::CheckedBinary`].
-    CountOnes { bits: u32 },
+    CountOnes {
+        /// Width in bits of the argument's integer type.
+        bits: u32,
+    },
     /// Anything else: the result joins the arguments' uniformities.
     ///
     /// This is deliberately optimistic about *value* flow — a callee could

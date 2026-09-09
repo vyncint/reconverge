@@ -3,6 +3,8 @@ name = "reconverge-tui"
 description = "Terminal UI for reconverge: inspector, witness debugger, learn mode, triage"
 version.workspace = true
 edition.workspace = true
+# MSRV of the library crates; the driver alone needs rust-toolchain.toml's nightly.
+rust-version = "1.88"
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
