@@ -10,9 +10,9 @@
     "code": "RC002",
     "span": {
       "file": "src/lib.rs",
-      "line_start": 229,
+      "line_start": 262,
       "column_start": 16,
-      "line_end": 229,
+      "line_end": 262,
       "column_end": 52
     }
   },
@@ -70,9 +70,9 @@
       "statement": "lanes evaluate the guarding branch — 16 continue toward `ballot_sync`, 16 never will",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 228,
+        "line_start": 261,
         "column_start": 8,
-        "line_end": 228,
+        "line_end": 261,
         "column_end": 24
       },
       "lane_changes": []
@@ -82,9 +82,9 @@
       "statement": "ballot_sync() — active lanes 0x55555555, mask 0xffffffff",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 229,
+        "line_start": 262,
         "column_start": 16,
-        "line_end": 229,
+        "line_end": 262,
         "column_end": 52
       },
       "lane_changes": [
@@ -164,9 +164,9 @@
       "statement": "16 lanes named by the mask never reach the call",
       "span": {
         "file": "src/lib.rs",
-        "line_start": 228,
+        "line_start": 261,
         "column_start": 8,
-        "line_end": 228,
+        "line_end": 261,
         "column_end": 24
       },
       "lane_changes": []
