@@ -12,6 +12,8 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-09
+
 ### Changed
 
 - **`SimtDialect` gains `classify_method_call(def_path, receiver)`** with a
@@ -1066,6 +1068,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0
 [0.5.0]: https://github.com/vyncint/reconverge/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vyncint/reconverge/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vyncint/reconverge/releases/tag/v0.3.0

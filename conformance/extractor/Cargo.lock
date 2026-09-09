@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "reconverge-artifacts"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -54,11 +54,11 @@ dependencies = [
 
 [[package]]
 name = "reconverge-core"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "reconverge-dialect-oxide"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "reconverge-core",
 ]
