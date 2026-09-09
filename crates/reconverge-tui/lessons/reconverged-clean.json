@@ -2,7 +2,7 @@
   "schema": "witness.v1",
   "tool": {
     "name": "reconverge",
-    "version": "0.6.0"
+    "version": "0.6.1"
   },
   "crate": "sample_kernels",
   "kernel": "convergent_barrier",

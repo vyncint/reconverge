@@ -315,6 +315,21 @@ one that does less.
   cuda-oxide; RC005 checks the index-uniqueness half (declared domain against
   the proven index formula) and RC003 the parameter shape, and no rule here
   reasons about which thread writes which address across warps.
+- **Uniformity is block-scoped.** A guard that is uniform within a block —
+  `blockIdx`, `cluster::block_rank()` — makes the barrier under it
+  non-divergent, and that is the right answer for `sync_threads`. It is not
+  the whole answer for a barrier whose participant set is *wider* than a
+  block: `cluster_sync()` under a `block_rank()` guard, or `grid::sync()`
+  under a `blockIdx` guard, reports clean, because separating block- from
+  cluster- and grid-uniformity needs a lattice v1 does not have. A recall
+  gap, never a precision one — nothing is reported that is not there.
+  `explain RC001` states it, with the reproducing kernels.
+- **Split barriers are checked at the wait.** The mbarrier family and the
+  raw `barrier.cluster.arrive`/`.wait` pair are phase-counted: partial
+  participation at an arrival is the designed use, so only the blocking half
+  is RC001's subject. `if c { arrive() } wait()` is a real hang this does
+  not report, recorded in `explain RC001` and in
+  `conformance/SURFACE_ALLOW` with the reason.
 - **Reducible CFGs.** An irreducible control-flow graph degrades to
   all-divergent for that function, and the diagnostic says so rather than
   pretending otherwise.
@@ -330,7 +345,9 @@ one that does less.
   stays at `warning`. Nothing is promoted on a summary bit; the bit raises
   the finding, a trace confirms it.
 - **RC001 covers the all-threads barriers** — `thread::sync_threads`,
-  `cluster::cluster_sync` and the raw `barrier_cluster_*` pair behind it,
+  `cluster::cluster_sync` and the blocking half of the raw pair behind it
+  (`barrier_cluster_wait*`; the arrival half signals and returns, so it
+  cannot hang and is not a barrier here — `explain RC001`),
   `grid::sync`, and the cooperative-groups barriers `this_thread_block()`,
   `this_grid()` and `this_cluster()` `.sync()` (told apart by receiver, since
   `ThreadGroup::sync` is one path for five barriers) plus `block_reduce` and

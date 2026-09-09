@@ -25,10 +25,12 @@ CHECK=0
 # The trailing number is the driver's emission order over kernels sorted
 # by path, so adding a kernel that sorts earlier renumbers everything after
 # it — which is what this mapping is for. 0.6.0 added
-# `rc001_cluster_divergent_sync` (0) and `rc001_cooperative_block_sync` (1).
+# `rc001_cluster_divergent_sync` (0) and `rc001_cooperative_block_sync` (1);
+# 0.6.1 added `rc001_split_cluster_divergent_wait` (6), which pushed
+# `rc002_divergent_collective` from 7 to 8.
 RECORDINGS="
 rc001-divergent-barrier|witness-lint_samples-lib-rc001_divergent_barrier-RC001-2.json
-rc002-partial-mask|witness-lint_samples-lib-rc002_divergent_collective-RC002-7.json
+rc002-partial-mask|witness-lint_samples-lib-rc002_divergent_collective-RC002-8.json
 rc001-multiwarp-barrier|witness-lint_samples-lib-rc001_multiwarp_barrier-RC001-4.json
 "
 

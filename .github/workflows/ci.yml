@@ -137,6 +137,10 @@ jobs:
       # unrecognized call is `Other` — a coverage note, never a finding — so
       # a new upstream primitive is a false negative until someone names it.
       - run: ./scripts/check-surface.sh target/conformance/upstream
+      # ...and the gate's own failure paths, which is how #134 survived: it
+      # reported PASS on a module whose `include!`d source was missing, so
+      # the surface was never enumerated and nothing said so.
+      - run: ./scripts/check-surface-selftest.sh
       - run: ./scripts/run-mutation-corpus.sh
 
   # The artifacts are the contract between the engine and every front-end,

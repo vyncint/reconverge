@@ -79,16 +79,25 @@ pub fn classify_call(def_path: &str) -> CallKind {
         "smid" | "nsmid" | "gridid" if def_path.contains("::thread::") => CallKind::BlockUniform,
         "nwarpid" if def_path.contains("::warp::") => CallKind::BlockUniform,
         "envreg1" | "envreg2" if def_path.contains("::grid::") => CallKind::BlockUniform,
-        // The raw cluster barrier: `barrier.cluster.arrive` / `.wait` with no
-        // participant count — every thread of the cluster must reach both,
-        // so a divergent call to either is the divergent barrier RC001 names
-        // (`cluster_sync` is the pair behind one safe function).
-        "barrier_cluster_arrive"
-        | "barrier_cluster_arrive_aligned"
-        | "barrier_cluster_arrive_relaxed"
-        | "barrier_cluster_arrive_relaxed_aligned"
-        | "barrier_cluster_wait"
-        | "barrier_cluster_wait_aligned"
+        // The raw cluster barrier is a *split* barrier: `barrier.cluster.arrive`
+        // signals and returns, `barrier.cluster.wait` blocks until the cluster
+        // has arrived. Only the waiting half can hang, so only it is RC001's
+        // subject.
+        //
+        // 0.6.0 classified both halves as `Barrier`, on the reasoning that
+        // "every thread of the cluster must reach both". That is true of the
+        // pair and false of each instruction: a warp may arrive through
+        // `arrive_aligned` while its sibling arrives through `arrive`, which
+        // is a legal split arrival and was reported as two confirmed
+        // deadlocks (#132).
+        //
+        // The arrival half joins the mbarrier family in
+        // `conformance/SURFACE_ALLOW` for the same reason those are there:
+        // partial participation at one arrival instruction is the designed
+        // use, and deciding it needs the phase counting explain/RC001.md
+        // declines. The boundary that buys is written down there too —
+        // `if c { arrive() } wait()` is a real hang this does not report.
+        "barrier_cluster_wait" | "barrier_cluster_wait_aligned"
             if def_path.contains("::cluster::") =>
         {
             CallKind::Barrier
@@ -596,18 +605,29 @@ mod tests {
             CallKind::DivergentEnvRead,
             "the hardware warp slot differs per warp"
         );
+        // The raw cluster barrier is split: only the waiting half blocks.
+        for name in ["barrier_cluster_wait", "barrier_cluster_wait_aligned"] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cluster::{name}")),
+                CallKind::Barrier,
+                "{name} blocks until the cluster has arrived"
+            );
+        }
+        // The arrival half signals and returns. 0.6.0 called it a barrier and
+        // reported a legal split arrival -- one warp through the aligned
+        // form, its sibling through the plain one -- as two confirmed
+        // deadlocks (#132). Allowlisted with the mbarrier family, and
+        // explain/RC001.md says what that costs.
         for name in [
             "barrier_cluster_arrive",
             "barrier_cluster_arrive_aligned",
             "barrier_cluster_arrive_relaxed",
             "barrier_cluster_arrive_relaxed_aligned",
-            "barrier_cluster_wait",
-            "barrier_cluster_wait_aligned",
         ] {
             assert_eq!(
                 classify_call(&format!("cuda_device::cluster::{name}")),
-                CallKind::Barrier,
-                "{name} needs every thread of the cluster"
+                CallKind::Other,
+                "{name} is a non-blocking arrival, not a barrier"
             );
         }
         // The counted CTA barrier names its participants, so partial
