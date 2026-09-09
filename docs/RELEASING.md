@@ -37,6 +37,15 @@ cargo check --workspace         # refreshes Cargo.lock
 #    leaving an empty [Unreleased] above it, and add its link definition
 #    at the foot of the file.
 
+# 3b. Every witness fixture is stamped with the tool version that wrote it,
+#     and a test holds the stamp to the workspace version. Re-record the
+#     three recorded ones, restamp the synthetic one, and refresh the
+#     lessons' byte-identical copies — or the `test` and `schemas` gates
+#     fail on the release PR (they did, at 0.6.0).
+./scripts/record-fixtures.sh
+sed -i 's/"version": "OLD"/"version": "X.Y.Z"/' fixtures/witness/reconverged-clean.json
+cp fixtures/witness/{rc001-divergent-barrier,rc002-partial-mask,reconverged-clean}.json crates/reconverge-tui/lessons/
+
 # 4. Land it.
 git switch -c release/vX.Y.Z
 git commit -sam "release: X.Y.Z"
