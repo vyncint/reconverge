@@ -29,9 +29,16 @@ $EDITOR Cargo.toml crates/*/Cargo.toml
 cargo check --workspace         # refreshes Cargo.lock
 
 # 2. The conformance extractor is outside the workspace and has its own
-#    lockfile. run-conformance.sh passes --locked, so it fails the build if
-#    you forget this.
-(cd conformance/extractor && cargo update -p reconverge-core -p reconverge-dialect-oxide)
+#    lockfile. run-conformance.sh passes --locked, and so does its clippy
+#    gate in `just ci`, so a stale lock fails the build — with "cannot
+#    update the lock file ... because --locked was passed", which names
+#    neither the version nor the crate.
+#
+#    `--workspace` rather than naming crates: the old form listed
+#    reconverge-core and reconverge-dialect-oxide and missed
+#    reconverge-artifacts, which is a path dependency too, so following this
+#    step literally still left the lock stale (0.6.1 hit exactly that).
+(cd conformance/extractor && cargo update --workspace)
 
 # 3. Move the CHANGELOG section: [Unreleased] -> [X.Y.Z] — YYYY-MM-DD,
 #    leaving an empty [Unreleased] above it, and add its link definition

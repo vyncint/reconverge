@@ -12,6 +12,79 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-09
+
+Three issues reported against 0.6.0, all reproduced here before anything was
+changed. Two are fixed; the third is a real recall gap that cannot be closed
+in a patch, and is now stated in the tool's own output instead of being left
+for a user to discover.
+
+### Fixed
+
+- **A valid split cluster arrival is no longer reported as two deadlocks**
+  (#132). The raw cluster barrier is a *split* barrier:
+  `barrier.cluster.arrive` signals and returns, `barrier.cluster.wait`
+  blocks. 0.6.0 classified both halves as `Barrier`, on the reasoning that
+  "every thread of the cluster must reach both" — true of the pair, false of
+  each instruction. A kernel whose two warps arrive through different
+  instructions and then share one wait
+
+  ```rust
+  if warp::warp_id() == 0 { cluster::barrier_cluster_arrive_aligned(); }
+  else                    { cluster::barrier_cluster_arrive(); }
+  cluster::barrier_cluster_wait_aligned();
+  ```
+
+  produced two `RC001/confirmed` findings and exit 1, with a witness
+  claiming 32 of 64 lanes never arrive — they arrive through the other
+  instruction. Only `barrier_cluster_wait*` is a barrier now; the four
+  arrival forms join the mbarrier family in `conformance/SURFACE_ALLOW`.
+
+  What this costs is written down rather than glossed: `if c { arrive() }
+  wait()` is a real hang that is no longer reported, because deciding it
+  needs the phase counting RC001 already declines for mbarrier. The
+  divergent *wait* — the whole pair inside one branch — is still
+  `confirmed`, and a lint sample pins both directions.
+
+- **`check-surface.sh` fails when it cannot read an included source**
+  (#134). A module that `include!`s a file that is not on disk had its
+  surface silently under-enumerated — `cat ... 2>/dev/null` hid the missing
+  file, the process substitution kept `set -e` from seeing it, and the
+  script printed `PASS — every surface function is classified or
+  allowlisted`. Unreadable input is exit 2 now, with the path.
+
+  A gate whose failure path is never exercised is how that survived, so
+  `scripts/check-surface-selftest.sh` drives the gate over synthetic trees
+  and asserts the exit code for each outcome — clean, unknown name,
+  allowlisted, classified, missing include, and an include that *is*
+  present with an unknown name inside it. It needs no checkout, no network
+  and no compiler, and it fails against the 0.6.0 script.
+
+### Documentation
+
+- **RC001's two recall boundaries are now in `explain RC001` and the
+  README**, with the kernels that reproduce them.
+
+  The split-barrier boundary above is one. The other is #133: **uniformity
+  is block-scoped.** A guard that is uniform within a block — `blockIdx`,
+  `cluster::block_rank()` — makes the barrier under it non-divergent, which
+  is right for `sync_threads` and not the whole answer for a barrier whose
+  participant set is *wider* than a block:
+
+  ```rust
+  #[cluster_launch(2, 1, 1)]
+  pub fn only_rank_zero() {
+      if cluster::block_rank() == 0 { cluster::cluster_sync(); }
+  }
+  ```
+
+  reports clean, and so does `grid::sync()` under a `blockIdx` guard — the
+  gap is not a cluster quirk. Closing it needs a uniformity lattice that
+  separates block- from cluster- and grid-uniformity, which reaches
+  `reconverge-core`'s public `BarrierSite` and is therefore 0.7.0 work, not
+  a patch. It is a recall gap and never a precision one: nothing is
+  reported that is not there.
+
 ## [0.6.0] — 2026-09-09
 
 ### Changed
@@ -1068,6 +1141,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.6.1]: https://github.com/vyncint/reconverge/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0
 [0.5.0]: https://github.com/vyncint/reconverge/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vyncint/reconverge/releases/tag/v0.4.0
