@@ -28,7 +28,9 @@ use crate::schema;
 pub struct BaselineArtifact {
     /// Always [`schema::BASELINE`].
     pub schema: String,
+    /// Which tool wrote this document, and its version.
     pub tool: ToolInfo,
+    /// The reviewed suppressions, one per accepted finding.
     pub entries: Vec<Entry>,
 }
 
@@ -50,6 +52,7 @@ pub struct Entry {
 }
 
 impl BaselineArtifact {
+    /// A baseline document for `entries` under the current tool identity.
     #[must_use]
     pub fn new(entries: Vec<Entry>) -> Self {
         let mut artifact = BaselineArtifact {

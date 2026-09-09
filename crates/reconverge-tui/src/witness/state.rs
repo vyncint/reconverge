@@ -10,6 +10,7 @@ use reconverge_artifacts::witness::WitnessArtifact;
 
 use super::data::WitnessData;
 
+/// Replay position of the witness view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WitnessState {
     /// Index into `data.witnesses`.
@@ -18,18 +19,25 @@ pub struct WitnessState {
     pub position: usize,
 }
 
+/// What a keypress asks the witness view to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
+    /// Advance one step.
     StepForward,
+    /// Rewind one step.
     StepBack,
+    /// Jump to the launch instant.
     First,
+    /// Jump to the verdict.
     Last,
     /// Jump to the moment the warp first splits (the first step that
     /// changes any lane state).
     JumpDivergence,
     /// Jump to the verdict step.
     JumpVerdict,
+    /// Show the next witness.
     NextWitness,
+    /// Show the previous witness.
     PrevWitness,
 }
 
@@ -44,6 +52,7 @@ pub fn divergence_position(witness: &WitnessArtifact) -> Option<usize> {
 }
 
 impl WitnessState {
+    /// The initial state: the first witness, at its launch instant.
     #[must_use]
     pub fn new(_data: &WitnessData) -> WitnessState {
         WitnessState {

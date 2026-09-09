@@ -10,6 +10,7 @@
 //! written by `cargo reconverge triage` — the one artifact a human owns.
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod baseline;
 pub mod findings;
