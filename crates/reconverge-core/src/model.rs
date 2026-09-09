@@ -37,6 +37,11 @@ pub struct FnModel {
     /// (`block = (X, Y, Z)`), when present — the launch shape a witness may
     /// replay beyond one warp.
     pub declared_block: Option<[u32; 3]>,
+    /// Cluster dimensions declared by the kernel's `#[cluster_launch(X, Y, Z)]`,
+    /// when present. Recorded so a cluster-scoped barrier can be reported
+    /// against the shape the kernel claims; the witness still replays one
+    /// block, so this does not widen a replay.
+    pub declared_cluster: Option<[u32; 3]>,
 }
 
 #[derive(Debug, Clone)]

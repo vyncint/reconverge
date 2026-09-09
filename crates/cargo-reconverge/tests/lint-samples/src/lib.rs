@@ -6,7 +6,10 @@
 //! bytes of shared memory; the static cap is 49152 bytes (48 KiB).
 
 use cuda_device::barrier::{Barrier, mbarrier_arrive, mbarrier_init, mbarrier_wait};
-use cuda_device::{DisjointSlice, SharedArray, kernel, launch_contract, thread, warp};
+use cuda_device::cooperative_groups::{self, ThreadGroup};
+use cuda_device::{
+    DisjointSlice, SharedArray, cluster, cluster_launch, kernel, launch_contract, thread, warp,
+};
 
 // ---------------------------------------------------------------- RC003
 
@@ -178,6 +181,36 @@ pub fn rc001_divergent_barrier(mut out: DisjointSlice<u32>) {
     let i = thread::index_1d();
     if i.get() % 2 == 0 {
         thread::sync_threads();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 1;
+    }
+}
+
+/// True positive (warning): the same divergent barrier one cooperative
+/// helper deeper — `this_thread_block().sync()` is `ThreadGroup::sync` on a
+/// `ThreadBlock`, a block-wide barrier the analysis recognizes by receiver.
+#[kernel]
+pub fn rc001_cooperative_block_sync(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if i.get() % 2 == 0 {
+        cooperative_groups::this_thread_block().sync();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 1;
+    }
+}
+
+/// True positive (warning) under a declared cluster: `#[cluster_launch]`
+/// plants `__cluster_config::<2, 1, 1>()`, which the analysis records, and a
+/// divergent `cluster_sync` hangs every block of that cluster — the finding
+/// says so in its notes.
+#[kernel]
+#[cluster_launch(2, 1, 1)]
+pub fn rc001_cluster_divergent_sync(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if i.get() % 2 == 0 {
+        cluster::cluster_sync();
     }
     if let Some(e) = out.get_mut(i) {
         *e = 1;

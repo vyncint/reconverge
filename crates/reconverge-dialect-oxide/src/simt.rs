@@ -16,6 +16,35 @@ impl SimtDialect for CudaOxide {
     fn classify_call(&self, def_path: &str) -> CallKind {
         classify_call(def_path)
     }
+
+    fn classify_method_call(&self, def_path: &str, receiver: Option<&str>) -> CallKind {
+        classify_method_call(def_path, receiver)
+    }
+}
+
+/// Classify a callee whose meaning depends on its receiver.
+///
+/// `cooperative_groups::ThreadGroup::sync` is one definition path for five
+/// different barriers: on a `ThreadBlock`, `Grid` or `Cluster` it is the
+/// scope-wide barrier RC001 is about — every thread of the scope must
+/// arrive, so a divergent call hangs exactly like `sync_threads` — while on a
+/// `WarpTile<N>` or `CoalescedThreads` the participants are the tile or the
+/// lanes that happen to be active, a partial-participation contract this
+/// analysis does not model (conformance/SURFACE_ALLOW says so). Without a
+/// receiver the path alone cannot tell them apart and stays `Other`.
+#[must_use]
+pub fn classify_method_call(def_path: &str, receiver: Option<&str>) -> CallKind {
+    if def_path.ends_with("::cooperative_groups::ThreadGroup::sync")
+        && let Some(receiver) = receiver
+        && receiver.starts_with("cuda_device::cooperative_groups::")
+    {
+        let group = receiver.rsplit("::").next().unwrap_or(receiver);
+        return match group {
+            "ThreadBlock" | "Grid" | "Cluster" => CallKind::Barrier,
+            _ => CallKind::Other,
+        };
+    }
+    classify_call(def_path)
 }
 
 /// Classify a cuda-device callee (free function form; see [`CudaOxide`]).
@@ -44,6 +73,26 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // Uniform within a block (or the whole grid).
         "blockIdx_x" | "blockIdx_y" | "blockIdx_z" | "blockDim_x" | "blockDim_y" | "blockDim_z"
         | "gridDim_x" | "gridDim_y" | "gridDim_z" => CallKind::BlockUniform,
+        // Special registers that read the same on every thread of a block:
+        // the SM a block runs on and how many there are, the grid id, the
+        // warp-slot count, and the two launch-environment registers.
+        "smid" | "nsmid" | "gridid" if def_path.contains("::thread::") => CallKind::BlockUniform,
+        "nwarpid" if def_path.contains("::warp::") => CallKind::BlockUniform,
+        "envreg1" | "envreg2" if def_path.contains("::grid::") => CallKind::BlockUniform,
+        // The raw cluster barrier: `barrier.cluster.arrive` / `.wait` with no
+        // participant count — every thread of the cluster must reach both,
+        // so a divergent call to either is the divergent barrier RC001 names
+        // (`cluster_sync` is the pair behind one safe function).
+        "barrier_cluster_arrive"
+        | "barrier_cluster_arrive_aligned"
+        | "barrier_cluster_arrive_relaxed"
+        | "barrier_cluster_arrive_relaxed_aligned"
+        | "barrier_cluster_wait"
+        | "barrier_cluster_wait_aligned"
+            if def_path.contains("::cluster::") =>
+        {
+            CallKind::Barrier
+        }
 
         // Execution barriers (RC001's subject): every primitive whose
         // contract is "all threads of the scope must reach this call".
@@ -55,6 +104,24 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // not by itself a bug — a documented v1 boundary (explain/RC001.md).
         "sync_threads" | "cluster_sync" => CallKind::Barrier,
         "sync" if def_path.contains("::grid::") => CallKind::Barrier,
+        // Cooperative-groups block helpers carry a block-wide barrier inside
+        // (`block_reduce` and `block_scan` both `sync_threads` between their
+        // warp and block phases), so a divergent call is the divergent
+        // barrier one helper deeper. The tile-scoped siblings (`warp_reduce`,
+        // `warp_scan` over a `WarpTile<N>`) are not here: their participant
+        // set is the tile, which is not modelled — conformance/SURFACE_ALLOW.
+        "block_reduce" | "block_scan" if def_path.contains("::cooperative_groups::") => {
+            CallKind::Barrier
+        }
+        // Cluster geometry reads: the block's rank and the cluster's shape
+        // are the same on every thread of the block, like `blockIdx`.
+        "block_rank" | "cluster_idx" | "cluster_size" | "num_clusters" | "cluster_ctaidX"
+        | "cluster_ctaidY" | "cluster_ctaidZ" | "cluster_nctaidX" | "cluster_nctaidY"
+        | "cluster_nctaidZ"
+            if def_path.contains("::cluster::") =>
+        {
+            CallKind::BlockUniform
+        }
 
         // Warp collectives (RC002's subject): cuda-device's masked `*_sync`
         // surface, every one taking the participation mask as its first
@@ -133,6 +200,14 @@ pub fn classify_call(def_path: &str) -> CallKind {
         | "redux_sync_min_i32"
         | "redux_sync_max_u32"
         | "redux_sync_max_i32"
+        | "redux_sync_min_f32"
+        | "redux_sync_max_f32"
+        | "redux_sync_min_abs_f32"
+        | "redux_sync_max_abs_f32"
+        | "redux_sync_min_nan_f32"
+        | "redux_sync_max_nan_f32"
+        | "redux_sync_min_abs_nan_f32"
+        | "redux_sync_max_abs_nan_f32"
         | "elect_sync"
         | "is_elected_sync"
         | "sync_mask" => CallKind::WarpCollective {
@@ -149,12 +224,18 @@ pub fn classify_call(def_path: &str) -> CallKind {
         // `!`, truncating casts), so guards on them stay warning-tier.
         "active_mask" | "lanemask_lt" | "lanemask_le" | "lanemask_eq" | "lanemask_ge"
         | "lanemask_gt" | "warp_id" | "live_lanes_1d" => CallKind::DivergentEnvRead,
+        // `%warpid`, the hardware warp slot: warp-uniform and, like
+        // `warp_id`, not something the lattice separates from thread-level
+        // divergence. Not the logical warp index (`warp_id` is), and never
+        // a collective.
+        "warpid" if def_path.contains("::warp::") => CallKind::DivergentEnvRead,
 
         // Dialect plumbing with uniform, effect-free results.
         "make_kernel_scope"
         | "__launch_contract_config"
         | "__launch_contract_block_config"
         | "__launch_bounds_config"
+        | "__cluster_config"
         | "__unchecked_indexing_config"
         | "__unroll_config" => CallKind::UniformMarker,
 
@@ -333,6 +414,14 @@ mod tests {
             "redux_sync_min_i32",
             "redux_sync_max_u32",
             "redux_sync_max_i32",
+            "redux_sync_min_f32",
+            "redux_sync_max_f32",
+            "redux_sync_min_abs_f32",
+            "redux_sync_max_abs_f32",
+            "redux_sync_min_nan_f32",
+            "redux_sync_max_nan_f32",
+            "redux_sync_min_abs_nan_f32",
+            "redux_sync_max_abs_nan_f32",
             "elect_sync",
             "is_elected_sync",
             "sync_mask",
@@ -442,6 +531,147 @@ mod tests {
     /// The wrapper names are only collectives under `::warp::`. `all` and
     /// `any` are ordinary words, and a false positive here would invent a
     /// collective where the program has none.
+    /// `ThreadGroup::sync` is one path for five barriers; the receiver
+    /// decides. Block, grid and cluster groups are RC001's subject; a tile
+    /// or the coalesced set is a partial-participation contract left as
+    /// `Other` (conformance/SURFACE_ALLOW), and no receiver is no decision.
+    #[test]
+    fn thread_group_sync_is_a_barrier_by_receiver() {
+        let sync = "cuda_device::cooperative_groups::ThreadGroup::sync";
+        for group in ["ThreadBlock", "Grid", "Cluster"] {
+            let receiver = format!("cuda_device::cooperative_groups::{group}");
+            assert_eq!(
+                classify_method_call(sync, Some(&receiver)),
+                CallKind::Barrier,
+                "{group}::sync is a scope-wide barrier"
+            );
+        }
+        for group in ["WarpTile<16>", "WarpTile<32>", "CoalescedThreads"] {
+            let receiver = format!("cuda_device::cooperative_groups::{group}");
+            assert_eq!(
+                classify_method_call(sync, Some(&receiver)),
+                CallKind::Other,
+                "{group}::sync is tile-scoped and deliberately unmodelled"
+            );
+        }
+        assert_eq!(classify_method_call(sync, None), CallKind::Other);
+        // A foreign trait with the same method name is nobody's barrier.
+        assert_eq!(
+            classify_method_call(
+                "my_crate::ThreadGroup::sync",
+                Some("cuda_device::cooperative_groups::ThreadBlock")
+            ),
+            CallKind::Other
+        );
+        // The receiver never changes a free function's classification.
+        assert_eq!(
+            classify_method_call(
+                "cuda_device::thread::sync_threads",
+                Some("cuda_device::cooperative_groups::WarpTile<32>")
+            ),
+            CallKind::Barrier
+        );
+    }
+
+    /// The generated special-register readers and the raw cluster barrier:
+    /// scanned by scripts/check-surface.sh through the modules' `include!`s.
+    #[test]
+    fn generated_registers_and_the_raw_cluster_barrier_are_classified() {
+        for (module, name) in [
+            ("thread", "smid"),
+            ("thread", "nsmid"),
+            ("thread", "gridid"),
+            ("warp", "nwarpid"),
+            ("grid", "envreg1"),
+            ("grid", "envreg2"),
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::{module}::{name}")),
+                CallKind::BlockUniform,
+                "{name} reads the same on every thread of the block"
+            );
+        }
+        assert_eq!(
+            classify_call("cuda_device::warp::warpid"),
+            CallKind::DivergentEnvRead,
+            "the hardware warp slot differs per warp"
+        );
+        for name in [
+            "barrier_cluster_arrive",
+            "barrier_cluster_arrive_aligned",
+            "barrier_cluster_arrive_relaxed",
+            "barrier_cluster_arrive_relaxed_aligned",
+            "barrier_cluster_wait",
+            "barrier_cluster_wait_aligned",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cluster::{name}")),
+                CallKind::Barrier,
+                "{name} needs every thread of the cluster"
+            );
+        }
+        // The counted CTA barrier names its participants, so partial
+        // participation is its design: allowlisted, not a barrier here.
+        assert_eq!(
+            classify_call("cuda_device::barrier::barrier_cta_sync"),
+            CallKind::Other
+        );
+        // Foreign lookalikes are nobody's register.
+        assert_eq!(classify_call("my_crate::thread::smid"), CallKind::Other);
+    }
+
+    /// The block helpers carry a `sync_threads` inside; the cluster reads
+    /// are block-uniform; the cluster marker is a marker.
+    #[test]
+    fn cooperative_block_helpers_and_cluster_reads_are_classified() {
+        for name in ["block_reduce", "block_scan"] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cooperative_groups::{name}")),
+                CallKind::Barrier,
+                "{name} is a block-wide barrier one helper deeper"
+            );
+            assert_eq!(
+                classify_call(&format!("my_crate::{name}")),
+                CallKind::Other,
+                "{name} outside cuda_device is nobody's barrier"
+            );
+        }
+        for name in [
+            "warp_reduce",
+            "warp_scan",
+            "coalesced_threads",
+            "this_thread_block",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cooperative_groups::{name}")),
+                CallKind::Other,
+                "{name} is allowlisted, not classified"
+            );
+        }
+        for name in [
+            "block_rank",
+            "cluster_idx",
+            "cluster_size",
+            "num_clusters",
+            "cluster_ctaidX",
+            "cluster_ctaidY",
+            "cluster_ctaidZ",
+            "cluster_nctaidX",
+            "cluster_nctaidY",
+            "cluster_nctaidZ",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cluster::{name}")),
+                CallKind::BlockUniform,
+                "{name} is the same on every thread of the block"
+            );
+        }
+        assert_eq!(
+            classify_call("cuda_device::cluster::__cluster_config"),
+            CallKind::UniformMarker
+        );
+    }
+
     #[test]
     fn wrapper_names_outside_warp_are_not_collectives() {
         for path in [

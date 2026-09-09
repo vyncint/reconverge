@@ -309,6 +309,14 @@ pub fn rc001_divergent_barriers(
                         .to_string(),
                 );
             }
+            if let Some([x, y, z]) = f.declared_cluster {
+                notes.push(format!(
+                    "kernel declares a ({x}, {y}, {z}) cluster (`#[cluster_launch]`): a \
+                     block-wide barrier that cannot be satisfied hangs this block, and a \
+                     cluster-wide one (`cluster_sync`, `this_cluster().sync()`) hangs every \
+                     block of the cluster waiting on it"
+                ));
+            }
             let mut provenance = vec![ProvenanceStep {
                 what: "thread-divergent branch".to_string(),
                 span: span_of(models, cause.span),

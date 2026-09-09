@@ -131,6 +131,12 @@ jobs:
           rustup toolchain install
           rustup show
       - run: ./scripts/run-conformance.sh
+      # The known-unknown gate: every public function in upstream's
+      # synchronization and collective modules at the pinned checkout is
+      # either classified by the dialect or allowlisted with a reason. An
+      # unrecognized call is `Other` — a coverage note, never a finding — so
+      # a new upstream primitive is a false negative until someone names it.
+      - run: ./scripts/check-surface.sh target/conformance/upstream
       - run: ./scripts/run-mutation-corpus.sh
 
   # The artifacts are the contract between the engine and every front-end,

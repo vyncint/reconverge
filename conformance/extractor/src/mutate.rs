@@ -350,6 +350,12 @@ impl<'ast, 'src> Visit<'ast> for Collector<'src> {
             && let Some(seg) = path.path.segments.last()
         {
             let name = seg.ident.to_string();
+            // The drift detector below asks about `warp::` calls; a user
+            // helper that happens to be named `reduce_all_forms` is not a
+            // collective the dialect missed, it is a function. Qualify by the
+            // path's previous segment, which for a collective is `warp`.
+            let in_warp = path.path.segments.len() >= 2
+                && path.path.segments[path.path.segments.len() - 2].ident == "warp";
             if is_classified_collective(&name) {
                 if self.kernel.is_none() {
                     self.sites.skips.sites_outside_kernels += 1;
@@ -374,7 +380,7 @@ impl<'ast, 'src> Visit<'ast> for Collector<'src> {
                         });
                     }
                 }
-            } else if is_unclassified_collective(&name) && self.kernel.is_some() {
+            } else if in_warp && is_unclassified_collective(&name) && self.kernel.is_some() {
                 self.sites.skips.unclassified_collectives += 1;
             }
         }

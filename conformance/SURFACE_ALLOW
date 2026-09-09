@@ -11,3 +11,30 @@ coalesced_threads	the active-lane group by construction: partial participation i
 this_grid	returns a handle; the barrier is the method `sync`, classified by receiver type
 this_cluster	returns a handle; the barrier is the method `sync`, classified by receiver type
 this_thread_block	returns a handle; the barrier is the method `sync`, classified by receiver type
+warp_reduce	tile-scoped over a WarpTile<N>: the participant set is the tile, not the warp, and a tile mask is not modelled
+warp_scan	tile-scoped over a WarpTile<N>: the participant set is the tile, not the warp, and a tile mask is not modelled
+barrier_cta_arrive	counted CTA barrier (`bar.arrive id, count`): the participants are the count the caller names, so partial participation is its design
+barrier_cta_arrive_aligned	counted CTA barrier (`bar.arrive id, count`): the participants are the count the caller names, so partial participation is its design
+barrier_cta_sync	counted CTA barrier (`bar.sync id, count`): the participants are the count the caller names, so partial participation is its design
+barrier_cta_sync_aligned	counted CTA barrier (`bar.sync id, count`): the participants are the count the caller names, so partial participation is its design
+mbarrier_arrive	phase-counted split barrier family (explain/RC001.md)
+mbarrier_arrive_no_complete	phase-counted split barrier family (explain/RC001.md)
+mbarrier_arrive_cluster	phase-counted split barrier family (explain/RC001.md)
+mbarrier_arrive_expect_tx	phase-counted split barrier family (explain/RC001.md)
+mbarrier_arrive_expect_tx_cluster	phase-counted split barrier family (explain/RC001.md)
+mbarrier_init	mbarrier lifecycle, not a synchronization point
+mbarrier_inval	mbarrier lifecycle, not a synchronization point
+mbarrier_test_wait	phase-counted split barrier family (explain/RC001.md); a poll, never a block
+mbarrier_try_wait	phase-counted split barrier family (explain/RC001.md); a bounded wait
+mbarrier_try_wait_parity	phase-counted split barrier family (explain/RC001.md); a bounded wait
+mbarrier_try_wait_parity_cluster	phase-counted split barrier family (explain/RC001.md); a bounded wait
+fence_mbarrier_init_release_cluster	memory fence: ordering, not participation
+fence_proxy_async_generic_acquire_shared_cluster_cluster	memory fence: ordering, not participation
+fence_proxy_async_generic_release_shared_cta_cluster	memory fence: ordering, not participation
+fence_proxy_async_shared_cta	memory fence: ordering, not participation
+nanosleep	a per-thread delay; legal under divergence
+setmaxnreg_inc	register-file control for warpgroup pipelines; no synchronization semantics this analysis models
+setmaxnreg_dec	register-file control for warpgroup pipelines; no synchronization semantics this analysis models
+dsmem_read_u32	distributed shared memory access: memory, not synchronization
+map_shared_rank	distributed shared memory addressing: memory, not synchronization
+map_shared_rank_mut	distributed shared memory addressing: memory, not synchronization

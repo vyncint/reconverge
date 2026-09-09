@@ -14,6 +14,21 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
+- **`SimtDialect` gains `classify_method_call(def_path, receiver)`** with a
+  default that defers to `classify_call`, and the driver now hands the
+  dialect the callee's `Self` type for trait methods. One definition path,
+  `cooperative_groups::ThreadGroup::sync`, is five different barriers; the
+  receiver decides: on a `ThreadBlock`, `Grid` or `Cluster` it is RC001's
+  scope-wide barrier, on a `WarpTile<N>` or `CoalescedThreads` it is a
+  tile-scoped contract this analysis does not model and stays `Other`.
+  Additive for implementors (the default), and the first path-only
+  classification that was structurally unable to be right.
+- **`FnModel` gains `declared_cluster`**, read from the
+  `__cluster_config::<X, Y, Z>()` marker `#[cluster_launch]` plants; an
+  RC001 finding in such a kernel names the cluster in its notes, since a
+  divergent `cluster_sync` hangs every block of it. Struct literals of
+  `FnModel` outside the crate need the new field.
+
 - **The pinned nightly is `nightly-2026-08-28`** (rustc 1.100, LLVM 23),
   matching the pin upstream cuda-oxide moved to on 2026-08-29. The driver's
   `rustc_public` use is ported: `Statement`/`Terminator` spans now live under
@@ -45,6 +60,41 @@ the corpus; found-in-the-wild is the true north.
   lands in the workspace's own `target/`, and the sweep covers both layouts.
 
 ### Added
+
+- **Twenty-three upstream names classified** that were `Other` — a coverage
+  note, never a finding — at the previous pin. The eight `redux_sync_*_f32`
+  collectives (`min`/`max`, `_abs`, `_nan`, and both) join RC002's masked
+  surface; `cooperative_groups::block_reduce` and `block_scan`, which carry
+  a `sync_threads` inside, join RC001's barriers, as does
+  `ThreadGroup::sync` on a block, grid or cluster; the `cluster` module's
+  geometry reads (`block_rank`, `cluster_idx`, `cluster_size`,
+  `num_clusters`, `cluster_ctaid{X,Y,Z}`, `cluster_nctaid{X,Y,Z}`) are
+  block-uniform; `__cluster_config` is a marker. The gate also follows each
+  module's `include!`d generated files, which is where `warp::warpid()`
+  lives: the special registers (`smid`, `nsmid`, `gridid`, `nwarpid`,
+  `envreg1`/`2`) are block-uniform, `warpid` is a warp-level read like
+  `warp_id`, and the raw `barrier_cluster_arrive*`/`wait*` pair is RC001's
+  barrier at cluster scope. Everything left — the counted CTA barrier
+  (`barrier_cta_*`, whose participants are the count the caller names), the
+  mbarrier family, the fences, `nanosleep`, `setmaxnreg_*`, the distributed
+  shared-memory helpers, `warp_reduce`, `warp_scan`, `coalesced_threads` —
+  is allowlisted with its reason in `conformance/SURFACE_ALLOW`, and
+  `scripts/check-surface.sh` now runs in the `conformance` CI job, so the
+  next upstream primitive fails the build instead of silently degrading
+  recall.
+- **Two lint samples:** `rc001_cooperative_block_sync` (a divergent
+  `this_thread_block().sync()` — an RC001 finding, where 0.5.0 reported
+  nothing) and `rc001_cluster_divergent_sync` (a divergent `cluster_sync`
+  under `#[cluster_launch(2, 1, 1)]`, whose finding names the cluster).
+- **explain/RC001.md** states the cooperative-groups boundary next to the
+  mbarrier one; **explain/RC002.md** names the `f32` redux family.
+- **The mutation corpus's drift detector asks about `warp::` calls only.**
+  It counted a user helper named `reduce_all_forms` in upstream's
+  `redux_f32` example as two "unclassified collectives"; qualified by the
+  call path's `warp` segment, `skipped_unclassified_collectives` reads 0,
+  which is what it is meant to read when the dialect and the corpus agree.
+  `skipped_sites_outside_kernels` is 8 at the new pin: collective calls in
+  upstream helper functions, which the mutator leaves alone by design.
 
 - **`pins.yml`: a weekly pin watch** that opens one issue when upstream
   cuda-oxide moves past `conformance/PIN`, when its `rust-toolchain.toml`
