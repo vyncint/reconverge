@@ -27,6 +27,7 @@ pub const MAX_BLOCKS: usize = 4096;
 
 /// A model with its local calls spliced in, and the sites that exposed.
 pub struct Inlined {
+    /// The caller with its local callees spliced in.
     pub model: FnModel,
     /// Barrier and collective blocks that only exist because a call was
     /// inlined, paired with the caller block whose call produced them.

@@ -22,6 +22,7 @@ pub type ComputeCapability = (u8, u8);
 /// Per-architecture shared-memory capacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SharedMemoryLimits {
+    /// The compute capability these limits describe.
     pub cc: ComputeCapability,
     /// Maximum shared memory per thread block (bytes), including the
     /// dynamic opt-in region.

@@ -14,6 +14,7 @@
 //! provenance and the interprocedural barrier/warp summary bits.
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod analysis;
 pub mod dialect;

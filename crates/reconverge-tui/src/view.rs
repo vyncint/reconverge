@@ -16,6 +16,7 @@ use crate::load::LoadedArtifact;
 /// the shell has no keys beyond quit, so state = f(artifacts).
 #[derive(Debug, Clone, Default)]
 pub struct ShellModel {
+    /// Every artifact loaded for this run.
     pub artifacts: Vec<LoadedArtifact>,
     /// Load failures, shown in-frame (deterministically) rather than on
     /// stderr where they would tear the alternate screen.

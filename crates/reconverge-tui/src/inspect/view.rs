@@ -15,10 +15,15 @@ use super::state::InspectorState;
 use crate::view::fit;
 use reconverge_artifacts::plural;
 
+/// Everything one frame of the inspector needs.
 pub struct InspectorView<'a> {
+    /// The loaded artifacts.
     pub data: &'a InspectorData,
+    /// The cursor.
     pub state: &'a InspectorState,
+    /// Draw with ASCII only — no box drawing or block glyphs.
     pub ascii: bool,
+    /// Use colour; false under `NO_COLOR` or when the terminal has none.
     pub color: bool,
 }
 
@@ -84,6 +89,7 @@ pub fn source_window(total_lines: usize, height: usize, focus_line: usize) -> us
     start.min(total_lines - height + 1)
 }
 
+/// Draw one frame of the inspector.
 pub fn render(frame: &mut Frame<'_>, view: &InspectorView<'_>) {
     let area = frame.area();
     let block = Block::bordered()

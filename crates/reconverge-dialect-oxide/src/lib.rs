@@ -11,6 +11,7 @@
 //! implementation that classifies every call the engine sees.
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod cc;
 pub mod paths;

@@ -3,6 +3,8 @@ name = "reconverge-artifacts"
 description = "Typed bindings for reconverge's versioned artifact schemas"
 version.workspace = true
 edition.workspace = true
+# MSRV of the library crates; the driver alone needs rust-toolchain.toml's nightly.
+rust-version = "1.88"
 license.workspace = true
 repository.workspace = true
 publish.workspace = true

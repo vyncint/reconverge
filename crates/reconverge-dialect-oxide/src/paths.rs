@@ -77,9 +77,13 @@ pub fn index_fn(def_path: &str) -> Option<IndexFn> {
 /// mismatched launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LaunchDomain {
+    /// No contract declared.
     Unknown,
+    /// One launch axis.
     D1,
+    /// Two launch axes.
     D2,
+    /// Three launch axes.
     D3,
 }
 

@@ -21,10 +21,15 @@ use super::state::{LearnState, Screen};
 use crate::view::fit;
 use crate::witness::view as wview;
 
+/// Everything one frame of the learn view needs.
 pub struct LearnView<'a> {
+    /// The lessons.
     pub lessons: &'a [Lesson],
+    /// The cursor.
     pub state: &'a LearnState,
+    /// Draw with ASCII only — no box drawing or block glyphs.
     pub ascii: bool,
+    /// Use colour; false under `NO_COLOR` or when the terminal has none.
     pub color: bool,
 }
 
@@ -52,6 +57,7 @@ impl LearnView<'_> {
     }
 }
 
+/// Draw one frame of the learn view.
 pub fn render(frame: &mut Frame<'_>, view: &LearnView<'_>) {
     let area = frame.area();
     let keys = match view.state.screen {

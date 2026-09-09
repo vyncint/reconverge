@@ -9,12 +9,16 @@
 
 use crate::model::{BlockId, FnModel};
 
+/// A function's control-flow graph as adjacency lists over block ids.
 pub struct Cfg {
+    /// Successors of each block.
     pub succs: Vec<Vec<BlockId>>,
+    /// Predecessors of each block.
     pub preds: Vec<Vec<BlockId>>,
 }
 
 impl Cfg {
+    /// The CFG of `f`, from each block's terminator.
     #[must_use]
     pub fn build(f: &FnModel) -> Cfg {
         let n = f.blocks.len();
@@ -29,11 +33,13 @@ impl Cfg {
         Cfg { succs, preds }
     }
 
+    /// Number of blocks.
     #[must_use]
     pub fn len(&self) -> usize {
         self.succs.len()
     }
 
+    /// Whether the function has no blocks.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.succs.is_empty()

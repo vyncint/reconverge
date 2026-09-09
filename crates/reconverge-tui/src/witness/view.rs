@@ -19,10 +19,15 @@ use super::data::WitnessData;
 use super::state::WitnessState;
 use crate::view::fit;
 
+/// Everything one frame of the witness view needs.
 pub struct WitnessView<'a> {
+    /// The witnesses.
     pub data: &'a WitnessData,
+    /// The replay position.
     pub state: &'a WitnessState,
+    /// Draw with ASCII only — no box drawing or block glyphs.
     pub ascii: bool,
+    /// Use colour; false under `NO_COLOR` or when the terminal has none.
     pub color: bool,
 }
 
@@ -155,6 +160,7 @@ impl WitnessView<'_> {
     }
 }
 
+/// Draw one frame of the witness view.
 pub fn render(frame: &mut Frame<'_>, view: &WitnessView<'_>) {
     let area = frame.area();
     let block = Block::bordered()
