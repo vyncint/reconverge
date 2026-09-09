@@ -69,6 +69,21 @@ the corpus; found-in-the-wild is the true north.
 
 ### Added
 
+- **Hardware session #1 has a result.** `docs/hardware/results/t4-cc75-2026-09-09.tsv`:
+  on a Tesla T4 (CC 7.5, cuda-oxide `26754ae5`) the two RC001 probes —
+  the canonical divergent `sync_threads` and the new cooperative
+  `this_thread_block().sync()` — **ran to completion** rather than hanging,
+  and the RC002 probe returned `0x55555555` for a full-mask ballot half the
+  warp never reached. explain/RC001.md carries the measurement next to its
+  "usually hangs"; the verdict wording is unchanged pending a second part.
+- **README and docs at 0.6.0:** RC001's row and coverage bullet name the
+  cooperative-groups and cluster barriers and the tile-scoped boundary; a
+  "Not in scope, by decision" entry says that register budgeting and
+  memory/`DisjointSlice` race analysis are not this tool's, and which rules
+  cover the adjacent questions; the surface gate and pin watch are described
+  in `conformance/README.md` and `docs/ARCHITECTURE.md`; `docs/RELEASING.md`
+  has the `baseline-version` step and the `breaking` label.
+
 - **A `semver` gate on every pull request** — `cargo-semver-checks` over the
   five published library crates against the last release on crates.io,
   with the release type **forced** to `patch`: left to infer it from the

@@ -51,6 +51,13 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
 
 ## After the publish
 
+- **Point the semver gate at the release you just cut.** `baseline-version`
+  in `ci.yml`'s `semver` job is a literal; move it to X.Y.Z in its own PR
+  once the crates are on the index (the job downloads the baseline from
+  crates.io, so bumping it *before* the publish fails every check). Until
+  then every PR is measured against the previous release — including this
+  release's own intended breaks, which is why the release PR carries the
+  `breaking` label.
 - **Cut the GitHub Release** from the CHANGELOG section, titled
   `vX.Y.Z — short theme` to match the existing ones, with an `## Install`
   block carrying both commands (`cargo install cargo-reconverge` and
@@ -80,6 +87,12 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
 - **Toolchain bumps are minor**, never patch. The pinned nightly moves only in
   lockstep with the upstream cuda-oxide pin, and never in a change that also
   alters analysis behaviour — one at a time.
+- **A breaking PR carries the `breaking` label.** The `semver` CI job runs
+  `cargo-semver-checks` with the release type forced to `patch` — left to
+  infer it from the version number, the checker treats a 0.x minor bump as a
+  major release and skips every check. The label runs the gate as `major`
+  — the checker's word for a 0.x break — so the break is visible in the
+  diagnostics rather than waved through by a version bump.
 
 ## If something fails mid-release
 

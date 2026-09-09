@@ -208,11 +208,11 @@ quiet dependency.
 ```mermaid
 flowchart TB
   unit["<b>unit</b> — pure functions<br/>engine on hand-built CFGs · state machines · label tables"]
-  golden["<b>golden frames</b> — spawn the real binary in a PTY<br/>drive keys · wait_idle · snapshot the grid"]
+  golden["<b>golden frames</b> — spawn the real binary in a PTY<br/>drive keys · wait_frame · snapshot the grid"]
   flow["<b>flow</b> — multi-step journeys<br/>open → step → jump → write → quit"]
   matrix["<b>matrix</b> — {80×24, 120×40} × {color, NO_COLOR}"]
   e2e["<b>end-to-end</b> — a real check over the lint samples,<br/>then the real subcommand over the real artifacts"]
-  conf["<b>conformance</b> — every upstream example, every CI run<br/>any unreviewed finding fails the build"]
+  conf["<b>conformance</b> — every upstream example, every CI run<br/>any unreviewed finding fails the build · any undecided upstream primitive fails it too"]
   mut["<b>mutation corpus</b> — labeled injected bugs<br/>precision must stay 1.0; recall is published"]
 
   unit --> golden --> flow --> matrix --> e2e --> conf --> mut
@@ -226,6 +226,14 @@ Two policies matter more than the pyramid:
   upstream with a reduction. TUI tests are never skipped-but-green.
 - **The ratchet.** Every escaped bug and every false positive becomes a
   permanent regression test *before* it is fixed. Confidence only moves up.
+- **Unknown is a decision, not a default.** An unrecognized `cuda_device::`
+  call is `Other` — counted as coverage, never a finding — so every primitive
+  upstream adds is a silent false negative until someone names it.
+  `scripts/check-surface.sh` runs in the conformance job and fails when a
+  public function of upstream's synchronization or collective modules is
+  neither classified in `simt.rs` nor listed in `conformance/SURFACE_ALLOW`
+  with a reason; `pins.yml` runs the same check against upstream `HEAD`
+  weekly, so the drift is reported before the pin moves.
 
 Conformance deserves one note: upstream's examples are host+device programs
 whose host half runs `bindgen` against a vendor SDK header at build time, and
@@ -238,7 +246,14 @@ documented in [`conformance/README.md`](../conformance/README.md).
 
 - **The nightly pin is load-bearing.** A rustc-driver tool must be built by
   the same rustc it wraps; `rust-toolchain.toml` matches upstream
-  cuda-oxide's pin exactly, and bumping it is a deliberate, reviewed act.
+  cuda-oxide's pin exactly, and bumping it is a deliberate, reviewed act —
+  its own commit, together with `conformance/PIN` and the sample crates'
+  `cuda-device` revs, never mixed with an analysis change (RELEASING.md).
+  `pins.yml` compares all three to upstream every week.
+- **Trait methods are classified by receiver.** `cooperative_groups::ThreadGroup::sync`
+  is one definition path for five barriers; the driver hands the dialect the
+  callee's `Self` type (`SimtDialect::classify_method_call`), and only a
+  `ThreadBlock`, `Grid` or `Cluster` receiver is RC001's barrier.
 - **`rustc_public` only.** The analysis uses Stable MIR; the unstable
   `rustc_driver`/`rustc_interface` imports exist solely because there is no
   stable driver entry point yet, and they are confined to the driver's binary
