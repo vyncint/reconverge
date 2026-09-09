@@ -23,7 +23,10 @@ Two mistakes in that model are unusually hard to debug:
 - **A divergent barrier.** `sync_threads()` waits for every thread in the
   block. If a branch lets only some threads reach it, the rest never arrive
   and the block waits forever. There is no error, no log line, and no stack
-  trace — just a kernel that never finishes.
+  trace — just a kernel that never finishes. Or, because it is undefined
+  behavior, a kernel that finishes and lies: on a Tesla T4 the same probe
+  ran to completion ([`docs/hardware/results/`](docs/hardware/results/)),
+  which is a compiler's mercy, not correctness.
 - **A non-convergent warp collective.** Operations like `ballot_sync` take a
   mask naming which lanes take part. If a named lane is not there, the result
   is undefined. This one often does not even hang: it returns a wrong value
@@ -107,7 +110,7 @@ flowchart TB
   subgraph check["cargo reconverge check — one wrapped cargo build, on any laptop"]
     direction TB
     mir["Stable MIR · rustc_public<br/>your own source, never PTX / cubin / SASS"]
-    dialect["dialect layer · recognizes items by path<br/>index witnesses · barriers · collectives · uniform sources"]
+    dialect["dialect layer · recognizes items by path, and by receiver<br/>index witnesses · barriers · collectives · uniform sources"]
     core["uniformity engine · Uniform ⊑ Divergent<br/>post-dominator regions · provenance recorded as it goes"]
     wit["witness interpreter · 32 lanes<br/>replays a concrete hang, or declines to guess"]
     mir --> dialect --> core --> wit
@@ -145,7 +148,7 @@ on a laptop, in a container, with no driver installed.
 
 | Code | Tier | Finding | Explain |
 |---|---|---|---|
-| `RC001` | confirmed / warning | `sync_threads()` reachable under thread-divergent control | [read](crates/cargo-reconverge/explain/RC001.md) |
+| `RC001` | confirmed / warning | a block-, cluster- or grid-wide barrier — `sync_threads()`, `cluster_sync()`, `this_thread_block().sync()`, `block_reduce` — reachable under thread-divergent control | [read](crates/cargo-reconverge/explain/RC001.md) |
 | `RC002` | confirmed / warning | warp collective at a non-convergent point, or a mask naming absent lanes | [read](crates/cargo-reconverge/explain/RC002.md) |
 | `RC003` | deny | `&mut [T]` as a `#[kernel]` parameter — one exclusive reference handed to every thread | [read](crates/cargo-reconverge/explain/RC003.md) |
 | `RC004` | deny | static shared memory over the target's limit | [read](crates/cargo-reconverge/explain/RC004.md) |
@@ -179,7 +182,12 @@ Every CI run pushes all of upstream's example kernels through the tool; any
 finding that has not been reviewed fails the build. Precision and recall are
 measured against a corpus of mechanically injected bugs and published in
 [`conformance/MUTATION.md`](conformance/MUTATION.md), which CI regenerates so
-the numbers cannot quietly go stale.
+the numbers cannot quietly go stale. The other direction is gated too: a
+public function in upstream's `warp`, `thread`, `barrier`, `grid`,
+`cooperative_groups` or `cluster` module that the dialect neither classifies
+nor lists in [`conformance/SURFACE_ALLOW`](conformance/SURFACE_ALLOW) with a
+reason fails the build — an unrecognized call is a coverage note, never a
+finding, so "unknown" has to be a decision someone wrote down.
 
 ## Four views in the terminal
 
@@ -300,6 +308,13 @@ one that does less.
 - **The decidable slice only.** Uniformity is computed as dataflow; there is
   no SMT solver and no general race freedom. Data races are out of scope —
   deleting a barrier is a race, and no static tier here will flag it.
+- **Not in scope, by decision.** *Register budgeting:* `#[launch_bounds]` is
+  read as a uniform marker and nothing here models register pressure — that
+  needs ptxas output, which is a build tool's concern, not a MIR analysis's.
+  *Memory and `DisjointSlice<T>`:* exclusivity is the type's guarantee in
+  cuda-oxide; RC005 checks the index-uniqueness half (declared domain against
+  the proven index formula) and RC003 the parameter shape, and no rule here
+  reasons about which thread writes which address across warps.
 - **Reducible CFGs.** An irreducible control-flow graph degrades to
   all-divergent for that function, and the diagnostic says so rather than
   pretending otherwise.
@@ -315,13 +330,20 @@ one that does less.
   stays at `warning`. Nothing is promoted on a summary bit; the bit raises
   the finding, a trace confirms it.
 - **RC001 covers the all-threads barriers** — `thread::sync_threads`,
-  `cluster::cluster_sync`, and `grid::sync`, whose shared contract is that
-  every thread of the scope must reach the call. The mbarrier arrive/wait
-  family (`barrier::Barrier`) is deliberately out: it is a phase-counted
-  split barrier where partial participation is the designed use, so
-  divergence at the wait is not by itself a bug.
+  `cluster::cluster_sync` and the raw `barrier_cluster_*` pair behind it,
+  `grid::sync`, and the cooperative-groups barriers `this_thread_block()`,
+  `this_grid()` and `this_cluster()` `.sync()` (told apart by receiver, since
+  `ThreadGroup::sync` is one path for five barriers) plus `block_reduce` and
+  `block_scan`, which carry a barrier inside. The shared contract is that
+  every thread of the scope must reach the call. Deliberately out, each with
+  its reason in `conformance/SURFACE_ALLOW`: the mbarrier arrive/wait family
+  and the counted CTA barrier (`barrier_cta_*`), where partial participation
+  is the designed use; and the tile-scoped `WarpTile<N>::sync`, `warp_reduce`,
+  `warp_scan` and `coalesced_threads()`, whose participant set is a tile or
+  the active lanes rather than the warp.
 - **RC002 covers the whole collective surface** — every `*_sync` function
-  of cuda-device's `warp` module (mask-first by convention), plus
+  of cuda-device's `warp` module (mask-first by convention, including the
+  `f32` `redux_sync_*` family upstream added in September 2026), plus
   `sync_mask`, plus the unmasked convenience wrappers (`warp::shuffle`,
   `warp::ballot`, `all`, `any`, `popc`, the `reduce_*` helpers). The
   wrappers take no mask argument, but they are the thing that supplies
@@ -431,7 +453,9 @@ one that does less.
   ("expected int of size 8, but got size 4") — after resolving the value,
   so what is missing is an API that returns it at its own width.
 - **The pinned nightly is not optional.** A rustc-driver tool and the rustc
-  it wraps must be the same build; the pin matches upstream cuda-oxide's own.
+  it wraps must be the same build; the pin matches upstream cuda-oxide's own,
+  and `pins.yml` opens an issue each week upstream moves — its commit, its
+  toolchain, or a device-surface function this dialect has not decided.
 
 ## Status
 
@@ -449,7 +473,8 @@ with them.
 | [`docs/explain/`](docs/explain/) | one page per diagnostic code: a minimal failing kernel, the hardware reason, the idiomatic fix |
 | [`docs/learn/`](docs/learn/) | the four SIMT lessons (also embedded in `cargo reconverge learn`) |
 | [`schemas/`](schemas/) | the versioned JSON Schemas — the contract between the engine and every front-end |
-| [`conformance/`](conformance/) | how the zero-false-positive gate and the mutation corpus work, plus [the published precision/recall table](conformance/MUTATION.md) |
+| [`docs/hardware/`](docs/hardware/) | the hardware sessions — how a true positive is run on a real GPU under a watchdog, and [what a Tesla T4 actually did](docs/hardware/results/) |
+| [`conformance/`](conformance/) | how the zero-false-positive gate, the surface gate (`SURFACE_ALLOW`) and the mutation corpus work, plus [the published precision/recall table](conformance/MUTATION.md) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev setup, testing policy, commit conventions, review rules for the baseline |
 | [`CHANGELOG.md`](CHANGELOG.md) | what has landed, and the corpus *and* found-in-the-wild numbers behind it |
 

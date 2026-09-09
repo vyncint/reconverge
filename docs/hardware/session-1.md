@@ -1,8 +1,11 @@
 # Hardware session #1 — witness calibration (human-provisioned)
 
-Status: **prepared, not run.** Per CONTRIBUTING.md, this session never
-runs unattended: the maintainer provisions a GPU host (rented is fine)
-and runs it there. Nothing in this repo's CI touches the CUDA SDK.
+Status: **run once** — 2026-09-09 on a rented Tesla T4 (CC 7.5), results
+in [`results/t4-cc75-2026-09-09.tsv`](results/t4-cc75-2026-09-09.tsv):
+both RC001 probes completed rather than hanging, the RC002 probe returned a
+wrong value. Per CONTRIBUTING.md, this session never runs unattended: the
+maintainer provisions a GPU host (rented is fine) and runs it there.
+Nothing in this repo's CI touches the CUDA SDK.
 
 ## Goal
 

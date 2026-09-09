@@ -29,10 +29,37 @@ by default in the tool and never gate the exit code.
 ## Updating
 
 - Moving the pin: update `PIN`, rerun, re-review any baseline change, and
-  keep the sample-crate pins in `crates/*/tests/*/Cargo.toml` in lockstep.
-  If the bump changes analysis behavior, stop and ask (CONTRIBUTING.md).
+  keep the sample-crate pins in `crates/*/tests/*/Cargo.toml` and the
+  toolchain in `rust-toolchain.toml` in lockstep — upstream's nightly moves
+  with its code, and a driver built on the wrong one cannot analyze a crate
+  that tracks upstream. If the bump changes analysis behavior, stop and ask
+  (CONTRIBUTING.md). `pins.yml` opens an issue each week any of the three
+  drifts.
 - Every `EXPECTED` line must carry a review comment explaining why the
   finding is a true positive.
+
+## The surface gate
+
+`scripts/check-surface.sh <upstream-checkout>` lists every module-level
+`pub fn` of upstream's `warp`, `thread`, `barrier`, `grid`,
+`cooperative_groups` and `cluster` modules — following each module's
+`include!`d generated files, which is where `warp::warpid()` lives — and
+fails when one is neither named in the dialect (`simt.rs`) nor listed in
+[`SURFACE_ALLOW`](SURFACE_ALLOW) with a reason. It runs in the conformance
+job against the pinned checkout, and in `pins.yml` against upstream `HEAD`.
+
+Why: an unrecognized `cuda_device::` call classifies as `Other`, which is
+counted as coverage and is never a finding. That is right for a helper and
+wrong for a barrier or a masked collective — a divergent call to a primitive
+the dialect has not named is not RC001/RC002, it is a note. Upstream adds
+such primitives (eight `redux_sync_*_f32` in one release), so "unknown"
+must be a decision someone wrote down, not the state a new name lands in.
+
+An `SURFACE_ALLOW` entry is reviewed like a baseline suppression: the name,
+a tab, and why a divergent call to it is *not* a bug this analysis can name
+(a counted barrier whose participants are the count the caller passes; a
+phase-counted mbarrier; a tile-scoped collective whose mask is the tile).
+Methods are not listed — `ThreadGroup::sync` is classified by its receiver.
 
 ## The mutation corpus
 

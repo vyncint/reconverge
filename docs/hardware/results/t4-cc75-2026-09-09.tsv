@@ -1,0 +1,8 @@
+# Hardware session #1, run 2026-09-09 on a rented g4dn.xlarge: Tesla T4, CC 7.5, driver 595.71.05, CUDA 13.2.
+# cuda-oxide 26754ae5 on nightly-2026-08-28; probe crate rc001_probe (block 64, grid 1), watchdog 30 s.
+# outcome: hang = watchdog fired; wrong-result = completed with a value the program never defines; pass = completed and correct.
+kernel	cc	outcome	seconds	detail
+divergent_barrier	7.5	pass	3	sync_threads under `i % 2 == 0`: every lane completed; no hang
+cooperative_block_sync	7.5	pass	3	this_thread_block().sync() under `warp_id() == 0`: every lane completed; no hang
+divergent_collective	7.5	wrong-result	3	ballot_sync(0xffffffff, true) under `i % 2 == 0` returned 0x55555555 on the lanes that took it
+reconverged	7.5	pass	4	thread 0 diverges, everyone syncs afterwards: correct (negative control)
