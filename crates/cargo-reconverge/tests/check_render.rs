@@ -262,7 +262,8 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
         0,
         "nothing may scroll off on its own at {COLS}x{ROWS}, or the erasure \
          assertions above cannot tell an erased diagnostic from one that \
-         merely scrolled past"
+         merely scrolled past\nscrolled off:\n{}\nscreen:\n{screen}",
+        screen.scrollback_text()
     );
 
     // --- and the grid those assertions read. `check` emits no sequence
