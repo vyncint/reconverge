@@ -13,4 +13,4 @@ publish = false
 
 [dependencies]
 # Same pinned rev as the driver's sample crate; conformance/PIN records it.
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "a766fc2650ea8e9e56c1481698b5dfdf01c31ded" }
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40" }

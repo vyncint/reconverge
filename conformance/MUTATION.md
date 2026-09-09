@@ -11,13 +11,13 @@ hand; rerun the script and review the diff.
 
 | class | injected bug | expected | mutants | compiling | detected (default) | detected (`--strict`) |
 |-------|--------------|----------|--------:|----------:|-------------------:|----------------------:|
-| wrapbar | barrier wrapped in an index-derived `if` | RC001 | 67 | 67 | 47/67 (70%) | 62/67 (92%) |
-| delbar | barrier deleted (data race) | - | 67 | 67 | 0/67 (0%) | 0/67 (0%) |
+| wrapbar | barrier wrapped in an index-derived `if` | RC001 | 78 | 78 | 56/78 (71%) | 73/78 (93%) |
+| delbar | barrier deleted (data race) | - | 78 | 78 | 0/78 (0%) | 0/78 (0%) |
 | wrapcol | warp collective wrapped the same way | RC002 | 42 | 42 | 23/42 (54%) | 42/42 (100%) |
 | shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 17 | 17 | 0/17 (0%) | 0/17 (0%) |
-| mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 414 | 393 | 393/393 (100%) | 393/393 (100%) |
+| mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 447 | 424 | 424/424 (100%) | 424/424 (100%) |
 
-**Precision at default confidence: 1.000** — 466 gating findings
+**Precision at default confidence: 1.000** — 506 gating findings
 across all compiling mutants, every one attributed to its injected bug
 or to the reviewed conformance baseline of its source example.
 
@@ -65,13 +65,13 @@ Every site seen and every site skipped, with the reason — no silent
 caps (from `mutation-report.tsv`):
 
 ```
-emitted_wrapbar	67
-emitted_delbar	67
+emitted_wrapbar	78
+emitted_delbar	78
 emitted_wrapcol	42
 emitted_shrinkmask	17
-emitted_mutslice	414
+emitted_mutslice	447
 skipped_sites_outside_kernels	0
-skipped_unclassified_collectives	0
+skipped_unclassified_collectives	2
 skipped_tail_expression_collectives	4
-skipped_extra_disjoint_params	45
+skipped_extra_disjoint_params	46
 ```

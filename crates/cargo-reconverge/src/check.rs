@@ -393,16 +393,37 @@ fn unanalyzed(member_crates: &[String], artifacts: &[FindingsArtifact]) -> Vec<S
 /// Drop cargo's freshness fingerprints in our dedicated build directory,
 /// forcing the next wrapped `cargo check` to re-lint everything.
 ///
-/// Cargo keeps fingerprints under each *profile* directory
-/// (`<build_dir>/debug/.fingerprint`), so sweep every immediate
-/// subdirectory rather than assuming one profile name.
+/// Two layouts, because cargo moved them: through 1.96 every profile
+/// directory held one `.fingerprint/` tree (`<build_dir>/debug/.fingerprint`);
+/// from 1.100 (the 2026-08-28 nightly) the fingerprint lives beside each
+/// unit's build-script state, `<build_dir>/debug/build/<pkg>/<hash>/fingerprint`,
+/// and no `.fingerprint/` directory exists at all. Sweeping only the old
+/// location made this function a no-op on the new cargo — a replaced driver
+/// re-linted nothing, which is the regression `replacing_the_driver_in_place_forces_a_relint`
+/// exists to catch. Both are swept, under every profile, so the layout cargo
+/// picks is not something this code has to know.
 fn drop_build_fingerprints(build_dir: &Path) {
     let _ = fs::remove_dir_all(build_dir.join(".fingerprint"));
-    let Ok(entries) = fs::read_dir(build_dir) else {
+    let Ok(profiles) = fs::read_dir(build_dir) else {
         return; // nothing built yet: nothing to invalidate
     };
-    for entry in entries.flatten() {
-        let _ = fs::remove_dir_all(entry.path().join(".fingerprint"));
+    for profile in profiles.flatten() {
+        let profile = profile.path();
+        let _ = fs::remove_dir_all(profile.join(".fingerprint"));
+        // New layout: build/<pkg>/<hash>/fingerprint. Only the fingerprint
+        // goes; a build script's `out` directory is regenerated on demand and
+        // costs nothing to keep.
+        let Ok(pkgs) = fs::read_dir(profile.join("build")) else {
+            continue;
+        };
+        for pkg in pkgs.flatten() {
+            let Ok(units) = fs::read_dir(pkg.path()) else {
+                continue;
+            };
+            for unit in units.flatten() {
+                let _ = fs::remove_dir_all(unit.path().join("fingerprint"));
+            }
+        }
     }
 }
 
@@ -436,6 +457,14 @@ fn run_wrapped_check(
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env("RECONVERGE_ARTIFACTS_OUT", reconverge_dir)
         .env("CARGO_TARGET_DIR", build_dir)
+        // cargo 1.100 splits the build directory (fingerprints, deps,
+        // incremental state) from the target directory, and `CARGO_TARGET_DIR`
+        // alone leaves the build directory at its default — the workspace's
+        // own `target/`. The wrapped check would then share fingerprints with
+        // the user's plain `cargo check`, and `drop_build_fingerprints` would
+        // sweep an empty tree, so a driver replaced in place could never force
+        // a re-lint. Pin both to our directory.
+        .env("CARGO_BUILD_BUILD_DIR", build_dir)
         .env("RUSTUP_TOOLCHAIN", &toolchain)
         .env(
             "LD_LIBRARY_PATH",

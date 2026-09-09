@@ -2,4 +2,4 @@
 # Format of the data line: "<git sha> <github repo>".
 # Bump deliberately, in lockstep with the sample-crate pins, and review the
 # baseline diff it produces (see conformance/README.md).
-a766fc2650ea8e9e56c1481698b5dfdf01c31ded NVlabs/cuda-oxide
+26754ae52c26c097dc1c465a1e42c4c5d05a3d40 NVlabs/cuda-oxide

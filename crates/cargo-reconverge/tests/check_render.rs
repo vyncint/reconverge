@@ -40,6 +40,14 @@ fn copy_dir(from: &Path, to: &Path) {
             copy_dir(&entry.path(), &target);
         } else {
             fs::copy(entry.path(), &target).unwrap();
+            // Backdate the copy: a source written in the same mtime tick as
+            // the first build's fingerprint reads as dirty on the next run,
+            // and these suites assert on cargo's freshness (a warm re-check,
+            // an edit between two runs). CI hit exactly that — a fresh copy,
+            // an out-of-band warm run, then an unexpected `Checking` line.
+            let file = fs::File::options().write(true).open(&target).unwrap();
+            let past = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+            file.set_modified(past).unwrap();
         }
     }
 }
@@ -61,6 +69,16 @@ fn ensure_driver() -> PathBuf {
     driver
 }
 
+/// The toolchain's own variables, and only those that are actually set:
+/// an absent `CARGO_HOME` must stay absent, not become the empty string,
+/// or cargo resolves a different home in one run than in the other.
+fn toolchain_env() -> Vec<(String, String)> {
+    ["PATH", "HOME", "CARGO", "CARGO_HOME", "RUSTUP_HOME"]
+        .iter()
+        .filter_map(|name| env::var(name).ok().map(|value| (name.to_string(), value)))
+        .collect()
+}
+
 /// A warm copy of the render probe: analyzed once out of band, so the run
 /// the terminal sees is a cached re-check rather than a dependency build.
 fn warm_probe(driver: &Path) -> PathBuf {
@@ -72,9 +90,17 @@ fn warm_probe(driver: &Path) -> PathBuf {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/render-probe"),
         &project,
     );
+    // The same environment the PTY run gets, so cargo's fingerprint agrees
+    // between the two and the run the terminal sees is a cached re-check.
+    // With the warm run inheriting the whole process environment and the
+    // PTY run getting five variables, CI saw a `Checking` line on the second
+    // run — one row, which was the difference between a report that fits
+    // 160x90 and one that scrolls.
     let output = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
         .args(["reconverge", "check"])
         .current_dir(&project)
+        .env_clear()
+        .envs(toolchain_env())
         .env("RECONVERGE_DRIVER", driver)
         .output()
         .expect("failed to spawn cargo-reconverge check");
@@ -131,12 +157,8 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
 
     // `bin!` pins the binary at compile time and clears the environment;
     // `check` shells out to cargo, so the toolchain's own variables are put
-    // back explicitly — under `env_clear` there is no PATH at all.
-    let path = env::var("PATH").unwrap_or_default();
-    let home = env::var("HOME").unwrap_or_default();
-    let cargo = env::var("CARGO").unwrap_or_default();
-    let cargo_home = env::var("CARGO_HOME").unwrap_or_default();
-    let rustup_home = env::var("RUSTUP_HOME").unwrap_or_default();
+    // back explicitly — under `env_clear` there is no PATH at all. The warm
+    // run above used exactly this set, so the two runs agree.
     let driver = driver.to_str().expect("utf-8 driver path").to_string();
 
     let mut t = termlens::bin!(
@@ -144,11 +166,7 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
         size(COLS, ROWS),
         timeout(TIMEOUT),
         current_dir(&project),
-        env("PATH", &path),
-        env("HOME", &home),
-        env("CARGO", &cargo),
-        env("CARGO_HOME", &cargo_home),
-        env("RUSTUP_HOME", &rustup_home),
+        envs(toolchain_env()),
         env("RECONVERGE_DRIVER", &driver),
         args(["reconverge", "check"]),
     )?;
@@ -262,7 +280,8 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
         0,
         "nothing may scroll off on its own at {COLS}x{ROWS}, or the erasure \
          assertions above cannot tell an erased diagnostic from one that \
-         merely scrolled past"
+         merely scrolled past\nscrolled off:\n{}\nscreen:\n{screen}",
+        screen.scrollback_text()
     );
 
     // --- and the grid those assertions read. `check` emits no sequence

@@ -12,7 +12,7 @@ matching version of it.
 Two constraints follow from being a rustc driver:
 
 - It must be **built by the exact nightly it wraps**
-  (`nightly-2026-04-03`, matching upstream cuda-oxide's own pin), with the
+  (`nightly-2026-08-28`, matching upstream cuda-oxide's own pin), with the
   `rustc-dev` and `llvm-tools` components installed.
 - docs.rs cannot build it (the `rustc_private` crates are not available
   there); the [repository](https://github.com/vyncint/reconverge) is the documentation.

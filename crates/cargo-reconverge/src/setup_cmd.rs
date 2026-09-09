@@ -18,7 +18,7 @@ use std::process::Command;
 /// The nightly the driver wraps, in lockstep with upstream cuda-oxide's
 /// own pin. `rust-toolchain.toml` at the repository root is the source of
 /// truth; a test below fails in-repo if the two ever drift.
-pub const PINNED_TOOLCHAIN: &str = "nightly-2026-04-03";
+pub const PINNED_TOOLCHAIN: &str = "nightly-2026-08-28";
 
 pub struct SetupOptions {}
 
