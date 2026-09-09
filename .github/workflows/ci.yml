@@ -229,7 +229,7 @@ jobs:
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
           package: reconverge-core,reconverge-artifacts,reconverge-dialect-oxide,reconverge-witness,reconverge-tui
-          baseline-version: 0.6.0
+          baseline-version: 0.6.1
           release-type: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') && 'major' || 'patch' }}
 
   # The five library crates declare `rust-version = "1.88"` (ratatui 0.30's
