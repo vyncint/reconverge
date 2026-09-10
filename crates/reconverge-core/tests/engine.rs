@@ -25,6 +25,7 @@ fn term(kind: TermKind) -> Term {
 fn call(kind: CallKind, display: &str, dest: Option<Local>, target: usize) -> TermKind {
     TermKind::Call {
         callee: Callee {
+            scope: reconverge_core::LaunchScope::Block,
             kind,
             display: display.to_string(),
             local_fn: None,
@@ -403,6 +404,7 @@ fn call_to_barrier_helper_under_divergence_is_flagged() {
                 stmts: vec![],
                 term: term(TermKind::Call {
                     callee: Callee {
+                        scope: reconverge_core::LaunchScope::Block,
                         kind: CallKind::Other,
                         display: "helper".into(),
                         local_fn: Some(1),
@@ -440,6 +442,7 @@ fn warp_collectives_and_masks_are_collected() {
     fn masked_call(display: &str, mask: u64, dest: Local, target: usize) -> TermKind {
         TermKind::Call {
             callee: Callee {
+                scope: reconverge_core::LaunchScope::Block,
                 kind: CallKind::WarpCollective {
                     mask: MaskSource::FirstArgument,
                 },
@@ -552,6 +555,7 @@ fn call_to_collective_helper_under_divergence_is_flagged() {
                 stmts: vec![],
                 term: term(TermKind::Call {
                     callee: Callee {
+                        scope: reconverge_core::LaunchScope::Block,
                         kind: CallKind::Other,
                         display: "collective_helper".into(),
                         local_fn: Some(1),

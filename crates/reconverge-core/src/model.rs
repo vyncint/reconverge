@@ -243,6 +243,12 @@ pub enum TermKind {
 pub struct Callee {
     /// The dialect's classification.
     pub kind: CallKind,
+    /// How far this barrier's participant set reaches, from
+    /// [`SimtDialect::barrier_scope`](crate::dialect::SimtDialect::barrier_scope).
+    /// Meaningful only when `kind` is [`CallKind::Barrier`]; the dialect is
+    /// not asked about anything else, and everything else carries
+    /// [`LaunchScope::Block`](crate::LaunchScope::Block).
+    pub scope: crate::LaunchScope,
     /// Human-facing name for diagnostics (a trimmed path).
     pub display: String,
     /// The callee's index in the crate model set, when it is a local

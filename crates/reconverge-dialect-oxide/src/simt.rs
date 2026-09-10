@@ -2,6 +2,7 @@
 //! definition path, verified against cuda-device at the pinned rev.
 //! Path matching only — no upstream code is vendored.
 
+use reconverge_core::LaunchScope;
 use reconverge_core::dialect::SimtDialect;
 // Re-exported: `classify_call` is public, so the vocabulary of its return
 // type has to be reachable from the same path. A caller could not name what
@@ -19,6 +20,43 @@ impl SimtDialect for CudaOxide {
 
     fn classify_method_call(&self, def_path: &str, receiver: Option<&str>) -> CallKind {
         classify_method_call(def_path, receiver)
+    }
+
+    fn barrier_scope(&self, def_path: &str, receiver: Option<&str>) -> LaunchScope {
+        barrier_scope(def_path, receiver)
+    }
+}
+
+/// How far a barrier's participant set reaches (free function form).
+///
+/// Asked only of callees [`classify_method_call`] already called
+/// [`CallKind::Barrier`], so anything unrecognized here is a block barrier
+/// — the narrow answer, which reports nothing extra.
+///
+/// `ThreadGroup::sync` is one path for three scopes and is told apart by
+/// receiver, exactly as its classification is.
+#[must_use]
+pub fn barrier_scope(def_path: &str, receiver: Option<&str>) -> LaunchScope {
+    if def_path.ends_with("::cooperative_groups::ThreadGroup::sync")
+        && let Some(receiver) = receiver
+    {
+        return match receiver.rsplit("::").next().unwrap_or(receiver) {
+            "Grid" => LaunchScope::Grid,
+            "Cluster" => LaunchScope::Cluster,
+            _ => LaunchScope::Block,
+        };
+    }
+    let last = def_path.rsplit("::").next().unwrap_or(def_path);
+    match last {
+        // `grid::sync()` — every block of the launch must arrive.
+        "sync" if def_path.contains("::grid::") => LaunchScope::Grid,
+        // The cluster barrier, safe wrapper and raw waiting half alike.
+        "cluster_sync" | "barrier_cluster_wait" | "barrier_cluster_wait_aligned"
+            if def_path.contains("::cluster::") =>
+        {
+            LaunchScope::Cluster
+        }
+        _ => LaunchScope::Block,
     }
 }
 
@@ -70,15 +108,24 @@ pub fn classify_call(def_path: &str) -> CallKind {
         }
         "threadIdx_x" | "threadIdx_y" | "threadIdx_z" | "lane_id" => CallKind::ThreadIndexWitness,
 
-        // Uniform within a block (or the whole grid).
-        "blockIdx_x" | "blockIdx_y" | "blockIdx_z" | "blockDim_x" | "blockDim_y" | "blockDim_z"
-        | "gridDim_x" | "gridDim_y" | "gridDim_z" => CallKind::BlockUniform,
-        // Special registers that read the same on every thread of a block:
-        // the SM a block runs on and how many there are, the grid id, the
-        // warp-slot count, and the two launch-environment registers.
-        "smid" | "nsmid" | "gridid" if def_path.contains("::thread::") => CallKind::BlockUniform,
-        "nwarpid" if def_path.contains("::warp::") => CallKind::BlockUniform,
-        "envreg1" | "envreg2" if def_path.contains("::grid::") => CallKind::BlockUniform,
+        // Uniform within a block and different in the next one: which
+        // block this is. Enough to decide `sync_threads`, not enough to
+        // decide a cluster- or grid-wide barrier (#133).
+        "blockIdx_x" | "blockIdx_y" | "blockIdx_z" => CallKind::BlockUniform,
+        // The launch geometry: the same number on every thread of every
+        // block, so it decides a barrier at any scope.
+        "blockDim_x" | "blockDim_y" | "blockDim_z" | "gridDim_x" | "gridDim_y" | "gridDim_z" => {
+            CallKind::GridUniform
+        }
+        // Special registers that read the same on every thread of a block.
+        // `smid` is which SM this block landed on — a block fact, and one
+        // that differs between blocks. The rest are launch-wide: how many
+        // SMs the device has, the grid's id, the warp-slot count, and the
+        // two launch-environment registers.
+        "smid" if def_path.contains("::thread::") => CallKind::BlockUniform,
+        "nsmid" | "gridid" if def_path.contains("::thread::") => CallKind::GridUniform,
+        "nwarpid" if def_path.contains("::warp::") => CallKind::GridUniform,
+        "envreg1" | "envreg2" if def_path.contains("::grid::") => CallKind::GridUniform,
         // The raw cluster barrier is a *split* barrier: `barrier.cluster.arrive`
         // signals and returns, `barrier.cluster.wait` blocks until the cluster
         // has arrived. Only the waiting half can hang, so only it is RC001's
@@ -122,14 +169,26 @@ pub fn classify_call(def_path: &str) -> CallKind {
         "block_reduce" | "block_scan" if def_path.contains("::cooperative_groups::") => {
             CallKind::Barrier
         }
-        // Cluster geometry reads: the block's rank and the cluster's shape
-        // are the same on every thread of the block, like `blockIdx`.
-        "block_rank" | "cluster_idx" | "cluster_size" | "num_clusters" | "cluster_ctaidX"
-        | "cluster_ctaidY" | "cluster_ctaidZ" | "cluster_nctaidX" | "cluster_nctaidY"
-        | "cluster_nctaidZ"
+        // Cluster geometry, split by how far each one is actually
+        // constant. The block's rank within its cluster and its cluster
+        // coordinates are block facts that differ across the cluster —
+        // exactly the values that decide a `cluster_sync` for some blocks
+        // and not others (#133).
+        "block_rank" | "cluster_ctaidX" | "cluster_ctaidY" | "cluster_ctaidZ"
             if def_path.contains("::cluster::") =>
         {
             CallKind::BlockUniform
+        }
+        // Which cluster this is: the same on every block of the cluster,
+        // so it decides a cluster-wide barrier, and different in the next
+        // cluster, so it does not decide a grid-wide one.
+        "cluster_idx" if def_path.contains("::cluster::") => CallKind::ClusterUniform,
+        // The cluster's shape is launch geometry, like `blockDim`.
+        "cluster_size" | "num_clusters" | "cluster_nctaidX" | "cluster_nctaidY"
+        | "cluster_nctaidZ"
+            if def_path.contains("::cluster::") =>
+        {
+            CallKind::GridUniform
         }
 
         // Warp collectives (RC002's subject): cuda-device's masked `*_sync`
@@ -352,15 +411,68 @@ mod tests {
         }
     }
 
+    /// A barrier's participant set, which is what decides whether a
+    /// block-uniform guard is enough (#133).
+    #[test]
+    fn barrier_scope_names_the_participant_set() {
+        use reconverge_core::LaunchScope;
+
+        // Block-wide: the default, and what an unrecognized path gets.
+        for path in [
+            "cuda_device::thread::sync_threads",
+            "cuda_device::cooperative_groups::block_reduce",
+            "cuda_device::something::unheard_of",
+        ] {
+            assert_eq!(barrier_scope(path, None), LaunchScope::Block, "{path}");
+        }
+
+        // Cluster-wide: the safe wrapper and the raw waiting half. The
+        // arrival half is not a barrier at all (#132), so it is never asked.
+        for path in [
+            "cuda_device::cluster::cluster_sync",
+            "cuda_device::cluster::barrier_cluster_wait",
+            "cuda_device::cluster::barrier_cluster_wait_aligned",
+        ] {
+            assert_eq!(barrier_scope(path, None), LaunchScope::Cluster, "{path}");
+        }
+
+        assert_eq!(
+            barrier_scope("cuda_device::grid::sync", None),
+            LaunchScope::Grid
+        );
+
+        // `ThreadGroup::sync` is one path for three scopes, told apart by
+        // receiver exactly as its classification is.
+        let sync = "cuda_device::cooperative_groups::ThreadGroup::sync";
+        for (receiver, want) in [
+            (
+                "cuda_device::cooperative_groups::ThreadBlock",
+                LaunchScope::Block,
+            ),
+            (
+                "cuda_device::cooperative_groups::Cluster",
+                LaunchScope::Cluster,
+            ),
+            ("cuda_device::cooperative_groups::Grid", LaunchScope::Grid),
+        ] {
+            assert_eq!(barrier_scope(sync, Some(receiver)), want, "{receiver}");
+        }
+        // Without a receiver the path cannot say, and the narrow answer
+        // reports nothing extra.
+        assert_eq!(barrier_scope(sync, None), LaunchScope::Block);
+    }
+
     #[test]
     fn classifies_uniform_sources_and_barrier() {
         assert_eq!(
             classify_call("cuda_device::thread::blockIdx_x"),
             CallKind::BlockUniform
         );
+        // Launch geometry is the same on every block, so it decides a
+        // barrier at any scope; `blockIdx` above is not.
         assert_eq!(
             classify_call("cuda_device::thread::blockDim_x"),
-            CallKind::BlockUniform
+            CallKind::GridUniform
         );
         assert_eq!(
             classify_call("cuda_device::sync_threads"),
@@ -586,8 +698,16 @@ mod tests {
     /// scanned by scripts/check-surface.sh through the modules' `include!`s.
     #[test]
     fn generated_registers_and_the_raw_cluster_barrier_are_classified() {
+        // Which SM this block landed on is a block fact, and it differs
+        // between blocks.
+        assert_eq!(
+            classify_call("cuda_device::thread::smid"),
+            CallKind::BlockUniform,
+            "smid is the same on every thread of the block, and differs on the next block"
+        );
+        // The rest are launch-wide: how many SMs the device has, the grid's
+        // id, the warp-slot count, and the launch environment.
         for (module, name) in [
-            ("thread", "smid"),
             ("thread", "nsmid"),
             ("thread", "gridid"),
             ("warp", "nwarpid"),
@@ -596,8 +716,8 @@ mod tests {
         ] {
             assert_eq!(
                 classify_call(&format!("cuda_device::{module}::{name}")),
-                CallKind::BlockUniform,
-                "{name} reads the same on every thread of the block"
+                CallKind::GridUniform,
+                "{name} reads the same on every thread of the launch"
             );
         }
         assert_eq!(
@@ -668,22 +788,38 @@ mod tests {
                 "{name} is allowlisted, not classified"
             );
         }
+        // Split by how far each is actually constant (#133). The block's
+        // rank and its cluster coordinates are block facts that differ
+        // across the cluster -- exactly the values that decide a
+        // `cluster_sync` for some blocks and not others.
         for name in [
             "block_rank",
-            "cluster_idx",
-            "cluster_size",
-            "num_clusters",
             "cluster_ctaidX",
             "cluster_ctaidY",
             "cluster_ctaidZ",
+        ] {
+            assert_eq!(
+                classify_call(&format!("cuda_device::cluster::{name}")),
+                CallKind::BlockUniform,
+                "{name} is a block fact that differs across the cluster"
+            );
+        }
+        assert_eq!(
+            classify_call("cuda_device::cluster::cluster_idx"),
+            CallKind::ClusterUniform,
+            "cluster_idx is the same on every block of the cluster"
+        );
+        for name in [
+            "cluster_size",
+            "num_clusters",
             "cluster_nctaidX",
             "cluster_nctaidY",
             "cluster_nctaidZ",
         ] {
             assert_eq!(
                 classify_call(&format!("cuda_device::cluster::{name}")),
-                CallKind::BlockUniform,
-                "{name} is the same on every thread of the block"
+                CallKind::GridUniform,
+                "{name} is launch geometry, the same everywhere"
             );
         }
         assert_eq!(

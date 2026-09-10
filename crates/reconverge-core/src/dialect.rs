@@ -23,6 +23,19 @@ pub trait SimtDialect {
         let _ = receiver;
         self.classify_call(def_path)
     }
+
+    /// How far a barrier's participant set reaches.
+    ///
+    /// Only meaningful for a callee this dialect classified as
+    /// [`CallKind::Barrier`]; the engine asks for nothing else. The default
+    /// is [`LaunchScope::Block`](crate::LaunchScope::Block), which is what
+    /// `sync_threads` is and what a dialect with no wider barrier should
+    /// keep — reporting a block barrier as cluster-wide would invent a
+    /// hazard, and a dialect that says nothing gets the narrow answer.
+    fn barrier_scope(&self, def_path: &str, receiver: Option<&str>) -> crate::LaunchScope {
+        let _ = (def_path, receiver);
+        crate::LaunchScope::Block
+    }
 }
 
 /// Where a warp collective's participation mask comes from.
@@ -56,9 +69,20 @@ pub enum CallKind {
     ThreadIndexWitness,
     /// Atomic read-modify-write returning the old value: divergent.
     AtomicRmw,
-    /// Uniform within a block (`block_idx`, block/grid dimensions):
-    /// the result is uniform.
+    /// Uniform within a block, and **not** guaranteed beyond it
+    /// (`block_idx`, `cluster::block_rank`): every thread of one block
+    /// agrees, the next block over may not. Enough for `sync_threads`,
+    /// not enough to decide a cluster- or grid-wide barrier — see
+    /// [`crate::LaunchScope`].
     BlockUniform,
+    /// Uniform within a cluster (`cluster::cluster_idx`): every block of
+    /// one cluster agrees, the next cluster may not.
+    ClusterUniform,
+    /// Uniform across the whole launch (`blockDim`, `gridDim`,
+    /// `cluster_size`, the launch environment registers): the same value
+    /// on every thread of every block, so it decides a barrier at any
+    /// scope.
+    GridUniform,
     /// Dialect plumbing with uniform, side-effect-free results
     /// (launch-scope constructors, config markers).
     UniformMarker,
@@ -149,7 +173,39 @@ impl CallKind {
             | CallKind::AtomicRmw
             | CallKind::WarpCollective { .. }
             | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
-            CallKind::BlockUniform | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
+            CallKind::BlockUniform
+            | CallKind::ClusterUniform
+            | CallKind::GridUniform
+            | CallKind::UniformMarker => Some(crate::Uniformity::Uniform),
+            CallKind::Barrier
+            | CallKind::WitnessRead
+            | CallKind::CountOnes { .. }
+            | CallKind::Other => None,
+        }
+    }
+
+    /// The widest scope this call's own result is constant over, before
+    /// meeting the arguments'. `None` means "just meet the arguments".
+    ///
+    /// Only the reads that *narrow* the scope answer here. Everything else
+    /// — a kernel argument, a constant, an ordinary computation — starts at
+    /// [`LaunchScope::Grid`](crate::LaunchScope::Grid) and is narrowed only
+    /// by what it reads, which is what keeps `if n > 0 { grid::sync() }` on
+    /// a launch argument from being reported.
+    #[must_use]
+    pub fn result_scope(self) -> Option<crate::LaunchScope> {
+        match self {
+            // Per-lane reads are narrower than a block, but the lane
+            // lattice has already called them divergent; `Block` is the
+            // narrowest this axis expresses and the divergence check fires
+            // first either way.
+            CallKind::ThreadIndexWitness
+            | CallKind::AtomicRmw
+            | CallKind::WarpCollective { .. }
+            | CallKind::DivergentEnvRead
+            | CallKind::BlockUniform => Some(crate::LaunchScope::Block),
+            CallKind::ClusterUniform => Some(crate::LaunchScope::Cluster),
+            CallKind::GridUniform | CallKind::UniformMarker => Some(crate::LaunchScope::Grid),
             CallKind::Barrier
             | CallKind::WitnessRead
             | CallKind::CountOnes { .. }

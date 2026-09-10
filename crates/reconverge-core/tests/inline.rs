@@ -20,6 +20,7 @@ fn stmt_eval(dest: Local, uses: &[Local], eval: Eval) -> Stmt {
 fn call(kind: CallKind, display: &str, local_fn: Option<FnId>, target: usize) -> TermKind {
     TermKind::Call {
         callee: Callee {
+            scope: reconverge_core::LaunchScope::Block,
             kind,
             display: display.to_string(),
             local_fn,

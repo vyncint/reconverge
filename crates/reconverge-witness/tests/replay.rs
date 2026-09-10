@@ -31,6 +31,7 @@ fn call(
 ) -> TermKind {
     TermKind::Call {
         callee: Callee {
+            scope: reconverge_core::LaunchScope::Block,
             kind,
             display: display.to_string(),
             local_fn: None,

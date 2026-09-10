@@ -315,15 +315,17 @@ one that does less.
   cuda-oxide; RC005 checks the index-uniqueness half (declared domain against
   the proven index formula) and RC003 the parameter shape, and no rule here
   reasons about which thread writes which address across warps.
-- **Uniformity is block-scoped.** A guard that is uniform within a block —
-  `blockIdx`, `cluster::block_rank()` — makes the barrier under it
-  non-divergent, and that is the right answer for `sync_threads`. It is not
-  the whole answer for a barrier whose participant set is *wider* than a
-  block: `cluster_sync()` under a `block_rank()` guard, or `grid::sync()`
-  under a `blockIdx` guard, reports clean, because separating block- from
-  cluster- and grid-uniformity needs a lattice v1 does not have. A recall
-  gap, never a precision one — nothing is reported that is not there.
-  `explain RC001` states it, with the reproducing kernels.
+- **Uniformity is scoped, and the value lattice is still two-valued.**
+  Since 0.7.0 a barrier is checked against its own participant set, so
+  `cluster_sync()` under a `cluster::block_rank()` guard and `grid::sync()`
+  under a `blockIdx` guard are both reported — at `warning`, never
+  promoted, because the witness replays one block and cannot execute the
+  second. What is still *not* modelled is value flow through memory: a
+  value loaded from global memory is treated as constant wherever its
+  address is, so a per-block value written by another kernel and read back
+  can guard a cluster barrier without a word from this rule. That is the
+  same recall gap the interprocedural note above describes, in a new
+  place.
 - **Split barriers are checked at the wait.** The mbarrier family and the
   raw `barrier.cluster.arrive`/`.wait` pair are phase-counted: partial
   participation at an arrival is the designed use, so only the blocking half
@@ -352,7 +354,10 @@ one that does less.
   `this_grid()` and `this_cluster()` `.sync()` (told apart by receiver, since
   `ThreadGroup::sync` is one path for five barriers) plus `block_reduce` and
   `block_scan`, which carry a barrier inside. The shared contract is that
-  every thread of the scope must reach the call. Deliberately out, each with
+  every thread of the scope must reach the call — and since 0.7.0 *scope*
+  is taken literally: each barrier is checked against its own participant
+  set, so a guard that is only block-uniform is enough for `sync_threads`
+  and not for `cluster_sync` or `grid::sync`. Deliberately out, each with
   its reason in `conformance/SURFACE_ALLOW`: the mbarrier arrive/wait family
   and the counted CTA barrier (`barrier_cta_*`), where partial participation
   is the designed use; and the tile-scoped `WarpTile<N>::sync`, `warp_reduce`,

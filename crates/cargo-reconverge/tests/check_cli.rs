@@ -246,6 +246,22 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         // neither list, which is the regression this pins. Both carry a
         // launch contract, so neither adds an RC005.
         ("RC001", "rc001_split_cluster_divergent_wait"),
+        // 0.7.0 (#133): uniformity is scoped. A `block_rank()` guard is
+        // uniform in its block and different in the next, so a cluster-wide
+        // barrier under one is entered by some blocks and skipped by the
+        // rest -- and `blockIdx` does the same to a grid-wide barrier, which
+        // is why this is not a cluster quirk. Both are RC001 at *warning*
+        // only: the witness replays one block and cannot show the second.
+        ("RC001", "rc001_cluster_sync_under_block_rank"),
+        ("RC005", "rc001_cluster_sync_under_block_rank"),
+        ("RC001", "rc001_grid_sync_under_block_idx"),
+        ("RC005", "rc001_grid_sync_under_block_idx"),
+        // And the two that must stay clean, which is the harder half: a
+        // *cluster*-uniform guard does decide a cluster barrier, and a
+        // kernel argument plus launch geometry is constant on every block.
+        // Each appears here with its RC005 and no RC001.
+        ("RC005", "rc001_ok_cluster_sync_under_cluster_idx"),
+        ("RC005", "rc001_ok_grid_sync_under_launch_values"),
     ]
     .into_iter()
     .map(|(code, kernel)| ((code.to_string(), kernel.to_string()), 1))
