@@ -18,7 +18,8 @@
 use std::collections::HashMap;
 
 use reconverge_artifacts::findings::SourceSpan;
-use reconverge_core::dialect::SimtDialect;
+use reconverge_core::LaunchScope;
+use reconverge_core::dialect::{CallKind, SimtDialect};
 use reconverge_core::model::{
     self, Block, Callee, Eval, FnId, FnModel, Local, SpanRef, Stmt, Term, TermKind,
 };
@@ -392,6 +393,13 @@ fn adapt_term(
         } => {
             let (path, display, receiver) = callee_path(func);
             let kind = dialect.classify_method_call(&path, receiver.as_deref());
+            // Only a barrier has a participant set to ask about; anything
+            // else keeps the narrow default and the engine never reads it.
+            let scope = if kind == CallKind::Barrier {
+                dialect.barrier_scope(&path, receiver.as_deref())
+            } else {
+                LaunchScope::Block
+            };
             let (dest, mut arg_locals) = write_target(destination);
             arg_locals.extend(args.iter().flat_map(operand_locals));
             arg_locals.extend(operand_locals(func));
@@ -403,6 +411,7 @@ fn adapt_term(
             TermKind::Call {
                 callee: Callee {
                     kind,
+                    scope,
                     display,
                     local_fn: path_to_id.get(&path).copied(),
                 },

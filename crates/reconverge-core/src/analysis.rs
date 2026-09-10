@@ -16,10 +16,10 @@
 //! Irreducible CFGs degrade to all-divergent for the whole function, and
 //! the result says so (`Analysis::irreducible`).
 
-use crate::Uniformity;
 use crate::dialect::CallKind;
 use crate::graph::{self, Cfg};
 use crate::model::{BlockId, FnModel, Local, SpanRef, TermKind};
+use crate::{LaunchScope, Uniformity};
 
 /// Interprocedural summary bits (docs/ARCHITECTURE.md): whether each function may
 /// execute a barrier / warp collective, directly or transitively.
@@ -125,6 +125,13 @@ pub struct BarrierSite {
     pub interprocedural: bool,
     /// Set when the site executes under thread-divergent control.
     pub divergent_cause: Option<BranchCause>,
+    /// How far this barrier's participant set reaches.
+    pub scope: LaunchScope,
+    /// Set when the site is *not* under divergent control, but a
+    /// lane-uniform guard decides it whose constant scope is narrower than
+    /// [`scope`](Self::scope) — some blocks of the participant set enter
+    /// and others do not. Carries that guard's scope and the branch.
+    pub cross_block_cause: Option<(LaunchScope, BranchCause)>,
 }
 
 /// A warp-collective call site (RC002's subject).
@@ -152,12 +159,24 @@ pub struct WarpOpSite {
 pub struct Analysis {
     /// Each local's label, indexed by local.
     pub locals: Vec<Uniformity>,
+    /// Each local's widest constant scope, indexed by local. Starts at
+    /// [`LaunchScope::Grid`] and is narrowed only by what a value reads, so
+    /// a kernel argument stays grid-constant and a `block_rank()` does not.
+    pub local_scopes: Vec<LaunchScope>,
     /// Why each local is divergent, when it is.
     pub reasons: Vec<Option<Reason>>,
     /// Per block: executes under thread-divergent control.
     pub block_divergent: Vec<bool>,
     /// Per block: the branch that made it divergent-control, when one did.
     pub block_cause: Vec<Option<BranchCause>>,
+    /// Per block: the narrowest scope any lane-*uniform* branch condition
+    /// governing it is constant over, with the branch that supplied it.
+    ///
+    /// The lane lattice stops asking once a condition is uniform, because
+    /// for `sync_threads` there is nothing more to ask. A barrier whose
+    /// participants span more than one block needs the rest of the
+    /// question, and this is where the answer is kept (#133).
+    pub block_guard_scope: Vec<Option<(LaunchScope, BranchCause)>>,
     /// The CFG was irreducible; everything was degraded to divergent.
     pub irreducible: bool,
     /// Statements the model represents.
@@ -179,13 +198,19 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
     let idom = graph::dominators(&cfg, 0);
 
     let mut locals = vec![Uniformity::Uniform; f.local_count];
+    // Optimistic like `locals`: everything starts grid-constant and is
+    // narrowed only by what it reads. A kernel argument is the same on
+    // every block, so `if n > 0 { grid::sync() }` must not be reported.
+    let mut local_scopes = vec![LaunchScope::Grid; f.local_count];
     let mut reasons: Vec<Option<Reason>> = vec![None; f.local_count];
     let mut block_divergent = vec![false; n];
     let mut block_cause: Vec<Option<BranchCause>> = vec![None; n];
+    let mut block_guard_scope: Vec<Option<(LaunchScope, BranchCause)>> = vec![None; n];
 
     let irreducible = !graph::is_reducible(&cfg, 0, &idom);
     if irreducible {
         // §5: degrade to all-divergent in this function and say so.
+        local_scopes.fill(LaunchScope::Block);
         for (local, slot) in locals.iter_mut().enumerate() {
             *slot = Uniformity::Divergent;
             reasons[local] = Some(Reason {
@@ -248,6 +273,17 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                     );
                     continue;
                 }
+                // Scope travels with the value: a result is constant only
+                // where every input is. Runs for every statement, including
+                // the ones the lane lattice leaves alone.
+                let stmt_scope = stmt
+                    .uses
+                    .iter()
+                    .fold(LaunchScope::Grid, |acc, &u| acc.meet(local_scopes[u]));
+                if stmt_scope < local_scopes[dest] {
+                    local_scopes[dest] = stmt_scope;
+                    changed = true;
+                }
                 let divergent_use: Option<Local> = stmt
                     .uses
                     .iter()
@@ -288,6 +324,14 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 } => {
                     {
                         let dest = *dest;
+                        let call_scope = args
+                            .iter()
+                            .fold(LaunchScope::Grid, |acc, &a| acc.meet(local_scopes[a]))
+                            .meet(callee.kind.result_scope().unwrap_or(LaunchScope::Grid));
+                        if call_scope < local_scopes[dest] {
+                            local_scopes[dest] = call_scope;
+                            changed = true;
+                        }
                         let base = callee.kind.result_base();
                         let divergent_arg = args
                             .iter()
@@ -347,6 +391,10 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 TermKind::Opaque {
                     dest: Some(dest), ..
                 } => {
+                    if local_scopes[*dest] > LaunchScope::Block {
+                        local_scopes[*dest] = LaunchScope::Block;
+                        changed = true;
+                    }
                     changed |= raise(
                         &mut locals,
                         &mut reasons,
@@ -359,6 +407,39 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                             source_call: None,
                         },
                     );
+                }
+                // A lane-uniform branch: nothing to say about lanes, but if
+                // the condition is not constant across the barrier's
+                // participants then some blocks take it and others do not.
+                // Recorded over the same divergence region a divergent
+                // branch would claim, so the guard reaches exactly the
+                // blocks it decides.
+                TermKind::Branch { cond, .. }
+                    if locals[*cond] == Uniformity::Uniform
+                        && local_scopes[*cond] < LaunchScope::Grid =>
+                {
+                    let entry = (
+                        local_scopes[*cond],
+                        BranchCause {
+                            block: b,
+                            cond: *cond,
+                            span: f.blocks[b].term.span,
+                        },
+                    );
+                    for (r, in_region) in graph::divergence_region(&cfg, b, ipdom[b])
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if !in_region {
+                            continue;
+                        }
+                        // Keep the narrowest guard: it is the one that
+                        // excludes the most participants.
+                        if block_guard_scope[r].is_none_or(|(s, _)| entry.0 < s) {
+                            block_guard_scope[r] = Some(entry);
+                            changed = true;
+                        }
+                    }
                 }
                 TermKind::Branch { cond, .. } if locals[*cond] == Uniformity::Divergent => {
                     let cause = BranchCause {
@@ -425,12 +506,31 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 .map(|_| true),
         };
         if let Some(interprocedural) = barrier {
+            // An interprocedural site is a call to a local function that
+            // *may* execute a barrier; the callee's scope is not knowable
+            // from here, so it keeps the narrow default and the
+            // cross-block question is not asked of it.
+            let scope = if interprocedural {
+                LaunchScope::Block
+            } else {
+                callee.scope
+            };
+            // Only when the lane lattice found nothing: a divergent guard
+            // is already RC001, and reporting the same branch twice would
+            // be noise.
+            let cross_block_cause = if divergent_cause.is_some() {
+                None
+            } else {
+                block_guard_scope[b].filter(|(guard, _)| !guard.admits(scope))
+            };
             barriers.push(BarrierSite {
                 block: b,
                 span: f.blocks[b].term.span,
                 callee_display: callee.display.clone(),
                 interprocedural,
                 divergent_cause,
+                scope,
+                cross_block_cause,
             });
         }
 
@@ -469,9 +569,11 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
 
     Analysis {
         locals,
+        local_scopes,
         reasons,
         block_divergent,
         block_cause,
+        block_guard_scope,
         irreducible,
         analyzed_statements: analyzed,
         opaque_statements: opaque,

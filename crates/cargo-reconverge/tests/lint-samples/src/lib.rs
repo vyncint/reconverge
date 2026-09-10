@@ -8,7 +8,8 @@
 use cuda_device::barrier::{Barrier, mbarrier_arrive, mbarrier_init, mbarrier_wait};
 use cuda_device::cooperative_groups::{self, ThreadGroup};
 use cuda_device::{
-    DisjointSlice, SharedArray, cluster, cluster_launch, kernel, launch_contract, thread, warp,
+    DisjointSlice, SharedArray, cluster, cluster_launch, grid, kernel, launch_contract, thread,
+    warp,
 };
 
 // ---------------------------------------------------------------- RC003
@@ -260,6 +261,68 @@ pub fn rc001_split_cluster_divergent_wait(mut out: DisjointSlice<u32>) {
     }
     if let Some(e) = out.get_mut(i) {
         *e = 4;
+    }
+}
+
+/// True positive (#133), warning only: a `block_rank()` guard is uniform
+/// within a block and different in the next one, so some blocks of the
+/// cluster enter `cluster_sync()` and the rest never arrive. No lane
+/// diverges, so 0.6.x reported nothing at all.
+///
+/// Never promoted: the witness replays the lanes of one block and cannot
+/// execute the second block this needs to show.
+#[kernel]
+#[cluster_launch(2, 1, 1)]
+pub fn rc001_cluster_sync_under_block_rank(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if cluster::block_rank() == 0 {
+        cluster::cluster_sync();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 5;
+    }
+}
+
+/// True positive (#133) one scope up: `blockIdx` is block-uniform and
+/// grid-varying, and `grid::sync()` needs every block of the launch. The
+/// gap is not a cluster quirk.
+#[kernel]
+pub fn rc001_grid_sync_under_block_idx(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if thread::blockIdx_x() == 0 {
+        unsafe { grid::sync() };
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 6;
+    }
+}
+
+/// True negative: a *cluster*-uniform guard does decide a cluster-wide
+/// barrier — every block of the cluster reads the same `cluster_idx`.
+#[kernel]
+#[cluster_launch(2, 1, 1)]
+pub fn rc001_ok_cluster_sync_under_cluster_idx(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if cluster::cluster_idx() == 0 {
+        cluster::cluster_sync();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 7;
+    }
+}
+
+/// True negative, and the false positive most worth not having: a kernel
+/// argument is the same on every block, so a grid-wide barrier under one is
+/// fine. Launch geometry (`blockDim`) behaves the same way, and arithmetic
+/// over either stays grid-constant.
+#[kernel]
+pub fn rc001_ok_grid_sync_under_launch_values(n: u32, mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if n + thread::blockDim_x() > 64 {
+        unsafe { grid::sync() };
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = n;
     }
 }
 

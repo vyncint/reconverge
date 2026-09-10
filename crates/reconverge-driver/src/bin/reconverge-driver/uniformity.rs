@@ -7,11 +7,13 @@ use reconverge_artifacts::unimap;
 use reconverge_artifacts::witness::{
     FindingRef, LaneChange, LaneState, Launch, Step, Verdict, WitnessArtifact,
 };
-use reconverge_core::Uniformity;
-use reconverge_core::analysis::{self as engine, Analysis, ReasonKind, Summaries};
+use reconverge_core::analysis::{
+    self as engine, Analysis, BarrierSite, BranchCause, ReasonKind, Summaries,
+};
 use reconverge_core::dialect::CallKind;
 use reconverge_core::inline::{MAX_DEPTH, inline_calls};
 use reconverge_core::model::{FnId, FnModel, TermKind};
+use reconverge_core::{LaunchScope, Uniformity};
 use reconverge_witness::{NoWitness, Replay, SiteKind, ascii_warp_diagram};
 
 use crate::adapt::CrateModels;
@@ -281,6 +283,19 @@ pub fn rc001_divergent_barriers(
         let f = &models.fns[*fn_id];
         for site in &analysis.barriers {
             let Some(cause) = site.divergent_cause else {
+                // Not divergent for lanes — but a barrier whose
+                // participants span more than one block can still be
+                // entered by some of them and skipped by others (#133).
+                if let Some((guard, guard_cause)) = site.cross_block_cause {
+                    findings.push(cross_block_finding(
+                        models,
+                        f,
+                        analysis,
+                        site,
+                        guard,
+                        guard_cause,
+                    ));
+                }
                 continue;
             };
             let message = if site.interprocedural {
@@ -372,6 +387,69 @@ pub fn rc001_divergent_barriers(
             }
             findings.push(finding);
         }
+    }
+}
+
+/// RC001 for a barrier wider than a block, guarded by a value that is not
+/// constant across its participants (#133).
+///
+/// Always `warning`, never promotable. The witness interpreter replays the
+/// lanes of one block; it cannot execute two blocks and so cannot show this
+/// hang the way it shows a divergent `sync_threads`. Reporting it as
+/// `confirmed` on static reasoning alone would be the confident wrong
+/// answer this project spends its diagnostics avoiding.
+fn cross_block_finding(
+    models: &CrateModels,
+    f: &FnModel,
+    analysis: &Analysis,
+    site: &BarrierSite,
+    guard: LaunchScope,
+    cause: BranchCause,
+) -> Finding {
+    let barrier = site.scope.as_str();
+    let mut provenance = vec![ProvenanceStep {
+        what: format!("{}-uniform branch", guard.as_str()),
+        span: span_of(models, cause.span),
+    }];
+    provenance.extend(
+        engine::provenance_chain(f, analysis, cause.cond)
+            .into_iter()
+            .map(|step| ProvenanceStep {
+                what: step.detail,
+                span: span_of(models, step.span),
+            }),
+    );
+    Finding {
+        code: "RC001".to_string(),
+        confidence: Confidence::Warning,
+        message: format!(
+            "kernel `{}` may execute `{}()`, a {barrier}-wide barrier, under control that is \
+             only {}-uniform",
+            f.name,
+            site.callee_display,
+            guard.as_str()
+        ),
+        kernel: Some(f.name.clone()),
+        span: span_of(models, site.span),
+        notes: vec![
+            format!(
+                "every thread of a block agrees on this branch, so no lane diverges — but the \
+                 value differs between blocks, so some blocks of the {barrier} enter the \
+                 barrier and the rest never arrive"
+            ),
+            "the blocks that did arrive wait for the ones that did not — on hardware this is \
+             undefined behavior, usually a permanent hang with no error"
+                .to_string(),
+            "reported as a warning and never promoted: the witness interpreter replays the \
+             lanes of one block, so it cannot execute the second block this needs to show"
+                .to_string(),
+        ],
+        help: Some(format!(
+            "make the condition {barrier}-uniform, or hoist the barrier out of the branch so \
+             every block of the {barrier} reaches it"
+        )),
+        explain: "RC001".to_string(),
+        provenance,
     }
 }
 

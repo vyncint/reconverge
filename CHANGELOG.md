@@ -12,6 +12,57 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Changed
+
+- **Uniformity is scoped now, and a barrier is checked against its own
+  participants** (#133). A guard uniform within a block settles
+  `sync_threads` and settles nothing wider: `blockIdx` and
+  `cluster::block_rank()` are constant on every thread of a block and
+  different on the next one, so
+
+  ```rust
+  #[cluster_launch(2, 1, 1)]
+  pub fn only_rank_zero() {
+      if cluster::block_rank() == 0 { cluster::cluster_sync(); }
+  }
+  ```
+
+  is entered by one block of the cluster and skipped by the other, and 0.6.x
+  reported nothing at all — `exit 0`, no findings, zero opaque. The same
+  shape one scope up (`grid::sync()` under a `blockIdx` guard) was equally
+  silent, which is how the report widened from a cluster quirk to the
+  general statement.
+
+  The engine now carries a second lattice beside lane uniformity:
+  `LaunchScope` — `Block ⊑ Cluster ⊑ Grid` — recording how far each value is
+  actually constant, and the dialect answers `barrier_scope` for how far
+  each barrier reaches. A finding is raised when the guard's scope does not
+  cover the barrier's.
+
+  **Always `warning`, never promoted.** The witness interpreter replays the
+  lanes of one block and cannot execute the second block this needs, so
+  there is no concrete hang to confirm; calling it `confirmed` would be a
+  claim the evidence does not support.
+
+  The precision half matters as much and is pinned by its own samples:
+  everything starts grid-constant and is narrowed only by what it reads, so
+  a kernel argument, `blockDim`, and arithmetic over either still decide a
+  grid-wide barrier, and `cluster::cluster_idx()` still decides a
+  cluster-wide one. `blockDim`/`gridDim`/`nsmid`/`gridid`/`nwarpid`/the
+  launch environment registers and the cluster's shape moved from
+  `BlockUniform` to the new `GridUniform`; `smid`, `block_rank` and the
+  cluster coordinates stayed block-scoped, which is what makes the check
+  fire where it should.
+
+### Breaking
+
+- `reconverge-core`: `Callee`, `BarrierSite` and `Analysis` gain fields
+  (`Callee::scope`, `BarrierSite::{scope, cross_block_cause}`,
+  `Analysis::{local_scopes, block_guard_scope}`), and `CallKind` gains
+  `ClusterUniform` and `GridUniform` beside `BlockUniform`. `SimtDialect`
+  gains `barrier_scope`, with a `Block` default, so an existing dialect
+  keeps compiling and keeps the narrow answer.
+
 ## [0.6.1] — 2026-09-09
 
 Three issues reported against 0.6.0, all reproduced here before anything was
