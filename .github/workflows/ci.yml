@@ -226,11 +226,40 @@ jobs:
         run: |
           rustup toolchain install
           rustup show
+      # Two ways to declare a break, because the label is only legible on a
+      # pull request. `github.event.pull_request` does not exist on a push,
+      # so the label expression silently yielded `patch` there — and the
+      # first break merged with the label turned every subsequent push to
+      # `main` red until the release bumped the baseline, which is exactly
+      # what happened to #137.
+      #
+      # The second way is the CHANGELOG, which is the document a release is
+      # cut from: a `### Breaking` heading under `## [Unreleased]` says this
+      # tree deliberately breaks the published baseline. That makes the push
+      # gate mean something rather than nothing — merge a break without
+      # recording it and this fails, which is a better rule than the label
+      # alone ever was.
+      - name: Decide the release type
+        id: release_type
+        env:
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') }}
+        run: |
+          set -euo pipefail
+          declared=no
+          if awk '/^## \[Unreleased\]/{u=1;next} /^## \[/{u=0} u && /^### Breaking/{found=1} END{exit !found}' CHANGELOG.md; then
+            declared=yes
+          fi
+          if [ "$LABELLED" = "true" ] || [ "$declared" = yes ]; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          fi
+          echo "breaking label: $LABELLED; CHANGELOG declares a break: $declared"
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
           package: reconverge-core,reconverge-artifacts,reconverge-dialect-oxide,reconverge-witness,reconverge-tui
           baseline-version: 0.6.1
-          release-type: ${{ contains(github.event.pull_request.labels.*.name, 'breaking') && 'major' || 'patch' }}
+          release-type: ${{ steps.release_type.outputs.type }}
 
   # The five library crates declare `rust-version = "1.88"` (ratatui 0.30's
   # floor); only the driver needs the pinned nightly. Build them on exactly

@@ -103,6 +103,14 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
 - **Toolchain bumps are minor**, never patch. The pinned nightly moves only in
   lockstep with the upstream cuda-oxide pin, and never in a change that also
   alters analysis behaviour — one at a time.
+- **A break is declared twice, and both are load-bearing.** On the pull
+  request it is the `breaking` label. On `main` it is a `### Breaking`
+  heading under `## [Unreleased]` in the CHANGELOG — `github.event.pull_request`
+  does not exist on a push, so the label is invisible there, and before
+  #137 the first labelled break merged turned every later push to `main`
+  red until the release moved the baseline. Merging a break without
+  recording it in the CHANGELOG now fails the gate, which is the better
+  rule: the CHANGELOG is the document this release is cut from.
 - **A breaking PR carries the `breaking` label.** The `semver` CI job runs
   `cargo-semver-checks` with the release type forced to `patch` — left to
   infer it from the version number, the checker treats a 0.x minor bump as a
