@@ -288,13 +288,15 @@ fn the_rendered_report_survives_its_own_source_and_points_where_it_says() -> ter
     // termlens fails to implement, so every claim above is made against a
     // stream the emulator honoured in full rather than a plausible-looking
     // reconstruction of one.
+    // `is_empty` on termlens 0.11's view is false when shapes overflowed the
+    // retention bound as well as when any were retained, so this is the whole
+    // record rather than the part of it that fits.
     assert!(
         screen.unsupported().is_empty(),
         "`check` emitted a sequence termlens does not model, so this grid may \
          be wrong: {:?}",
         screen.unsupported()
     );
-    assert_eq!(screen.unsupported_overflow(), 0);
     assert!(!screen.insert_mode(), "IRM would shift every row right");
     assert_eq!(screen.bells(), 0, "a report is text, never a beep");
     assert_eq!(screen.visual_bells(), 0);

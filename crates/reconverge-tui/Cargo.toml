@@ -36,4 +36,4 @@ unicode-width = "0.2"
 # A bump moves three things together, and scripts/check-skill-version.sh
 # gates all three: this line, cargo-reconverge's, and the vendored skill at
 # .claude/skills/termlens/SKILL.md that AGENTS.md makes normative.
-termlens = { version = "0.10", default-features = false }
+termlens = { version = "0.11", default-features = false }

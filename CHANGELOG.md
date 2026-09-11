@@ -14,6 +14,25 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
+- **termlens 0.11** in both PTY suites (`reconverge-tui` and
+  `cargo-reconverge`), and the vendored skill with it. 0.11 is termlens's
+  stability candidate: from it no promised item changes incompatibly before
+  its 1.0, so this requirement should hold for a while.
+
+  Its one breaking change lands here as a simplification.
+  `Screen::unsupported()` returns a view instead of a slice of `Arc<str>`,
+  and `unsupported_overflow()` folds into it — so the pinned list and "the
+  record is not truncated" are now **one** assertion, because the view
+  compares equal to a slice only when the retained shapes match *and*
+  nothing overflowed the bound. `tests/emulation.rs` loses its
+  `Vec<String>` helper, and the three flow tests lose a separate overflow
+  assertion each.
+
+  The comment in `tests/emulation.rs` warning that termlens#320 reported
+  blink and strikethrough as unsupported when the shadow parser implements
+  them is gone: that was fixed upstream in 0.10.2, so an entry in this
+  list is now a real gap in every case.
+
 - **Uniformity is scoped now, and a barrier is checked against its own
   participants** (#133). A guard uniform within a block settles
   `sync_threads` and settles nothing wider: `blockIdx` and

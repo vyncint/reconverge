@@ -28,4 +28,4 @@ unicode-width = "0.2"
 # deliberately not a workspace dependency, and deny.toml only *warns* on a
 # duplicate, so bumping one and not the other would otherwise pass CI while
 # rendering the goldens through two different emulators.
-termlens = { version = "0.10", default-features = false }
+termlens = { version = "0.11", default-features = false }
