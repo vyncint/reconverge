@@ -37,13 +37,12 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// be pinned exactly: anything joining it is a sequence that *might* change a
 /// cell, and would need reading before the goldens are trusted again.
 ///
-/// Not a false positive. termlens#320 reports `^[[5m`/`^[[25m` (blink) and
-/// `^[[9m`/`^[[29m` (strikethrough) as unsupported although the attribute
-/// shadow does implement them; those cannot appear here, because the TUI's
-/// entire style vocabulary is `Modifier::BOLD`, `Modifier::DIM` and five
-/// indexed colours — there is no blink and no strikethrough anywhere in
-/// `crates/`. If either pair ever shows up in this list, check the modifier
-/// that was just added against that issue before believing the failure.
+/// Nothing else can appear here by accident: termlens 0.10.2 fixed the one
+/// case where this list named a sequence the emulator *does* implement
+/// (termlens#320 — the attribute shadow recovers blink and strikethrough,
+/// and they were being reported as dropped anyway). Since that fix an entry
+/// here is a real gap, so a new one is a reason to read the stream before
+/// trusting any golden in this suite again.
 const EXPECTED_UNSUPPORTED: [&str; 1] = ["^[[59m"];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -59,14 +58,6 @@ fn empty_dir(tag: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-fn unsupported(screen: &Screen) -> Vec<String> {
-    screen
-        .unsupported()
-        .iter()
-        .map(ToString::to_string)
-        .collect()
 }
 
 /// One spawn per view, each waiting on the text its own flow test waits on.
@@ -119,17 +110,18 @@ fn the_emulator_drops_nothing_that_could_change_a_cell() -> termlens::Result<()>
         let needle = ready(view);
         let screen = t.wait_frame(|s| s.contains(needle))?;
 
+        // One comparison for both halves of the record: termlens 0.11's
+        // `Unsupported` view is equal to a slice only when the retained
+        // shapes match *and* nothing overflowed the bound, so a truncated
+        // record fails here rather than passing a list that is missing
+        // entries.
         assert_eq!(
-            unsupported(&screen),
+            screen.unsupported(),
             EXPECTED_UNSUPPORTED,
-            "{view}: the TUI emitted a sequence termlens does not model. Until \
-             it is understood, every golden in this suite is being compared \
-             against a grid that may be wrong.\n{screen}"
-        );
-        assert_eq!(
-            screen.unsupported_overflow(),
-            0,
-            "{view}: the record is complete, not truncated"
+            "{view}: the TUI emitted a sequence termlens does not model, or \
+             the record was truncated. Until it is understood, every golden \
+             in this suite is being compared against a grid that may be \
+             wrong.\n{screen}"
         );
 
         // Insert mode pushes the rest of a row right. A view that left it on

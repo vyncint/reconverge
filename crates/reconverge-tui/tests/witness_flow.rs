@@ -281,16 +281,11 @@ fn matrix_leg(size: (u16, u16)) {
     // The second is that NO_COLOR did anything at all. Identical grids are
     // also what a view that hardcoded a colour produces.
     assert_eq!(
-        colour
-            .unsupported()
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>(),
+        colour.unsupported(),
         ["^[[59m"],
         "the coloured leg's grid was built from a stream the emulator \
          implemented apart from the underline-colour reset ({golden})"
     );
-    assert_eq!(colour.unsupported_overflow(), 0, "the record is complete");
     assert!(
         plain.unsupported().is_empty(),
         "with nothing to style there is nothing left to drop, got {:?}",

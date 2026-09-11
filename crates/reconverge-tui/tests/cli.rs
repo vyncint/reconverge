@@ -218,19 +218,21 @@ fn inspect_reproduces_the_checked_in_shell_golden() {
     );
     let printed = stdout(&out);
     assert!(printed.starts_with("size: 80x24"), "{printed}");
-    // The shell is a TUI, so inspect reports the deadline rather than an exit.
+    // The shell is a TUI, so inspect reports the deadline rather than an
+    // exit — on **stderr** since termlens 0.11 (termlens#340), so that what
+    // stdout carries is a saved screen and needs no filtering here. Against
+    // 0.10.x the trailer followed the screen on stdout and this test dropped
+    // the line itself.
     assert!(
-        printed.contains("still running at the deadline"),
-        "the shell does not exit on its own:\n{printed}"
+        String::from_utf8_lossy(&out.stderr).contains("still running at the deadline"),
+        "the shell does not exit on its own: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
-
-    // The trailer under the screen is inspect's report, not part of the
-    // picture; drop it and the rest is a saved screen.
-    let screen: String = printed
-        .lines()
-        .filter(|line| !line.starts_with("--- "))
-        .collect::<Vec<_>>()
-        .join("\n");
+    assert!(
+        !printed.contains("--- "),
+        "stdout is the screen alone:\n{printed}"
+    );
+    let screen = printed.clone();
     let live = env::temp_dir().join(format!("reconverge-inspect-{}.snap", std::process::id()));
     fs::write(&live, &screen).expect("write the inspected screen");
 
