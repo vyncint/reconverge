@@ -11,13 +11,13 @@ hand; rerun the script and review the diff.
 
 | class | injected bug | expected | mutants | compiling | detected (default) | detected (`--strict`) |
 |-------|--------------|----------|--------:|----------:|-------------------:|----------------------:|
-| wrapbar | barrier wrapped in an index-derived `if` | RC001 | 78 | 78 | 56/78 (71%) | 73/78 (93%) |
+| wrapbar | barrier wrapped in an index-derived `if` | RC001 | 78 | 78 | 60/78 (76%) | 77/78 (98%) |
 | delbar | barrier deleted (data race) | - | 78 | 78 | 0/78 (0%) | 0/78 (0%) |
-| wrapcol | warp collective wrapped the same way | RC002 | 42 | 42 | 23/42 (54%) | 42/42 (100%) |
-| shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 17 | 17 | 0/17 (0%) | 0/17 (0%) |
-| mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 447 | 424 | 424/424 (100%) | 424/424 (100%) |
+| wrapcol | warp collective wrapped the same way | RC002 | 35 | 35 | 23/35 (65%) | 35/35 (100%) |
+| shrinkmask | full mask shrunk to `0x0000_ffff` | RC002 | 10 | 10 | 0/10 (0%) | 0/10 (0%) |
+| mutslice | `DisjointSlice<T>` param swapped to `&mut [T]` | RC003 | 457 | 434 | 434/434 (100%) | 434/434 (100%) |
 
-**Precision at default confidence: 1.000** — 506 gating findings
+**Precision at default confidence: 1.000** — 576 gating findings
 across all compiling mutants, every one attributed to its injected bug
 or to the reviewed conformance baseline of its source example.
 
@@ -67,9 +67,9 @@ caps (from `mutation-report.tsv`):
 ```
 emitted_wrapbar	78
 emitted_delbar	78
-emitted_wrapcol	42
-emitted_shrinkmask	17
-emitted_mutslice	447
+emitted_wrapcol	35
+emitted_shrinkmask	10
+emitted_mutslice	457
 skipped_sites_outside_kernels	8
 skipped_unclassified_collectives	0
 skipped_tail_expression_collectives	4

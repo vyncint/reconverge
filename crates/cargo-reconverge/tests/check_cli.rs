@@ -653,7 +653,7 @@ fn sample_hang_is_confirmed_and_gates_the_exit() {
 /// from the cwd, and no test could see the two disagree.
 fn two_member_workspace(name: &str, default_members: Option<&str>) -> PathBuf {
     const DEP: &str = "cuda-device = { git = \"https://github.com/NVlabs/cuda-oxide\", \
-                       rev = \"26754ae52c26c097dc1c465a1e42c4c5d05a3d40\" }";
+                       rev = \"b0f961df3af0ff140b3b006fa2b6750b71f43f62\" }";
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = fs::remove_dir_all(dir.join("crates"));
     let _ = fs::remove_file(dir.join("Cargo.toml"));
@@ -805,7 +805,7 @@ fn a_lib_and_a_bin_are_two_documents_that_name_their_targets() {
         "[workspace]\n\n[package]\nname = \"libbin\"\nversion = \"0.0.0\"\n\
          edition = \"2024\"\npublish = false\n\n[dependencies]\n\
          cuda-device = { git = \"https://github.com/NVlabs/cuda-oxide\", \
-         rev = \"26754ae52c26c097dc1c465a1e42c4c5d05a3d40\" }\n",
+         rev = \"b0f961df3af0ff140b3b006fa2b6750b71f43f62\" }\n",
     )
     .unwrap();
     fs::write(
@@ -973,7 +973,7 @@ fn a_witness_does_not_outlive_the_finding_it_replays() {
         "[workspace]\n\n[package]\nname = \"stale\"\nversion = \"0.0.0\"\n\
          edition = \"2024\"\npublish = false\n\n[dependencies]\n\
          cuda-device = { git = \"https://github.com/NVlabs/cuda-oxide\", \
-         rev = \"26754ae52c26c097dc1c465a1e42c4c5d05a3d40\" }\n",
+         rev = \"b0f961df3af0ff140b3b006fa2b6750b71f43f62\" }\n",
     )
     .unwrap();
     let divergent = "use cuda_device::{DisjointSlice, kernel, thread};\n\

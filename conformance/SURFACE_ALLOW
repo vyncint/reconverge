@@ -42,3 +42,4 @@ barrier_cluster_arrive	split cluster barrier: the arrival is non-blocking, only 
 barrier_cluster_arrive_aligned	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
 barrier_cluster_arrive_relaxed	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
 barrier_cluster_arrive_relaxed_aligned	split cluster barrier: the arrival is non-blocking, only `barrier_cluster_wait*` can hang (explain/RC001.md)
+__grid_constant_config	compile-time launch-ABI marker (`#[grid_constant]`), `#[doc(hidden)]` and erased before codegen; emits no instruction and no synchronization

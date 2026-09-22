@@ -14,4 +14,4 @@ publish = false
 # emits just the renamed no_mangle function and no host-side lookup
 # machinery. Pinned to the upstream rev recorded in conformance/PIN; moving the
 # pin into conformance/PIN.
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40" }
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "b0f961df3af0ff140b3b006fa2b6750b71f43f62" }
