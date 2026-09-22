@@ -10,9 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::findings::{SourceSpan, ToolInfo};
 use crate::read::Artifact;
+use crate::schema;
 
 /// Top-level witness artifact: one replay of one finding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct WitnessArtifact {
     /// Always [`crate::schema::WITNESS`].
     pub schema: String,
@@ -175,6 +177,37 @@ impl Artifact for WitnessArtifact {
 }
 
 impl WitnessArtifact {
+    /// A witness document for `kernel` under the current tool identity,
+    /// naming no crate and no finding yet.
+    ///
+    /// The same shape as [`crate::findings::FindingsArtifact::new`]: the two
+    /// fields every document carries and nobody chooses -- `schema` and
+    /// `tool` -- are filled here, and the two a writer fills later --
+    /// `krate`, known at write time, and `finding`, which a replay produced
+    /// without one does not have -- are left to assignment.
+    #[must_use]
+    pub fn new(
+        kernel: impl Into<String>,
+        launch: Launch,
+        lanes: u8,
+        initial_lane_states: Vec<LaneState>,
+        steps: Vec<Step>,
+        verdict: Verdict,
+    ) -> Self {
+        WitnessArtifact {
+            schema: schema::WITNESS.to_string(),
+            tool: ToolInfo::current(),
+            krate: String::new(),
+            kernel: kernel.into(),
+            finding: None,
+            launch,
+            lanes,
+            initial_lane_states,
+            steps,
+            verdict,
+        }
+    }
+
     /// Replay the delta-encoded timeline up to and including `step`,
     /// returning the lane states at that point. `step = None` returns the
     /// initial states.

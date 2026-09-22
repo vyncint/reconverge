@@ -166,6 +166,37 @@ allowlist is a list on purpose, so that widening it is a visible decision.
 Releases are cut by maintainers only; the checklist lives in
 [docs/RELEASING.md](docs/RELEASING.md).
 
+### Semver, and what `#[non_exhaustive]` is for here
+
+Five library crates are published, and `cargo-semver-checks` runs on every
+pull request against the last release with the release type **forced** (see
+the `semver` job) — a self-declared bump must never be what excuses a break.
+
+Three rules decide whether a type carries `#[non_exhaustive]`, and they are
+about who *builds* the value rather than how important it looks:
+
+1. **An artifact root, or an error enum: yes.** A reader deserializes
+   `findings.v1` and prints a `ReadError`; neither assembles one field at a
+   time. Both grow, and neither growth should break a caller. The four roots
+   in `reconverge-artifacts` each have a `new` that fills the fields nobody
+   chooses, which is what makes the attribute cost nothing.
+2. **A leaf record that front-ends build: no.** `Finding`, `SourceSpan`,
+   `Step` and the rest are built 42 times inside this workspace alone, and a
+   downstream front-end writing artifacts would do the same. Closing them
+   would buy additive evolution at the price of the thing the crate is for.
+   When one gains a field, that is a minor bump of a 0.x crate, and the
+   `### Breaking` block in `CHANGELOG.md` records it — which is also what
+   switches the semver gate to `major` on the pull request that does it.
+3. **A vocabulary enum: never.** `Confidence`, `LaneState`, `VerdictKind`,
+   `Uniformity`, `CallKind`, `LaunchScope`, `BinOp` and their kin are the
+   analysis, not a payload. A `_` arm over confidence tiers or lane states is
+   a wrong answer that compiles. Adding a variant is *meant* to be a break, so
+   that every reader is made to decide what the new one means.
+
+Do not "fix" the inconsistency by marking the second and third groups. The
+first paragraph of `reconverge-artifacts`'s crate documentation says the same
+thing next to the types themselves.
+
 ## 9. Reviewing findings (the baseline)
 
 A project silences a reviewed finding by accepting it in

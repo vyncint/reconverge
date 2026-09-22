@@ -19,6 +19,7 @@ use crate::schema;
 
 /// Top-level findings artifact for one analyzed target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct FindingsArtifact {
     /// Always [`schema::FINDINGS`].
     pub schema: String,
@@ -121,6 +122,7 @@ impl RunCoverage {
 
 /// Identity of the tool that produced an artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ToolInfo {
     /// Tool name: `reconverge` for every artifact this workspace writes.
     pub name: String,

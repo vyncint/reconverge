@@ -99,6 +99,31 @@ the corpus; found-in-the-wild is the true north.
   gains `barrier_scope`, with a `Block` default, so an existing dialect
   keeps compiling and keeps the narrow answer.
 
+- **`reconverge-artifacts`: the four artifact roots, `ToolInfo` and
+  `ReadError` are `#[non_exhaustive]`.** "Schemas are additive-only" and
+  "adding a field is not a breaking change" turned out to be different
+  promises, and only the first one held: a new key in `findings.v1` is
+  additive in JSON and a major break here, because a struct with public
+  fields can be built with a struct expression from anywhere. The `Breaking`
+  entry above is that, twice, for three `reconverge-core` records.
+
+  Which types close is decided by who *builds* the value, and the split was
+  measured rather than assumed. Marking all twenty-two records broke 42
+  construction sites inside this workspace alone, across `cargo-reconverge`,
+  `reconverge-tui` and the driver — a downstream front-end that writes
+  artifacts would pay the same, so the leaf records (`Finding`, `SourceSpan`,
+  `Step`, `Entry` and the rest) stay plain deliberately. The roots do not:
+  a reader deserializes one rather than assembling it, a top-level key is the
+  likeliest thing a schema gains, and three of the four already had a `new`.
+  `WitnessArtifact` now has one too, matching `FindingsArtifact::new`.
+
+  The vocabulary enums — `Confidence`, `LaneState`, `VerdictKind`,
+  `Uniformity`, `ValueSource` — stay exhaustive **on purpose**: a `_` arm
+  over confidence tiers or lane states is a wrong answer that compiles, and
+  adding a variant is meant to make every reader decide. The rule is written
+  down in CONTRIBUTING §8 and in the crate docs, so the next reader does not
+  file the inconsistency as a bug.
+
 ## [0.6.1] — 2026-09-09
 
 Three issues reported against 0.6.0, all reproduced here before anything was

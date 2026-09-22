@@ -220,55 +220,59 @@ fn witness_artifact(
     finding: &Finding,
     replay: &Replay,
 ) -> WitnessArtifact {
-    WitnessArtifact {
-        schema: reconverge_witness::emitted_schema().to_string(),
-        tool: reconverge_artifacts::findings::ToolInfo::current(),
-        krate: String::new(), // filled at write time with the crate name
-        kernel: f.name.clone(),
-        finding: Some(FindingRef {
-            code: finding.code.clone(),
-            span: Some(finding.span.clone()),
-        }),
-        launch: Launch {
-            grid: replay.grid,
-            block: replay.block,
-            // A one-warp replay is warp 0; a whole-block replay is not a
-            // single warp's view.
-            warp: (replay.block[0] == 32).then_some(0),
-        },
-        lanes: u8::try_from(replay.block[0]).unwrap_or(32),
-        initial_lane_states: vec![LaneState::Active; replay.block[0] as usize],
-        steps: replay
-            .steps
-            .iter()
-            .enumerate()
-            .map(|(index, step)| Step {
-                index,
-                statement: step.statement.clone(),
-                span: step.span.map(|s| span_of(models, s)),
-                lane_changes: step
-                    .lane_changes
-                    .iter()
-                    .map(|&(lane, state)| LaneChange { lane, state })
-                    .collect(),
-                barrier: step.barrier.map(|(arrived, expected)| {
-                    reconverge_artifacts::witness::BarrierEvent { arrived, expected }
-                }),
-                warp_op: step.warp_op.as_ref().map(|(op, mask, active)| {
-                    reconverge_artifacts::witness::WarpOpEvent {
-                        op: op.clone(),
-                        mask: format!("{mask:#010x}"),
-                        active: format!("{active:#010x}"),
-                    }
-                }),
-            })
-            .collect(),
-        verdict: Verdict {
-            kind: replay.verdict_kind,
-            message: replay.verdict_message.clone(),
-            step: Some(replay.verdict_step),
-        },
-    }
+    let launch = Launch {
+        grid: replay.grid,
+        block: replay.block,
+        // A one-warp replay is warp 0; a whole-block replay is not a single
+        // warp's view.
+        warp: (replay.block[0] == 32).then_some(0),
+    };
+    let steps = replay
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(index, step)| Step {
+            index,
+            statement: step.statement.clone(),
+            span: step.span.map(|s| span_of(models, s)),
+            lane_changes: step
+                .lane_changes
+                .iter()
+                .map(|&(lane, state)| LaneChange { lane, state })
+                .collect(),
+            barrier: step.barrier.map(|(arrived, expected)| {
+                reconverge_artifacts::witness::BarrierEvent { arrived, expected }
+            }),
+            warp_op: step.warp_op.as_ref().map(|(op, mask, active)| {
+                reconverge_artifacts::witness::WarpOpEvent {
+                    op: op.clone(),
+                    mask: format!("{mask:#010x}"),
+                    active: format!("{active:#010x}"),
+                }
+            }),
+        })
+        .collect();
+    let verdict = Verdict {
+        kind: replay.verdict_kind,
+        message: replay.verdict_message.clone(),
+        step: Some(replay.verdict_step),
+    };
+
+    // `krate` stays empty here and is filled at write time with the crate
+    // name, as it always was.
+    let mut artifact = WitnessArtifact::new(
+        f.name.clone(),
+        launch,
+        u8::try_from(replay.block[0]).unwrap_or(32),
+        vec![LaneState::Active; replay.block[0] as usize],
+        steps,
+        verdict,
+    );
+    artifact.finding = Some(FindingRef {
+        code: finding.code.clone(),
+        span: Some(finding.span.clone()),
+    });
+    artifact
 }
 
 /// RC001 (warning until a witness confirms it, per docs/ARCHITECTURE.md):

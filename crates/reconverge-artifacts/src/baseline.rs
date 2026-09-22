@@ -25,6 +25,7 @@ use crate::schema;
 
 /// Top-level baseline document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct BaselineArtifact {
     /// Always [`schema::BASELINE`].
     pub schema: String,
