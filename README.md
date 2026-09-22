@@ -492,7 +492,9 @@ one that does less.
 
 ## Status
 
-Everything on this page is implemented and gate-tested: the five diagnostics with their witness promotions, the four terminal views, the GitHub Action, the conformance gate, and the mutation corpus behind the published numbers. reconverge is released and published on crates.io. Two hardware sessions are still planned to calibrate verdict wording against real silicon, but they are no longer a release blocker.
+Everything on this page is implemented and gate-tested: the five diagnostics with their witness promotions, the four terminal views, the GitHub Action, the conformance gate, and the mutation corpus behind the published numbers. reconverge is released and published on crates.io.
+
+Of the two hardware sessions, **session #1 has run** — 2026-09-09, on a rented Tesla T4 (CC 7.5), with the results in [`docs/hardware/results/`](docs/hardware/results/). **Session #2 has not**: it cross-checks the vendor's own dynamic checker against these static verdicts over identical injected bugs, and it is the only external check on the accuracy claims above, since everything else here is measured against a corpus this project wrote for itself. Neither is a release blocker.
 
 Next on the engineering side: `RC006`/`RC007`, the coalescing and
 bank-conflict lints, with the lanes-to-address-grid visualizer that goes

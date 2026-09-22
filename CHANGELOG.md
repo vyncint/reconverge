@@ -12,6 +12,14 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-22
+
+The production-readiness release. It ships the correctness fix `main` had
+been sitting on for twelve days, and closes the gaps between "the analysis is
+correct and published" and "a team can depend on this in their CI": the
+supply chain, the release, the platform coverage, and the semver rule that
+decides what a field addition costs.
+
 ### Added
 
 - **Windows is gated in CI, and the README says which platforms are
@@ -1332,6 +1340,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[0.7.0]: https://github.com/vyncint/reconverge/releases/tag/v0.7.0
 [0.6.1]: https://github.com/vyncint/reconverge/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0
 [0.5.0]: https://github.com/vyncint/reconverge/releases/tag/v0.5.0
