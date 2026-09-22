@@ -13,6 +13,7 @@ use crate::schema;
 
 /// Top-level uniformity-map artifact for one analyzed crate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct UnimapArtifact {
     /// Always [`schema::UNIMAP`].
     pub schema: String,

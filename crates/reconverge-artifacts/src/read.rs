@@ -25,6 +25,7 @@ pub trait Artifact: DeserializeOwned {
 
 /// Why a document could not be read.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReadError {
     /// Not JSON, or JSON that is not this artifact's shape.
     Parse(serde_json::Error),

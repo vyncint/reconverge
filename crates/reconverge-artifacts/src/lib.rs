@@ -8,6 +8,41 @@
 //!
 //! Three of the schemas are produced by the driver; `baseline.v1` is
 //! written by `cargo reconverge triage` — the one artifact a human owns.
+//!
+//! # Which types are `#[non_exhaustive]`, and why the rest are not
+//!
+//! "Schemas are additive-only" and "adding a field is not a breaking change"
+//! are not the same promise, and only the first one held. A new key in
+//! `findings.v1` is additive in JSON and a major break in this crate, because
+//! a struct with public fields can be built with a struct expression from
+//! anywhere.
+//!
+//! The split is by *who builds the value*, measured rather than assumed:
+//!
+//! - **The four artifact roots** — [`findings::FindingsArtifact`],
+//!   [`unimap::UnimapArtifact`], [`witness::WitnessArtifact`],
+//!   [`baseline::BaselineArtifact`] — and [`findings::ToolInfo`] are
+//!   `#[non_exhaustive]`. A reader deserializes a root; it does not assemble
+//!   one field at a time, and each already has a `new` that fills the two
+//!   fields nobody chooses (`schema`, `tool`). A top-level key is also the
+//!   likeliest thing a schema gains.
+//! - **The leaf records** — `Finding`, `SourceSpan`, `Step`, `Entry` and the
+//!   rest — stay plain. The workspace's own front-ends build them 42 times
+//!   between `cargo-reconverge`, `reconverge-tui` and the driver, and a
+//!   downstream front-end writing artifacts would do exactly the same; making
+//!   every one of those go through a constructor buys additive evolution at
+//!   the cost of the thing this crate is for. When one of them does gain a
+//!   field, that is a minor bump of a 0.x crate and the CHANGELOG says so.
+//! - **The vocabulary enums** — [`findings::Confidence`],
+//!   [`witness::LaneState`], [`witness::VerdictKind`], [`unimap::Uniformity`],
+//!   [`unimap::ValueSource`] — stay exhaustive **on purpose**. They are the
+//!   analysis, not a payload: a `_` arm over confidence tiers or lane states
+//!   is a wrong answer that compiles, and a reader who has not been made to
+//!   handle a new one is a reader silently mis-drawing it. Adding a variant
+//!   is meant to be a break here.
+//! - **[`read::ReadError`]** is `#[non_exhaustive]`, like any error enum:
+//!   a new way for a document to be unreadable should not break a caller who
+//!   only prints it.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
