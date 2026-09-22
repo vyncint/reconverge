@@ -103,21 +103,6 @@ fn ready(view: &str) -> &'static str {
 /// The invariant, in every view the TUI has. A dropped sequence in any one of
 /// them makes that view's goldens a fiction, and the shell's four views share
 /// one renderer, so a regression in one is a regression in all.
-// Quarantined on Windows, and root-caused as far as this machine can take it
-// (see #162). Both tests wait on a *complete frame*, and under ConPTY the
-// run times out with "2 complete frames observed" while the screen shown in
-// the failure is the right screen, fully painted: the content arrives, the
-// frame boundary does not. That is the ConPTY difference termlens documents
-// -- it rewrites and reorders what the application wrote -- rather than
-// anything this crate renders differently.
-//
-// Quarantined rather than deleted, and named rather than skipped silently,
-// per CONTRIBUTING section 3: a flaky TUI test is quarantined the same day
-// and root-caused, either as a determinism bug fixed here or as a termlens
-// issue filed upstream with a reduction. The reduction needs a Windows box
-// to produce and this does not have one, which is what #162 is for. Every
-// other PTY suite in this repository passes on Windows.
-#[cfg_attr(windows, ignore = "ConPTY frame boundaries; see #162")]
 #[test]
 fn the_emulator_drops_nothing_that_could_change_a_cell() -> termlens::Result<()> {
     for view in ["shell", "witness", "learn", "triage"] {
@@ -202,21 +187,6 @@ fn the_emulator_drops_nothing_that_could_change_a_cell() -> termlens::Result<()>
 /// format ever stopped carrying what the TUI draws — the box drawing, the em
 /// dashes, the lane glyphs — every golden would still compare equal to
 /// itself while describing something else.
-// Quarantined on Windows, and root-caused as far as this machine can take it
-// (see #162). Both tests wait on a *complete frame*, and under ConPTY the
-// run times out with "2 complete frames observed" while the screen shown in
-// the failure is the right screen, fully painted: the content arrives, the
-// frame boundary does not. That is the ConPTY difference termlens documents
-// -- it rewrites and reorders what the application wrote -- rather than
-// anything this crate renders differently.
-//
-// Quarantined rather than deleted, and named rather than skipped silently,
-// per CONTRIBUTING section 3: a flaky TUI test is quarantined the same day
-// and root-caused, either as a determinism bug fixed here or as a termlens
-// issue filed upstream with a reduction. The reduction needs a Windows box
-// to produce and this does not have one, which is what #162 is for. Every
-// other PTY suite in this repository passes on Windows.
-#[cfg_attr(windows, ignore = "ConPTY frame boundaries; see #162")]
 #[test]
 fn a_frame_survives_the_snapshot_format_the_goldens_are_written_in() -> termlens::Result<()> {
     let mut t = spawn_view("witness", (80, 24));

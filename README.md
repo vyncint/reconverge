@@ -479,14 +479,16 @@ one that does less.
   it wraps must be the same build; the pin matches upstream cuda-oxide's own,
   and `pins.yml` opens an issue each week upstream moves — its commit, its
   toolchain, or a device-surface function this dialect has not decided.
-- **Platforms: Linux, macOS and Windows, all x86-64/arm64, all gated in CI.**
-  Nothing here needs a GPU or a vendor SDK on any of them. Two exceptions,
-  both narrow and both on Windows: the terminal-emulation fidelity suite is
-  quarantined there because ConPTY does not deliver frame boundaries the way
-  the other two consoles do — the four views themselves are exercised on
-  Windows and pass — and a Windows checkout must not convert line endings in
-  the lesson prose, which `.gitattributes` handles for a clone of this
-  repository.
+- **Platforms: Linux, macOS and Windows, all gated in CI.** Nothing here
+  needs a GPU or a vendor SDK on any of them, and the analysis, `check`, the
+  artifact round-trip, the schemas and the CLI contract are tested on all
+  three. **The four terminal views are gated on Linux and macOS only.** They
+  are believed to work on Windows and are not held to it: under ConPTY the
+  PTY suites time out waiting for a frame boundary while the screen they
+  print is correct and complete, which is a difference in how that console
+  delivers what an application wrote rather than in what these views render.
+  Root-causing it needs a Windows machine (#162). A Windows clone also needs
+  the lesson prose checked out with LF, which `.gitattributes` handles here.
 
 ## Status
 

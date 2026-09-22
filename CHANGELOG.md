@@ -21,12 +21,17 @@ the corpus; found-in-the-wild is the true north.
   failure was worth reporting.
 
   It mostly does run anywhere: the job found three bugs, two of which are
-  below and one of which made `learn` panic. What is quarantined there is the
-  terminal-emulation fidelity suite, because ConPTY does not deliver frame
-  boundaries the way the other two consoles do (#162) — the four views
-  themselves are exercised on Windows and pass, as do `check`, `triage` and
-  `watch`. `.gitattributes` pins the working tree to LF, which is the other
-  half of the `learn` fix.
+  below and one of which made `learn` panic outright. The analysis, `check`,
+  the artifact round-trip, the schemas and the CLI contract are gated on
+  Windows now.
+
+  **The four terminal views are not**, and that is stated rather than
+  skipped: under ConPTY the PTY suites time out waiting for a frame boundary
+  while the screen they print is the right screen, fully painted — two
+  different suites show it, so it is about how that console delivers what an
+  application wrote rather than about what these views render. #162 holds the
+  root cause, which needs a Windows machine to reduce. `.gitattributes` pins
+  the working tree to LF, which is the other half of the `learn` fix.
 
   Components are named explicitly in that job rather than left to
   `rust-toolchain.toml`: the channel installed on the runner and its
