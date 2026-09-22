@@ -277,6 +277,70 @@ jobs:
       # cheapest thing that reads them on the platform that broke.
       - run: bash -n scripts/run-conformance.sh scripts/run-mutation-corpus.sh
 
+  # Windows, for the half of the tool that has no terminal in it.
+  #
+  # The word did not appear anywhere in this repository -- not a support
+  # statement, not an exclusion, not a job -- while the README says the
+  # analysis "runs anywhere: in CI, on a laptop, in a container, with no
+  # driver installed". A Windows user had no way to tell whether a failure
+  # was worth reporting. Nothing here is Unix-specific by design: the
+  # analysis is a wrapped `cargo build` over Stable MIR with no vendor SDK on
+  # the path, and the one `cfg(unix)` in the tree guards a permissions test.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Components are named explicitly here, unlike the Linux and macOS
+      # jobs. `rustup toolchain install` reading rust-toolchain.toml installed
+      # the channel on this runner and not its `components`, and the failure
+      # surfaced three crates later as the driver's build script saying
+      # `rustc-dev` was missing -- the right message, from the wrong layer.
+      # rustc-dev and llvm-tools are both published for
+      # x86_64-pc-windows-msvc at this nightly, so there is nothing to work
+      # around; they just have to be asked for.
+      - name: Materialize pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$channel" --profile minimal \
+            --component rustc-dev --component llvm-tools --component rust-src \
+            --component rustfmt --component clippy
+          rustup show
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-windows-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-windows-
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Everything except the TUI crate's PTY suites.
+      #
+      # Those were tried, and they are the one part that does not port. Under
+      # ConPTY the waits time out with "N complete frames observed" while the
+      # screen printed in the failure is the right screen, fully painted: the
+      # content arrives and the frame boundary does not. It is not one test --
+      # `emulation` and `inspect_flow` both show it -- and it is not about
+      # what this crate renders. #162 holds the root-cause work, which needs a
+      # Windows machine to produce the reduction that would go upstream.
+      #
+      # What does run here is everything the README claims runs anywhere: the
+      # analysis, `check`, the artifact round-trip, the schemas, the CLI
+      # contract, and the TUI crate's own state and rendering unit tests. The
+      # PTY suites keep their Linux and macOS legs, which is where they have
+      # always been the terminal gate.
+      - run: cargo test --workspace --exclude reconverge-tui
+      - run: >-
+          cargo test -p reconverge-tui --lib
+          --test inspector_state --test learn_state
+          --test triage_state --test witness_state
+
   # The vendored termlens skill is refreshed by hand and AGENTS.md makes it
   # normative for every PTY test here, so a stale copy silently instructs the
   # next contributor to write code that no longer compiles. Nothing can diff
@@ -409,6 +473,7 @@ jobs:
         semver,
         msrv,
         zizmor,
+        windows,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5

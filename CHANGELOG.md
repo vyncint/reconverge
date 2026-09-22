@@ -14,6 +14,62 @@ the corpus; found-in-the-wild is the true north.
 
 ### Added
 
+- **Windows is gated in CI, and the README says which platforms are
+  supported.** The word did not appear anywhere in this repository — not a
+  support statement, not an exclusion, not a job — while the README said the
+  analysis "runs anywhere". A Windows user had no way to tell whether a
+  failure was worth reporting.
+
+  It mostly does run anywhere: the job found three bugs, two of which are
+  below and one of which made `learn` panic outright. The analysis, `check`,
+  the artifact round-trip, the schemas and the CLI contract are gated on
+  Windows now.
+
+  **The four terminal views are not**, and that is stated rather than
+  skipped: under ConPTY the PTY suites time out waiting for a frame boundary
+  while the screen they print is the right screen, fully painted — two
+  different suites show it, so it is about how that console delivers what an
+  application wrote rather than about what these views render. #162 holds the
+  root cause, which needs a Windows machine to reduce. `.gitattributes` pins
+  the working tree to LF, which is the other half of the `learn` fix.
+
+  Components are named explicitly in that job rather than left to
+  `rust-toolchain.toml`: the channel installed on the runner and its
+  `components` did not, and the failure surfaced three crates later as the
+  driver's build script reporting a missing `rustc-dev` — the right message
+  from the wrong layer.
+
+### Fixed
+
+- **`cargo reconverge learn` panicked on Windows, for all four lessons.**
+  The prose arrives through `include_str!`, which embeds the working tree's
+  bytes. A checkout with `core.autocrlf=true` — the default on Windows —
+  gives `\r\n---\r\n`, so the page split found no separator, every lesson
+  collapsed to one page, and the page-metadata assertion fired. A surviving
+  `\r` would have rendered as a glyph too. Line endings are normalized before
+  the split now, and the regression test is written against the bytes rather
+  than the platform, because a Linux clone of a repository whose files were
+  committed with CRLF has the same problem. `.gitattributes` pins the tree to
+  LF as well, for the golden files the PTY suites compare byte-for-byte.
+
+- **`reconverge-driver` refused to build on Windows with `rustc-dev`
+  installed.** The build script that turns a missing component into one
+  actionable line looked in `<sysroot>/lib` for `librustc_driver*`, which is
+  the Unix layout — windows-msvc puts `rustc_driver-<hash>.dll` under
+  `<sysroot>/bin`, so a correct toolchain was reported as missing the
+  component and the build stopped. That is exactly what the script's own
+  documentation promises not to do.
+
+  The same check was also a **false negative everywhere**:
+  `librustc_driver-<hash>.so` is in `<sysroot>/lib` on any toolchain, because
+  it is the shared library rustc itself links — measured against a stable
+  1.98.0 with no `rustc-dev`, one match there and zero in
+  `lib/rustlib/<host>/lib`. It now looks for the component's `.rmeta` in
+  `<sysroot>/lib/rustlib/<host>/lib`, which is where `rustc-dev` installs on
+  every platform, so the guard fires when it should and only then.
+
+### Added
+
 - **Releases carry binaries, and the action has a version to pin.** Two gaps
   that were really one: `release.yml` compiled `cargo-reconverge`,
   `reconverge-driver` and `reconverge-tui` for Linux and macOS on every

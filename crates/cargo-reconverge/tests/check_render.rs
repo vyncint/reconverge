@@ -22,6 +22,9 @@ use std::{env, fs};
 
 use termlens::Screen;
 
+mod common;
+use common::toolchain_env;
+
 /// Generous: the PTY run is warm, but CI runners are not fast.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -67,16 +70,6 @@ fn ensure_driver() -> PathBuf {
         assert!(status.success(), "building reconverge-driver failed");
     }
     driver
-}
-
-/// The toolchain's own variables, and only those that are actually set:
-/// an absent `CARGO_HOME` must stay absent, not become the empty string,
-/// or cargo resolves a different home in one run than in the other.
-fn toolchain_env() -> Vec<(String, String)> {
-    ["PATH", "HOME", "CARGO", "CARGO_HOME", "RUSTUP_HOME"]
-        .iter()
-        .filter_map(|name| env::var(name).ok().map(|value| (name.to_string(), value)))
-        .collect()
 }
 
 /// A warm copy of the render probe: analyzed once out of band, so the run
