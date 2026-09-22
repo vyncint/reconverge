@@ -293,9 +293,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Components are named explicitly here, unlike the Linux and macOS
+      # jobs. `rustup toolchain install` reading rust-toolchain.toml installed
+      # the channel on this runner and not its `components`, and the failure
+      # surfaced three crates later as the driver's build script saying
+      # `rustc-dev` was missing -- the right message, from the wrong layer.
+      # rustc-dev and llvm-tools are both published for
+      # x86_64-pc-windows-msvc at this nightly, so there is nothing to work
+      # around; they just have to be asked for.
       - name: Materialize pinned toolchain
+        shell: bash
         run: |
-          rustup toolchain install
+          set -euo pipefail
+          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$channel" --profile minimal \
+            --component rustc-dev --component llvm-tools --component rust-src \
+            --component rustfmt --component clippy
           rustup show
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
