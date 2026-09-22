@@ -1,8 +1,11 @@
 # Hardware session #2 — sanitizer cross-check (human-provisioned)
 
-Status: **prepared, not run.** Per CONTRIBUTING.md, this session never
-runs unattended: the maintainer provisions a GPU host (rented is fine) and
-runs it there. Nothing in this repo's CI touches the CUDA SDK.
+Status: **run once** — 2026-09-22 on a rented g5.xlarge (NVIDIA A10G,
+CC 8.6, driver 595.71.05, CUDA 13.2), cuda-oxide `b0f961df` on
+nightly-2026-08-28. 36 mutants across three examples; results in
+[`results/a10g-cc86-2026-09-22-synccheck.tsv`](results/a10g-cc86-2026-09-22-synccheck.tsv)
+and read in [`results/README.md`](results/README.md). Nothing in this repo's
+CI touches the CUDA SDK, and this session still never runs there.
 
 ## Goal
 
@@ -34,9 +37,13 @@ are data, and the comparison gets published:
    `compute-sanitizer --tool synccheck` with a watchdog, restores the
    original, and records
    `example<TAB>class<TAB>expected<TAB>kernel<TAB>cc<TAB>outcome<TAB>seconds`.
-4. Start with the barrier-heavy examples (`atomics`,
-   `scoped_atomic_load_store`, `barrier_sync_test`) and `lanemask_scan`
-   for the collective classes; add more as time allows.
+4. Start with the barrier-heavy examples and `lanemask_scan` for the
+   collective classes; add more as time allows. **The example directory is
+   `barrier`, not `barrier_sync_test`** — the latter is a kernel inside it,
+   and this page named it as an example until the first run found otherwise.
+   `atomics` was not probed on 2026-09-22: upstream rewrote it at this pin to
+   take `*mut u32` through `DeviceAtomicU32::from_ptr` instead of transmuting
+   a shared slice, which is the shape the old finding keyed on.
 5. Commit the TSVs under `docs/hardware/results/` — the comparison against
    the static table and its publication happen in a normal session
    afterwards. Session #1's probes (the confirmed lint-sample kernels and
