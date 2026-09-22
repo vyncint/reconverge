@@ -285,7 +285,7 @@ error. In CI, the [GitHub Action](action/README.md) is three lines:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: vyncint/reconverge/action@main
+- uses: vyncint/reconverge/action@v0
   with:
     cc: "8.6"
 ```
