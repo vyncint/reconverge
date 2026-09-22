@@ -14,6 +14,29 @@ the corpus; found-in-the-wild is the true north.
 
 ### Added
 
+- **Releases carry binaries, and the action has a version to pin.** Two gaps
+  that were really one: `release.yml` compiled `cargo-reconverge`,
+  `reconverge-driver` and `reconverge-tui` for Linux and macOS on every
+  release and then left them in workflow artifacts, which expire and need a
+  GitHub login to reach — `v0.6.1` shipped with **zero** assets. So the only
+  supported install was `cargo install`, which compiles a rustc-driver, and
+  the GitHub Action pays that on every consumer's run because it deliberately
+  never caches.
+
+  `github-release` now creates the release from this version's `CHANGELOG.md`
+  section — not from generated commit subjects — and attaches one
+  `reconverge-<tag>-<host-triple>.tar.gz` per platform with a `.sha256`
+  beside it. `float-major-tag` then repoints `v0` through the API, after the
+  publish, so the floating tag can never name a release that did not reach
+  crates.io.
+
+  `README.md` and `action/README.md` document `@v0` instead of `@main`. That
+  was the sharper half of the problem: the ref decides which analyzer version
+  the action installs, so `@main` re-decided it on every run of a consumer's
+  CI, and a merge here changed the gate in somebody else's pull request with
+  no notice and nothing to pin.
+
+
 - **`--cc` takes the CUDA spellings.** `sm_86` is what `nvcc -arch` takes,
   what `ptxas` prints and what a PTX `.target` directive says; `86` is the
   same thing without the prefix. Both now normalize to `8.6`, as do `sm_120`

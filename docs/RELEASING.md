@@ -74,10 +74,18 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
   then every PR is measured against the previous release — including this
   release's own intended breaks, which is why the release PR carries the
   `breaking` label.
-- **Cut the GitHub Release** from the CHANGELOG section, titled
-  `vX.Y.Z — short theme` to match the existing ones, with an `## Install`
-  block carrying both commands (`cargo install cargo-reconverge` and
-  `cargo reconverge setup`).
+- **The GitHub Release cuts itself.** `release.yml`'s `github-release` job
+  creates it from this version's `CHANGELOG.md` section, appends the
+  `## Install` block, and attaches one `.tar.gz` per platform — the three
+  binaries the `build` job compiles, with a `.sha256` beside each. Before
+  this it built them and left them in workflow artifacts, so `v0.6.1`
+  shipped with zero assets. Give the release a title if you want one
+  (`gh release edit vX.Y.Z --title 'vX.Y.Z — short theme'`); the job names it
+  after the tag, since a theme is not something a workflow can invent.
+- **`v0` moves itself too.** `float-major-tag` repoints it at the release
+  commit through the API, after the publish, so the tag documented in
+  `README.md` and `action/README.md` can never name a release that did not
+  reach crates.io.
 - **Read the finished release run's job list, and explain every job that is
   not green.** A `skipped` job is something to account for, not something to
   scroll past: `notify-testing-repo` carried a guard on an event this

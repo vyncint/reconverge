@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: vyncint/reconverge/action@main
+      - uses: vyncint/reconverge/action@v0
         with:
           cc: "8.6" # optional: capacity context for RC004
 ```
@@ -23,7 +23,7 @@ path to also write a SARIF 2.1.0 report, for upload with
 `github/codeql-action/upload-sarif`:
 
 ```yaml
-      - uses: vyncint/reconverge/action@main
+      - uses: vyncint/reconverge/action@v0
         with:
           sarif: reconverge.sarif
       - uses: github/codeql-action/upload-sarif@v3
@@ -43,9 +43,13 @@ Notes:
   toolchain and that version from scratch, so a run cannot inherit a stale
   binary and what CI checks is always a published release. Expect the install
   to cost a few minutes on every run.
-- The action is built from this repository, so it tracks whichever ref you
-  pin (`@main`, a tag, or a SHA). Pin a tag or SHA if you want the
-  analyzer to change only when you say so.
+- The action is built from this repository, so the ref you pin decides which
+  analyzer version is installed — the install step reads the version out of
+  the workspace manifest at that ref. `@v0` is a floating tag moved to each
+  release by `release.yml`, so it follows releases rather than the default
+  branch; `@v0.7.0` pins one release exactly, and a 40-hex SHA pins one
+  commit. **Do not use `@main`**: it re-decides the analyzer version on every
+  run of your CI, from whatever merged here since.
 
 Verified end to end on a separate repository
 (`vyncint/reconverge-action-smoke`): a clean kernel crate passes, and an

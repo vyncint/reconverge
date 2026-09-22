@@ -59,13 +59,36 @@ jobs:
           rustup toolchain install
           rustup show
       - run: cargo build --release -p cargo-reconverge -p reconverge-driver -p reconverge-tui
+      # One archive per platform, named by the host triple rather than by the
+      # runner label: `macos-latest` says nothing about the architecture it
+      # was on the day the release was cut, and the file name is what a user
+      # reads. The checksum sits beside it because a binary downloaded over
+      # HTTP with nothing to check it against is a binary you are trusting
+      # twice.
+      - name: Package the three binaries
+        id: package
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          name="reconverge-${TAG}-${triple}"
+          mkdir -p "dist/${name}"
+          cp target/release/cargo-reconverge \
+             target/release/reconverge-driver \
+             target/release/reconverge-tui \
+             README.md LICENSE-APACHE LICENSE-MIT "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          ( cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256" )
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "packaged ${name}.tar.gz"
+          cat "dist/${name}.tar.gz.sha256"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: reconverge-${{ inputs.tag }}-${{ matrix.os }}
+          name: ${{ steps.package.outputs.name }}
           path: |
-            target/release/cargo-reconverge
-            target/release/reconverge-driver
-            target/release/reconverge-tui
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
 
   publish:
     runs-on: ubuntu-latest
@@ -133,6 +156,141 @@ jobs:
             fi
             echo "::endgroup::"
           done
+
+  # The GitHub Release, with the archives the `build` job produced attached.
+  #
+  # Until now `build` compiled three binaries per platform on every release
+  # and left them in workflow artifacts, which expire and need a GitHub login
+  # to reach -- so `v0.6.1` shipped with zero assets and the only supported
+  # install was `cargo install`, which compiles a rustc-driver. The action
+  # pays that on every consumer's run, deliberately uncached.
+  #
+  # The notes come from CHANGELOG.md rather than from `--generate-notes`. The
+  # changelog here is written for a reader; a list of squashed commit subjects
+  # would be a downgrade, and it is also the document the release was cut
+  # from, so the two cannot disagree.
+  github-release:
+    needs: [build, publish]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # creates the release and uploads its assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Extract this version's changelog section
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # From the heading for this version to the next `## [` heading.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { inside = 1; next }
+            inside && /^## \[/        { exit }
+            inside                     { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section; write it before releasing"
+            exit 1
+          fi
+          {
+            echo
+            echo '## Install'
+            echo
+            echo '```sh'
+            echo 'cargo install cargo-reconverge'
+            echo 'cargo reconverge setup'
+            echo '```'
+            echo
+            echo 'Or take a prebuilt archive below and put the three binaries'
+            echo 'on your PATH **in the same directory** -- `cargo-reconverge`'
+            echo 'finds the driver and the views as siblings of its own'
+            echo 'executable. Verify it first:'
+            echo
+            echo '```sh'
+            echo 'shasum -a 256 -c reconverge-'"$TAG"'-<triple>.tar.gz.sha256'
+            echo '```'
+          } >> notes.md
+          echo "release notes:"; cat notes.md
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists; replacing its notes and assets"
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          fi
+          gh release upload "$TAG" dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
+
+  # `v0` is what README.md and action/README.md tell people to write. Until
+  # now they said `@main`, because there was no floating tag to point at --
+  # so every consumer's CI silently followed this repository's default
+  # branch, and a merge here changed the analyzer running in somebody else's
+  # pull request with no version to pin and no notice. The sibling project
+  # has had this job since 2.0.
+  #
+  # After `publish`, so the floating tag can never point at a release that
+  # did not reach crates.io -- which matters more here than usual, because
+  # the action installs the version the ref's own manifest declares.
+  float-major-tag:
+    needs: [publish, github-release]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # moves refs/tags/vN
+    steps:
+      # The ref is moved through the API rather than by pushing, so the job
+      # never needs a git credential in its working tree: the checkout is
+      # only here to resolve the tag to a commit, and it keeps
+      # `persist-credentials: false` like every other one in this repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Point vN at the release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # A dispatch can be handed anything, so the tag has to exist and be
+          # a version before a floating pointer is aimed at it.
+          sha="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}")" || {
+            echo "::error::no such tag: '$TAG'"; exit 1
+          }
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$TAG' is not a release tag (expected vX.Y.Z)"; exit 1 ;;
+          esac
+          major="v${TAG#v}"
+          major="${major%%.*}"
+          case "$major" in
+            v[0-9]*) ;;
+            *) echo "::error::cannot derive a major tag from '$TAG'"; exit 1 ;;
+          esac
+          if gh api "repos/$REPO/git/ref/tags/$major" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/$major" \
+              -f "sha=$sha" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$REPO/git/refs" \
+              -f "ref=refs/tags/$major" -f "sha=$sha" >/dev/null
+          fi
+          echo "$major now points at $TAG (${sha:0:8})"
 
   # Tell the repository that tests this tool against a real subject that a
   # new version exists, so the deep run happens now rather than at its next
