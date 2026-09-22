@@ -92,6 +92,15 @@ pub fn known_compute_capabilities() -> Vec<String> {
 
 /// Parse a `--cc` value like `"8.6"`.
 ///
+/// The CUDA spellings are accepted too. `sm_86` is what `nvcc -arch` takes,
+/// what `ptxas` prints and what a PTX `.target` directive says, and `86` is
+/// the same thing with the prefix dropped; both normalize to `8.6`. A
+/// capability is one major digit or two, followed by exactly one minor
+/// digit, so a run of digits is unambiguous: the last one is the minor.
+/// `launchbound` — which passes this flag straight through to this
+/// parser — has accepted these two spellings since 2.0, and a user moving
+/// between the pair should not have to retype the number.
+///
 /// Failures are told apart, because the reader needs different things from
 /// each. A part that is not a number at all (`8.x`, `8.`) is reported as
 /// non-numeric. A part that *is* a number but cannot be a compute
@@ -100,9 +109,13 @@ pub fn known_compute_capabilities() -> Vec<String> {
 /// capabilities that would have worked rather than being told their digits
 /// are not digits.
 pub fn parse_compute_capability(s: &str) -> Result<ComputeCapability, String> {
-    let (major, minor) = s
-        .split_once('.')
-        .ok_or_else(|| format!("`{s}` is not a compute capability; expected e.g. `8.6`"))?;
+    let normalized = normalize_cuda_spelling(s);
+    let (major, minor) = normalized.split_once('.').ok_or_else(|| {
+        format!(
+            "`{s}` is not a compute capability; expected e.g. `8.6` \
+             (the `sm_86` and `86` spellings are accepted too)"
+        )
+    })?;
     let parse = |part: &str, what: &str| {
         part.parse::<u8>().map_err(|_| {
             if is_integer_literal(part) {
@@ -118,6 +131,27 @@ pub fn parse_compute_capability(s: &str) -> Result<ComputeCapability, String> {
     Ok((parse(major, "major")?, parse(minor, "minor")?))
 }
 
+/// Normalize `sm_86` and `86` to `8.6`, leaving anything else untouched for
+/// the parser to reject with the message it would have used anyway.
+///
+/// Only a bare run of two or three ASCII digits is rewritten. One digit
+/// (`8`) is a major with no minor and stays an error; four (`1234`) is not a
+/// capability in any spelling. The `sm_` prefix is matched case-insensitively
+/// because `SM_86` is what a datasheet prints.
+fn normalize_cuda_spelling(s: &str) -> String {
+    let digits = if s.len() > 3 && s[..3].eq_ignore_ascii_case("sm_") {
+        &s[3..]
+    } else {
+        s
+    };
+    if matches!(digits.len(), 2 | 3) && digits.bytes().all(|b| b.is_ascii_digit()) {
+        let (major, minor) = digits.split_at(digits.len() - 1);
+        format!("{major}.{minor}")
+    } else {
+        digits.to_string()
+    }
+}
+
 /// Whether `part` is an integer literal — an optional sign followed by ASCII
 /// digits — and so a real number even when it overflows `u8` or is negative,
 /// as opposed to input that is not numeric at all.
@@ -129,6 +163,52 @@ fn is_integer_literal(part: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cuda_spellings_normalize() {
+        for spelling in ["8.6", "86", "sm_86", "SM_86", "Sm_86"] {
+            assert_eq!(
+                parse_compute_capability(spelling),
+                Ok((8, 6)),
+                "`{spelling}` should mean 8.6"
+            );
+        }
+        // Two majors and one minor, so the last digit is always the minor.
+        assert_eq!(parse_compute_capability("100"), Ok((10, 0)));
+        assert_eq!(parse_compute_capability("sm_120"), Ok((12, 0)));
+        assert_eq!(parse_compute_capability("75"), Ok((7, 5)));
+    }
+
+    #[test]
+    fn a_digit_run_that_cannot_be_a_capability_is_still_refused() {
+        // One digit is a major with no minor; four is not a capability in
+        // any spelling. Neither is rewritten, so both reach the parser and
+        // fail with the message they always did -- now naming the spellings.
+        for spelling in ["8", "1234", "sm_8", "sm_1234", "8x", "sm_", "", "x86"] {
+            let err = parse_compute_capability(spelling).unwrap_err();
+            assert!(
+                err.contains("is not a compute capability"),
+                "`{spelling}` should be refused as malformed, got: {err}"
+            );
+            assert!(
+                err.contains("sm_86"),
+                "the refusal should name the accepted spellings, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalizing_is_a_spelling_change_and_nothing_more() {
+        // It rewrites the text and hands the result to the same parser, so
+        // every judgement stays where it was. `99.9` is well formed and
+        // absent from the table, and this function has never been the place
+        // that consults the table -- the caller is -- so it still says Ok.
+        assert_eq!(parse_compute_capability("99.9"), Ok((99, 9)));
+        // And a digit run wide enough to overflow `u8` still reaches the
+        // table message rather than being called non-numeric.
+        let err = parse_compute_capability("999.9").unwrap_err();
+        assert!(err.contains("not in the compute-capability table"), "{err}");
+    }
 
     #[test]
     fn table_is_ascending_and_complete_enough() {
@@ -153,7 +233,9 @@ mod tests {
         assert_eq!(parse_compute_capability("12.0"), Ok((12, 0)));
         // A leading `+` is numeric and in range: `u8::from_str` accepts it.
         assert_eq!(parse_compute_capability("+8.6"), Ok((8, 6)));
-        assert!(parse_compute_capability("86").is_err());
+        // `86` was an error until the CUDA spellings were accepted; it is
+        // now 8.6, and `the_cuda_spellings_normalize` below is its contract.
+        assert_eq!(parse_compute_capability("86"), Ok((8, 6)));
         assert!(parse_compute_capability("8.x").is_err());
     }
 

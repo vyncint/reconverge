@@ -426,20 +426,22 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
 /// to `check` and, on a tool error, reports the tail of stderr — a reasonable
 /// default, since a failing tool usually fails last. When every argument
 /// error printed the whole usage text, that tail was the exit-code legend,
-/// and the reason (`80` is not a compute capability) was forty-four lines
+/// and the reason (`8x` is not a compute capability) was forty-four lines
 /// above it, out of view. It reported the legend as the cause. Eleven times,
 /// once per candidate.
 #[test]
 fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
     let bad_value = Command::new(env!("CARGO_BIN_EXE_cargo-reconverge"))
-        .args(["reconverge", "check", "--cc", "80"])
+        // Not `80`: that is now read as the `sm_80` spelling of 8.0.
+        .args(["reconverge", "check", "--cc", "8x"])
         .output()
         .unwrap();
     assert_eq!(bad_value.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&bad_value.stderr);
     assert_eq!(
         stderr.trim(),
-        "error: `80` is not a compute capability; expected e.g. `8.6`",
+        "error: `8x` is not a compute capability; expected e.g. `8.6` \
+         (the `sm_86` and `86` spellings are accepted too)",
         "a value error is the whole of stderr:\n{stderr}"
     );
 

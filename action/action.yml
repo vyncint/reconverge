@@ -32,7 +32,8 @@ inputs:
   cc:
     description: >-
       Target compute capability (X.Y, e.g. 8.6) for shared-memory capacity
-      context (RC004).
+      context (RC004). The CUDA spellings are accepted too: `sm_86` and `86`
+      both mean 8.6.
     required: false
     default: ""
   strict:
