@@ -33,6 +33,21 @@
 //! point yet.
 
 #![feature(rustc_private)]
+// The other five crates here have carried this since they were written; the
+// driver was the one that did not, and it is the one where it is worth the
+// most. It links rustc's own crates, and rustc's internal APIs are exactly
+// the neighbourhood where the next contributor reaches for `unsafe` to get
+// past a lifetime. There is no `unsafe` in this binary today, so this costs
+// nothing now and is the whole guarantee later.
+//
+// Analysis goes through `rustc_public` (Stable MIR) and nothing else, which
+// is the reason none is needed -- see the justification above.
+//
+// `missing_docs` is not here because it has nothing to say: this crate is
+// binary-only (`src/bin/reconverge-driver/`, no `lib.rs`), so it exposes no
+// public API for the lint to check. The module-level docs above are the
+// documentation, and `cargo doc` already runs with `-D warnings`.
+#![forbid(unsafe_code)]
 
 extern crate rustc_driver;
 extern crate rustc_interface;
