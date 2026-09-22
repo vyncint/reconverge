@@ -22,6 +22,9 @@ use std::{env, fs};
 
 use termlens::Screen;
 
+mod common;
+use common::toolchain_env;
+
 /// Generous: the PTY run is warm, but CI runners are not fast.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -67,53 +70,6 @@ fn ensure_driver() -> PathBuf {
         assert!(status.success(), "building reconverge-driver failed");
     }
     driver
-}
-
-/// The toolchain's own variables, and only those that are actually set:
-/// an absent `CARGO_HOME` must stay absent, not become the empty string,
-/// or cargo resolves a different home in one run than in the other.
-///
-/// Both runs below clear the environment and put this set back, which is
-/// what makes the warm run and the PTY run agree on cargo's fingerprint.
-/// The Windows half of the list is not a toolchain variable at all: with a
-/// cleared environment and no `SystemRoot`, the platform's own networking
-/// DLLs cannot initialise, and cargo fails with
-///
-/// ```text
-/// [6] Could not resolve hostname (Could not resolve host: index.crates.io)
-/// ```
-///
-/// which reads exactly like a runner with no network. It is not: it is a
-/// process that cannot resolve anything because `env_clear` took the
-/// variable the resolver needs. The rest of the Windows names are the ones
-/// cargo and rustc themselves reach for — the temp directory, the user
-/// profile, `PATHEXT` for finding `cargo.exe` at all.
-fn toolchain_env() -> Vec<(String, String)> {
-    const SHARED: &[&str] = &["PATH", "HOME", "CARGO", "CARGO_HOME", "RUSTUP_HOME"];
-    #[cfg(windows)]
-    const PLATFORM: &[&str] = &[
-        "SystemRoot",
-        "windir",
-        "SystemDrive",
-        "ComSpec",
-        "PATHEXT",
-        "USERPROFILE",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "ProgramData",
-        "ProgramFiles",
-        "TEMP",
-        "TMP",
-        "NUMBER_OF_PROCESSORS",
-    ];
-    #[cfg(not(windows))]
-    const PLATFORM: &[&str] = &[];
-
-    SHARED
-        .iter()
-        .chain(PLATFORM)
-        .filter_map(|name| env::var(name).ok().map(|value| (name.to_string(), value)))
-        .collect()
 }
 
 /// A warm copy of the render probe: analyzed once out of band, so the run

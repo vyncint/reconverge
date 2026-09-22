@@ -16,6 +16,8 @@ use reconverge_artifacts::baseline::{BaselineArtifact, Entry};
 use reconverge_artifacts::findings::FindingsArtifact;
 use termlens::{Key, Location, Terminal};
 
+mod common;
+
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -234,18 +236,8 @@ fn the_review_loop_gates_accepts_and_reports() {
         .env("RECONVERGE_TUI", tui.to_str().unwrap())
         .arg("reconverge")
         .arg("triage");
-    for var in [
-        "PATH",
-        "HOME",
-        "CARGO",
-        "CARGO_HOME",
-        "RUSTUP_HOME",
-        "RUSTUP_TOOLCHAIN",
-        "RUSTC",
-    ] {
-        if let Ok(value) = env::var(var) {
-            builder = builder.env(var, &value);
-        }
+    for (var, value) in common::toolchain_env() {
+        builder = builder.env(&var, &value);
     }
     let mut t = builder
         .spawn(env!("CARGO_BIN_EXE_cargo-reconverge"))
@@ -317,21 +309,8 @@ fn watch_reruns_the_check_when_a_source_file_changes() {
         .arg("watch")
         .arg("--max-runs")
         .arg("2");
-    for var in [
-        "PATH",
-        "HOME",
-        "CARGO",
-        "CARGO_HOME",
-        "RUSTUP_HOME",
-        // Without the toolchain pin the child's cargo and rustc can
-        // resolve differently from the caller's, and the sample's cached
-        // dependencies then look "compiled by an incompatible version".
-        "RUSTUP_TOOLCHAIN",
-        "RUSTC",
-    ] {
-        if let Ok(value) = env::var(var) {
-            builder = builder.env(var, &value);
-        }
+    for (var, value) in common::toolchain_env() {
+        builder = builder.env(&var, &value);
     }
     let mut t = builder
         .spawn(env!("CARGO_BIN_EXE_cargo-reconverge"))
