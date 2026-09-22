@@ -11,3 +11,18 @@
 # safety model says to treat such a kernel as unsafe, so RC003 here is a
 # reviewed true positive, not an FP.
 conformance_constant_index_from_end	RC003	write_last	deny
+
+# conformance_unroll_bounds_check (all seven kernels) takes `arr: &mut [u32]`
+# as a `#[kernel]` parameter. The crate is upstream's regression corpus for a
+# bounds-check bug in the `#[unroll]` MIR transform -- the slice is there to
+# be indexed out of range on purpose (`arr[999] = 7`), not because anyone
+# should write a kernel that way. RC003 is correct on every one of them:
+# `&mut [T]` is one exclusive reference handed to every thread, and upstream's
+# own safety model says the same. Reviewed true positives, not FPs.
+conformance_unroll_bounds_check	RC003	control	deny
+conformance_unroll_bounds_check	RC003	full_after	deny
+conformance_unroll_bounds_check	RC003	full_before	deny
+conformance_unroll_bounds_check	RC003	full_inside	deny
+conformance_unroll_bounds_check	RC003	partial_after	deny
+conformance_unroll_bounds_check	RC003	partial_before	deny
+conformance_unroll_bounds_check	RC003	partial_inside	deny

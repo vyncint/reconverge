@@ -1,6 +1,6 @@
 # Pinned in lockstep with upstream cuda-oxide: a rustc-driver tool must be
 # built by the same rustc it wraps. Verified against
-# NVlabs/cuda-oxide@26754ae5. Bump only together with the upstream pin, and
+# NVlabs/cuda-oxide@b0f961df. Bump only together with the upstream pin, and
 # never in a change that also alters analysis behavior — one at a time.
 [toolchain]
 channel = "nightly-2026-08-28"
