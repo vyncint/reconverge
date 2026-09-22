@@ -15,14 +15,25 @@ on:
 permissions:
   contents: read
 
+# Thirteen jobs, and a push to an open pull request supersedes the run before
+# it. `install` and `stress` deliberately do not cancel -- a release
+# verification and a flake hunt are worth finishing -- but a superseded gate
+# result is one nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   fmt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
@@ -36,12 +47,37 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
           rustup show
+      # Restored only by the jobs whose cost is the build itself. Measured on
+      # run 35686146034: `cargo test --workspace` is 99s of the `test` job's
+      # 149s and 94s of macOS's 172s, and those two are the critical path.
+      #
+      # The gates are deliberately NOT cached, and that is the same rule the
+      # `semver` job states below: `conformance`, `schemas`, `isolation` and
+      # `deny` decide whether a claim holds, and a gate that reports on what a
+      # cache held the day it was filled is not reporting on this tree. They
+      # are also cheap -- 71s, 38s, 24s, 91s -- so there is nothing to buy.
+      #
+      # The key carries the toolchain file, so a pin bump cannot reuse objects
+      # built by a different rustc, and the lockfile, so a dependency change
+      # cannot either.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-clippy-
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The second workspace: see the note in the fmt job.
       - run: >-
@@ -50,12 +86,24 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
           rustup show
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-
       - run: cargo test --workspace
         env:
           # Every screen a failing termlens wait embeds is also written here,
@@ -83,30 +131,48 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
           rustup show
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-docs-
       - run: cargo doc --no-deps --workspace
         env:
           RUSTDOCFLAGS: "-D warnings"
 
   deny:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
           rustup show
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
   isolation:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
@@ -124,8 +190,11 @@ jobs:
   # 1.0 and the published table (conformance/MUTATION.md) must match.
   conformance:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
@@ -151,8 +220,11 @@ jobs:
   # end-to-end `check` is what the driver actually emits.
   schemas:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
@@ -166,12 +238,24 @@ jobs:
   # where the platforms actually differ.
   macos:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
           rustup show
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-macos-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-macos-
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -203,8 +287,11 @@ jobs:
   # `[workspace.dependencies]`, and deny.toml only warns on duplicates.
   skill-version:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./scripts/check-skill-version.sh
 
   # Public API compatibility of the five published library crates against
@@ -220,8 +307,11 @@ jobs:
   # bumped in a PR after each publish (the baseline must be on the index).
   semver:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Materialize pinned toolchain
         run: |
           rustup toolchain install
@@ -266,20 +356,62 @@ jobs:
   # that stable so the declaration is a measurement, not a hope.
   msrv:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: rustup toolchain install 1.88 --profile minimal
       - run: >-
           cargo +1.88 check --locked
           -p reconverge-core -p reconverge-artifacts -p reconverge-dialect-oxide
           -p reconverge-witness -p reconverge-tui
 
+  # Workflow security, on the workflows and on the action this repository
+  # ships. It runs ONLINE, which is the half a local run cannot do: `zizmor
+  # --offline` checks that a `uses:` carries a hash, and only the API can say
+  # whether that hash is the one the version comment claims. Both the tool and
+  # the action that installs it are pinned, because a linter that decides
+  # whether this repository is pinned properly is a poor place to float.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          inputs: .github/workflows/ action/
+          version: "1.29.0"
+          persona: regular
+          # No security tab upload: this repository has no Advanced Security,
+          # and a failed upload would turn a clean audit into a red job.
+          # Annotations put each finding on the diff instead.
+          advanced-security: false
+          annotations: true
+
   # The single required status check: green iff every Linux gate is green.
   required-green:
     name: required-green
     if: always()
-    needs: [fmt, clippy, test, docs, deny, isolation, conformance, schemas, skill-version, semver, msrv]
+    needs:
+      [
+        fmt,
+        clippy,
+        test,
+        docs,
+        deny,
+        isolation,
+        conformance,
+        schemas,
+        skill-version,
+        semver,
+        msrv,
+        zizmor,
+      ]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify every gate succeeded
         env:
