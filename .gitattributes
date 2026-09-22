@@ -1,0 +1,13 @@
+# The working tree is the source of truth for two things that embed it
+# verbatim: `include_str!` of the lesson prose (crates/reconverge-tui) and the
+# golden/snapshot files the PTY suites compare against. A CRLF checkout
+# changes the bytes of both.
+#
+# The code no longer depends on this -- `pages()` normalizes line endings and
+# has a test for it -- but a golden compared byte-for-byte still would, so the
+# files are pinned to LF on every platform rather than left to whatever
+# `core.autocrlf` a clone happens to have.
+* text=auto eol=lf
+
+*.png binary
+*.cast binary

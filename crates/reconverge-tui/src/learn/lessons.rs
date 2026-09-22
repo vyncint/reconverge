@@ -73,10 +73,21 @@ const CLEAN_WITNESS: &str = include_str!("../../lessons/reconverged-clean.json")
 /// Split a lesson file into pages on `---` separator lines and zip with
 /// per-page extras. Page counts are locked by the unit tests below, so a
 /// drifted edit of `docs/learn/` fails the build's tests, not the reader.
+///
+/// Line endings are normalized first, because the prose arrives through
+/// `include_str!` and therefore in whatever form the working tree holds. A
+/// Windows checkout with `core.autocrlf=true` -- the default on a
+/// `windows-latest` runner and on most Windows clones -- gives
+/// `\r\n---\r\n`, the split finds no separator, and every lesson collapses
+/// to one page. The assertion below then fires, so `cargo reconverge learn`
+/// **panicked** on Windows for all four lessons until the first Windows CI
+/// run found it. A surviving `\r` would also render as a glyph in the
+/// terminal.
 fn pages(
     prose: &'static str,
     extras: &[(Option<&'static str>, Option<&'static str>)],
 ) -> Vec<Page> {
+    let prose = prose.replace("\r\n", "\n");
     let bodies: Vec<String> = prose
         .split("\n---\n")
         .map(|page| nfc(page.trim_matches('\n')))
@@ -165,6 +176,34 @@ mod tests {
     /// artifacts crate round-trips as its schema tests. They must stay
     /// byte-identical, or the lessons would teach something the schema
     /// tests never checked.
+    /// The failure the first Windows CI run found: `include_str!` embeds the
+    /// working tree's bytes, a Windows checkout with `core.autocrlf=true`
+    /// gives CRLF, and `split("\n---\n")` then finds no separator at all.
+    /// Every lesson collapsed to one page and `pages` asserted, so
+    /// `cargo reconverge learn` panicked rather than opening.
+    ///
+    /// Checked here rather than only on a Windows runner, because the bug is
+    /// about the bytes and not about the platform: a Linux clone of a
+    /// repository whose files were committed with CRLF has the same problem.
+    #[test]
+    fn a_crlf_working_tree_still_splits_into_pages() {
+        let lf = "one\n---\ntwo\n---\nthree";
+        let crlf: &'static str = Box::leak(lf.replace('\n', "\r\n").into_boxed_str());
+        let extras = &[(None, None), (None, None), (None, None)][..];
+
+        let from_lf = pages(lf, extras);
+        let from_crlf = pages(crlf, extras);
+
+        assert_eq!(from_crlf.len(), 3, "CRLF prose must split the same way");
+        let lf_bodies: Vec<&str> = from_lf.iter().map(Page::body).collect();
+        let crlf_bodies: Vec<&str> = from_crlf.iter().map(Page::body).collect();
+        assert_eq!(lf_bodies, crlf_bodies, "and produce the same text");
+        assert!(
+            crlf_bodies.iter().all(|b| !b.contains('\r')),
+            "no carriage return may survive into a body: it renders as a glyph"
+        );
+    }
+
     #[test]
     fn embedded_replays_match_the_canonical_fixtures() {
         use std::path::Path;
