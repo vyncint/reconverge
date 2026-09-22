@@ -12,6 +12,23 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **`--cc` takes the CUDA spellings.** `sm_86` is what `nvcc -arch` takes,
+  what `ptxas` prints and what a PTX `.target` directive says; `86` is the
+  same thing without the prefix. Both now normalize to `8.6`, as do `sm_120`
+  and `100` — a capability is one or two major digits and exactly one minor
+  digit, so the last digit of a run is always the minor.
+
+  `launchbound` has accepted these two spellings since 2.0 and passes this
+  flag straight through to this parser, so the pair disagreed about the
+  spelling of their shared argument. Nothing else moved: normalization
+  rewrites the text and hands it to the same parser, so `8.x` is still
+  non-numeric and `999.9` still lands on the table message.
+
+  One test changed its example rather than its assertion:
+  `a_bad_value_answers_in_one_line_…` used `--cc 80`, which now means 8.0.
+
 ### Changed
 
 - **termlens 0.11** in both PTY suites (`reconverge-tui` and

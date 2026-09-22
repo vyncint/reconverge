@@ -273,6 +273,7 @@ driver's build script checks for it and says so directly.
 $ cargo reconverge check                       # analyze; exit 1 on deny/confirmed findings
 $ cargo reconverge check --strict              # include warning-tier findings
 $ cargo reconverge check --cc 8.6              # target capacity context for RC004
+$ cargo reconverge check --cc sm_86            # the CUDA spellings work: sm_86, 86
 $ cargo reconverge check --sarif out.sarif     # SARIF 2.1.0 for code scanning
 $ cargo reconverge check --message-format json # one findings.v1 document per target
 $ cargo reconverge watch                       # re-run on every save

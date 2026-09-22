@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn only_an_unknown_argument_asks_for_the_usage_text() {
         assert!(ArgError::unknown("--bogus").wants_usage());
-        assert!(!ArgError::from("`80` is not a compute capability".to_string()).wants_usage());
+        assert!(!ArgError::from("`8x` is not a compute capability".to_string()).wants_usage());
     }
 
     #[test]
