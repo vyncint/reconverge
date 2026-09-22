@@ -12,6 +12,28 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **Windows is gated in CI, and the README says which platforms are
+  supported.** The word did not appear anywhere in this repository — not a
+  support statement, not an exclusion, not a job — while the README said the
+  analysis "runs anywhere". A Windows user had no way to tell whether a
+  failure was worth reporting.
+
+  It mostly does run anywhere: the job found three bugs, two of which are
+  below and one of which made `learn` panic. What is quarantined there is the
+  terminal-emulation fidelity suite, because ConPTY does not deliver frame
+  boundaries the way the other two consoles do (#162) — the four views
+  themselves are exercised on Windows and pass, as do `check`, `triage` and
+  `watch`. `.gitattributes` pins the working tree to LF, which is the other
+  half of the `learn` fix.
+
+  Components are named explicitly in that job rather than left to
+  `rust-toolchain.toml`: the channel installed on the runner and its
+  `components` did not, and the failure surfaced three crates later as the
+  driver's build script reporting a missing `rustc-dev` — the right message
+  from the wrong layer.
+
 ### Fixed
 
 - **`cargo reconverge learn` panicked on Windows, for all four lessons.**

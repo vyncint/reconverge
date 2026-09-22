@@ -479,6 +479,14 @@ one that does less.
   it wraps must be the same build; the pin matches upstream cuda-oxide's own,
   and `pins.yml` opens an issue each week upstream moves — its commit, its
   toolchain, or a device-surface function this dialect has not decided.
+- **Platforms: Linux, macOS and Windows, all x86-64/arm64, all gated in CI.**
+  Nothing here needs a GPU or a vendor SDK on any of them. Two exceptions,
+  both narrow and both on Windows: the terminal-emulation fidelity suite is
+  quarantined there because ConPTY does not deliver frame boundaries the way
+  the other two consoles do — the four views themselves are exercised on
+  Windows and pass — and a Windows checkout must not convert line endings in
+  the lesson prose, which `.gitattributes` handles for a clone of this
+  repository.
 
 ## Status
 
