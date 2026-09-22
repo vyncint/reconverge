@@ -277,6 +277,43 @@ jobs:
       # cheapest thing that reads them on the platform that broke.
       - run: bash -n scripts/run-conformance.sh scripts/run-mutation-corpus.sh
 
+  # Windows, for the half of the tool that has no terminal in it.
+  #
+  # The word did not appear anywhere in this repository -- not a support
+  # statement, not an exclusion, not a job -- while the README says the
+  # analysis "runs anywhere: in CI, on a laptop, in a container, with no
+  # driver installed". A Windows user had no way to tell whether a failure
+  # was worth reporting. Nothing here is Unix-specific by design: the
+  # analysis is a wrapped `cargo build` over Stable MIR with no vendor SDK on
+  # the path, and the one `cfg(unix)` in the tree guards a permissions test.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Materialize pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-windows-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-windows-
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The whole suite, PTY tests included -- termlens has had a required
+      # Windows leg since its 0.10.0, so there is no reason to assume the
+      # views are the part that breaks. If something here is genuinely not
+      # portable, it should be named in the README's Limitations section
+      # rather than skipped quietly.
+      - run: cargo test --workspace
+
   # The vendored termlens skill is refreshed by hand and AGENTS.md makes it
   # normative for every PTY test here, so a stale copy silently instructs the
   # next contributor to write code that no longer compiles. Nothing can diff
