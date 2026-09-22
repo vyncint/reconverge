@@ -12,6 +12,39 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G
+  (CC 8.6, driver 595.71.05, CUDA 13.2), cuda-oxide `b0f961df`. 36 labeled
+  mutants across `barrier`, `lanemask_scan` and `scoped_atomic_load_store`,
+  each run under `compute-sanitizer --tool synccheck`. The TSV is in
+  `docs/hardware/results/`, read against the static table in that
+  directory's README.
+
+  This is the first *external* check on the accuracy claims: every other
+  number in this repository is measured against a corpus the project wrote
+  for itself. Four results, and one of them is not in this tool's favour:
+
+  - **RC003 is invisible to the dynamic checker.** Seven `mutslice` mutants —
+    one `&mut [T]` handed to every thread — ran clean under synccheck.
+    reconverge denies all seven from syntax alone. 100% against 0% on the
+    same labeled bugs.
+  - **Three of nine `wrapbar` mutants passed on hardware**, no hang and
+    nothing reported. The accidental pass this project has described since
+    0.1.0, now measured on a part.
+  - **`shrinkmask` is invisible to both**, which is the first evidence that
+    the published expected-recall-0 is a property of the bug class rather
+    than a gap in this engine.
+  - **`delbar` is where synccheck wins**: it flagged two deleted-barrier
+    mutants that this analysis cannot see at all, a deleted barrier being a
+    data race and outside the decidable slice by design.
+
+  Two corrections fell out of running it: `session-2.md` named
+  `barrier_sync_test` as an example directory when it is a kernel inside
+  `barrier`, and `atomics` is no longer probeable for the old finding because
+  upstream rewrote it at this pin to take `*mut u32` through
+  `DeviceAtomicU32::from_ptr`.
+
 ## [0.7.0] — 2026-09-22
 
 The production-readiness release. It ships the correctness fix `main` had
