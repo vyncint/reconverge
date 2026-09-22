@@ -51,20 +51,30 @@ inputs:
 runs:
   using: composite
   steps:
+    # Through `$GITHUB_OUTPUT` rather than `$GITHUB_ENV`. Both carry the value
+    # to the next step; only the environment file can *set* a variable the
+    # runner itself acts on, which is why writing to it from a `run:` block is
+    # flagged wherever the written value is not obviously the action's own.
+    # These two are read out of this repository's checkout and nothing else,
+    # but an output says that structurally instead of in a comment.
     - name: Install the pinned toolchain
+      id: toolchain
       shell: bash
       run: |
         reconverge_root="$(cd "${GITHUB_ACTION_PATH}/.." && pwd)"
-        echo "RECONVERGE_ROOT=${reconverge_root}" >> "$GITHUB_ENV"
+        echo "root=${reconverge_root}" >> "$GITHUB_OUTPUT"
         # `rustup toolchain install` inside the repo reads
         # rust-toolchain.toml: the exact nightly plus rustc-dev/llvm-tools,
         # which the driver needs.
         (cd "${reconverge_root}" && rustup toolchain install)
         toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "${reconverge_root}/rust-toolchain.toml")"
-        echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
+        echo "channel=${toolchain}" >> "$GITHUB_OUTPUT"
 
     - name: Install the analyzer
       shell: bash
+      env:
+        RECONVERGE_ROOT: ${{ steps.toolchain.outputs.root }}
+        RUSTUP_TOOLCHAIN: ${{ steps.toolchain.outputs.channel }}
       run: |
         # The version comes from the ref's own workspace manifest, so
         # `@<ref>` still chooses the analyzer; it is now resolved to a
@@ -87,6 +97,10 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
+        # The analyzed project is built with reconverge's pin, overriding any
+        # rust-toolchain.toml the target repository carries: a rustc-driver
+        # tool and the rustc it wraps must be the same build.
+        RUSTUP_TOOLCHAIN: ${{ steps.toolchain.outputs.channel }}
         INPUT_CC: ${{ inputs.cc }}
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_SARIF: ${{ inputs.sarif }}

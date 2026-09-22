@@ -9,12 +9,19 @@ permissions:
   contents: read
   pull-requests: write
 
+# A superseded run of this gate has nothing left to report.
+concurrency:
+  group: commit-policy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   commit-policy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine commit range
@@ -52,7 +59,12 @@ jobs:
       - name: No AI attribution on any commit
         # run even when the DCO step failed, so both reports land at once
         if: success() || failure()
-        run: .github/scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.range }}"
+        # Through `env:` rather than expanded into the script line: a `${{ }}`
+        # inside a `run:` block is substituted before bash ever sees it, so a
+        # ref name is interpolated as shell rather than passed as an argument.
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: .github/scripts/check-no-ai-attribution.sh "$RANGE"
 
       # The guidance has to survive a fork PR, where GITHUB_TOKEN is
       # read-only no matter what `permissions:` above asks for — so it
