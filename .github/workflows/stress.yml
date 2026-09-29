@@ -113,7 +113,7 @@ jobs:
       # Only on a caught flake, which is the run that matters here. The
       # artifact name carries the OS and the thread count, because which shard
       # a flake landed on is most of the diagnosis.
-      - uses: vyncint/termlens/.github/actions/report@6a1411e316a83a4208289862b7532beda552deb7 # v0.11.2
+      - uses: vyncint/termlens/.github/actions/report@5830c93d92fdd263fed3fdd0c3095b9618b8aa6f # v0.11.3
         if: failure()
         with:
           name: termlens-flake-${{ matrix.os }}-${{ matrix.threads }}t
