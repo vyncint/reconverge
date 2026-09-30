@@ -1466,9 +1466,9 @@ dependencies = [
 
 [[package]]
 name = "termlens"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f87d209970e479a096785b98dc9f482934a5c74256a878385d1de18cb8ada20"
+checksum = "a8c92f26f9681f8c3c00506fc2b30cf79b6ceb66f30ae0a6b8aa949223305a42"
 dependencies = [
  "libc",
  "portable-pty",
