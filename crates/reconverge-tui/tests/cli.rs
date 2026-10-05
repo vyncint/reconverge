@@ -218,13 +218,17 @@ fn inspect_reproduces_the_checked_in_shell_golden() {
     );
     let printed = stdout(&out);
     assert!(printed.starts_with("size: 80x24"), "{printed}");
-    // The shell is a TUI, so inspect reports the deadline rather than an
+    // The shell is a TUI, so inspect reports it still running rather than an
     // exit — on **stderr** since termlens 0.11 (termlens#340), so that what
     // stdout carries is a saved screen and needs no filtering here. Against
     // 0.10.x the trailer followed the screen on stdout and this test dropped
-    // the line itself.
+    // the line itself. Which "still running" it is depends on what ended the
+    // wait: since termlens 0.11.3 (#374) a shell that goes quiet for `--idle`
+    // reads `still running (killed on exit)`, and only one that keeps
+    // printing until `--timeout` says `at the deadline`. Both mean it did not
+    // exit, which is all this asserts.
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("still running at the deadline"),
+        String::from_utf8_lossy(&out.stderr).contains("still running"),
         "the shell does not exit on its own: {}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -232,7 +236,13 @@ fn inspect_reproduces_the_checked_in_shell_golden() {
         !printed.contains("--- "),
         "stdout is the screen alone:\n{printed}"
     );
-    let screen = printed.clone();
+    // Through a pipe, inspect writes a saved screen *with* its `styles:`
+    // block since termlens 0.11.3 (#454, #478), where the checked-in goldens
+    // are the grid alone. The grid is what the two paths into a screen have
+    // to agree on here, so the block is dropped the way the other golden
+    // checks drop it (`grid_of`); against 0.11.2 there is none and this is
+    // the whole screen.
+    let screen = format!("{}\n", grid_of(&printed));
     let live = env::temp_dir().join(format!("reconverge-inspect-{}.snap", std::process::id()));
     fs::write(&live, &screen).expect("write the inspected screen");
 
