@@ -5,8 +5,8 @@ description: Write, fix or review headless terminal tests for a Rust CLI or TUI 
 
 # Testing terminal programs with termlens
 
-Written against **termlens 0.11.0**, the stability candidate: from 0.11.0
-no promised public item changes incompatibly before 1.0, so the API below
+Written against **termlens 0.11.7**. 0.11.0 is the stability candidate:
+from it no promised public item changes incompatibly before 1.0, so the API below
 is one to build on, not one to expect to move. Every `rust` block below is
 a complete integration test that is compiled against the crate in CI, so
 the API it shows is the API that exists. The recipes spawn a binary called
@@ -128,18 +128,24 @@ your test ── send(Key) · click · paste · resize ──▶ PTY     └─�
    `EndSynchronizedUpdate` — then a `wait_frame` timeout also shows the
    diff from the last frame it returned to the live screen.
 
-9. **Return `termlens::Result<()>` from the test and use `?`.** The
-   `Display` of every error carries the screen, so a failing wait prints
-   the grid the application was showing instead of `called unwrap() on Err`.
+9. **Return `termlens::Result<()>` from the test and use `?`.** Steps and
+   helpers then chain without an `.unwrap()` each, and a failed wait still
+   prints everything: the test harness shows the error's `Debug` form,
+   `Error: Timeout { waiting_for: "…", timeout: …, screen: Screen(…) }`,
+   with the description, any note and the grid. That is the same content
+   `unwrap()` would print, without the panic. The readable `Display` form
+   that §6 quotes is `err.to_string()`, for a test that asserts on an
+   error it expects.
 
 10. **Snapshot the `Screen`, not its text.** `insta::assert_snapshot!(screen)`
     records the header (`size: 80x24  cursor: 3,5` or `cursor: hidden`) and
     the grid; `screen.with_styles()` adds a `styles:` block that catches a
     colour regression. The one-liner that gets all three decisions right —
     wait, settle, styles — is `termlens::assert_screen_snapshot!(t, after =
-    |s| s.contains("Ready"))`. `.text()` drops the header and
-    `format!("{:?}")` is the same as `Display`. Review changes with `cargo
-    insta review`; never blind-accept with `INSTA_UPDATE=always`.
+    |s| s.contains("Ready"))`. `.text()` drops the header, and
+    `format!("{:?}")` wraps the same text in `Screen(…)`, which is not a
+    saved screen. Review changes with `cargo insta review`; never
+    blind-accept with `INSTA_UPDATE=always`.
 
 11. **The environment is hermetic by default — set what the app reads.**
     Under `env_clear()` (which `bin!` applies) the child sees only
@@ -394,21 +400,31 @@ fn snapshot_diff_and_mask() -> termlens::Result<()> {
 
 ## 6. Reading a failure
 
-Every error's `Display` ends with the screen, under a header that says
-which screen it is (`--- screen at timeout ---`, `--- final screen ---`).
-Read the first line for the cause:
+A wait error's `Display` (a timeout, an EOF, an emulator failure) and a
+failed write's end with the screen, under a header that says which screen
+it is (`--- screen at timeout ---`, `--- final screen ---`); a spawn, size
+or input error carries none.
+Read the first line for the cause. A test that fails through `?` or
+`unwrap()` prints the `Debug` form instead, which carries the same text in
+another shape: `timed out after 5s while waiting for X` is
+`Timeout { waiting_for: "X", timeout: 5s, screen: Screen(…) }`, notes
+included in `X`, and `terminal closed (EOF) while waiting for X` is
+`Eof { waiting_for: "X", … }`. The grid follows inside `Screen(…)`:
 
 | First line says | Meaning | Do |
 |---|---|---|
 | `timed out after 5s while waiting for the screen predicate to hold` | the predicate never became true | look at the embedded grid; the text is usually spelled differently, on another row, or scrolled off (the note says how many rows scrolled) |
 | `… note: N rows have scrolled off the top` | the text went into history | assert with `full_text()` / `scrollback_text()` |
-| `… note: the application queried the terminal (^[[?u …) and received no answer` | the app is blocked on a probe termlens deliberately does not answer | the app needs a fallback; see the termlens README's Known limitations |
+| `… note: the application queried the terminal (^[[?u …) and received no answer` | the app is blocked on a probe termlens deliberately does not answer | the app needs a fallback; see [the questions termlens leaves unanswered](https://github.com/vyncint/termlens/blob/main/docs/LIMITATIONS.md#waits-frames-and-queries) |
 | `terminal closed (EOF) while waiting for …` | the app exited before the predicate held | check `wait_exit()` first, or the app crashed — the final screen shows why |
+| ``failed to send Char('x') to `…` (the child is gone (exit code 7) and the terminal is closed)`` | input was sent after the child exited | check `wait_exit()` first and inspect the screen embedded under `--- screen at the failed write ---` |
+| ``failed to send … to `…` (the application is not reading its input, and the PTY buffer is full — no progress in 5s; …)`` | the child is alive but has stopped draining terminal input; the unwritten bytes stay queued, so do not retry the send | wait for the application to draw the state that is ready for input before typing |
 | `the application never emitted a DEC 2026 synchronized update` | `wait_frame` or `record().stop()` against an app without synchronized output | use `snapshot_after` / `wait_until` (rule 8) |
 | `--- last returned frame → live screen ---` under a `wait_frame` timeout | the app repainted, but never into the predicate | the diff shows what did change; the predicate is looking at the wrong thing |
 | `input not receivable: the application has not enabled mouse tracking` | `click`/`drag`/`scroll` before the app enabled the mouse | `wait_until(|s| s.mouse_mode() != MouseMode::None)` first |
 | `input not receivable: mouse at (50, 2) is outside the 20x5 grid` | coordinates swapped or out of range | rule 6 |
 | `failed to spawn \`sh\`: \`sh\` is a bare program name and env_clear() removed PATH` | bare program name under `env_clear` | absolute path, `bin!`, or `.env("PATH", …)` |
+| ``failed to spawn `./x`: cannot execute …: its #! interpreter "…" does not exist`` | the script's `#!` line names a file that is not there, or with `is not an executable file` one that cannot be run; a `\r` at the end of the quoted name means CRLF line endings | install the interpreter, point the `#!` line at one that exists, or save the script with LF endings |
 | `invalid terminal size: a terminal needs at least 2 columns and 2 rows` | geometry below 2x2 (past 1000 has its own message) | rule 5 |
 | `the terminal emulator failed and the screen stopped advancing` (`Error::Emulator`) | a bug in the emulation, not in your app | report it to termlens with the detail it names |
 
@@ -426,10 +442,10 @@ Read the first line for the cause:
 | `.current_dir(path)` | default: the test process's directory |
 | `.scrollback(rows)` | history retained (default 1000, text only) |
 | `.scrollback_styles(true)` | retain scrolled rows as cells too, so `scrollback_cell` keeps a masked-field assertion alive after it scrolls (measured cost in the rustdoc) |
-| `.record_budget(cells)` | how much `record()` retains before dropping the oldest frames |
+| `.record_budget(cells)` | how much `record()` retains, in cells (frames × grid size), before dropping the oldest frames; default 2,000,000, about a thousand 80x24 frames — `Recording::dropped()` counts what went |
 | `.spawn(program) -> Result<Terminal>` | program is a path or a name on `PATH` |
 
-**Wait** (all return `termlens::Result`, all embed the screen on failure, all have a `_for(…, timeout)` twin):
+**Wait** (the waits all return `termlens::Result`, all embed the screen on failure, all have a `_for(…, timeout)` twin; the last two rows are about frames over time rather than waits):
 
 | Method | Returns | Use for |
 |---|---|---|
@@ -440,7 +456,8 @@ Read the first line for the cause:
 | `wait_frame(\|s\| bool)` | `Screen` | complete DEC 2026 frames only (rule 8) |
 | `wait_exit()` | `ExitStatus` | the child's exit; `success()`, `code() -> Option<u32>`, `signal() -> Option<&str>` |
 | `wait_until_matches(&Regex)` | `Screen` | feature `regex`: a pattern over a row of the screen — the expect-style wait, on the grid |
-| `record()` … `.stop()` | `Recording` | every complete DEC 2026 frame with its time; `frames()`, `write_asciicast(path)` for a file `asciinema` plays |
+| `record()` … `.stop()` | `Recording` | every complete DEC 2026 frame with its time; `frames()`, `duration()` (to the last frame), `write_asciicast(path)` for a file `asciinema` plays — its header carries when and what was recorded |
+| `frame_timings()` | `Vec<FrameTiming>` | not a wait: what each of the last 512 repaints cost, span and size between its DEC 2026 markers, kept apart from the eight frames `wait_frame` retains — measured through a PTY, so a trend to hold a line on, not a render benchmark |
 
 **Drive**: `send(Key)`, `send_str("text")` (no Enter — send `Key::Enter`
 yourself; `"\n"` would send LF, not CR), `paste("text")` (bracketed if the
@@ -459,7 +476,7 @@ from_r, to_c, to_r)`, `scroll(col, row, Scroll::Down)`, `resize(cols, rows)`,
 | Accessor | Returns |
 |---|---|
 | `contains(&str)` / `find(&str)` / `find_all(&str)` | `bool` / `Option<(row, col)>` / `Vec<(row, col)>` — visible grid, NFC-folded |
-| `locate(&str)` | `Option<Location>`: `Screen { row, col }` or `History { row, col }` |
+| `locate(&str)` | `Option<Location>`: `Screen { row, col }` or `History { row, col }`, with `is_on_screen()`, `is_in_history()` and `col()` — and deliberately **no** `row()`: a grid row and a history row are different things, so match on the variant when the row matters |
 | `logical_text()` / `row_wrapped(row)` | wrapped rows joined back into lines / where the backend wrapped |
 | `find_by(\|&Cell\| bool)` | `Option<(row, col)>` |
 | `cell(row, col)` | `Option<&Cell>`: `contents()`, `style()`, `is_wide()`, `is_wide_continuation()` |
@@ -470,13 +487,12 @@ from_r, to_c, to_r)`, `scroll(col, row, Scroll::Down)`, `resize(cols, rows)`,
 | `cursor()` / `cursor_visible()` | `(row, col, visible)` / the flag alone; `cursor_shape()`, `cursor_blink()` |
 | `alternate_screen()`, `bracketed_paste()`, `application_cursor()`, `focus_events()` | mode flags |
 | `mouse_mode()` / `mouse_modes()` | reporting protocol / the set the app enabled |
-| `title()`, `clipboard()`, `links()`, `bells()`, `repaints()`, `graphics()` | out-of-band state |
+| `title()`, `clipboard()`, `links()`, `bells()`, `visual_bells()`, `repaints()`, `graphics()` | out-of-band state. `bells()` counts BEL; `visual_bells()` counts `ESC g`, a flash — a different event, so a test asserting on `bells()` alone passes against an app that complained the other way |
 | `unsupported()` / `insert_mode()` | an `Unsupported` view of the sequences the emulator did not implement (`^[[20h`…) — `is_empty()`, `contains("^[[5m")`, `iter()`, `overflow()`, and `assert_eq!(s.unsupported(), ["^[[59m"])` pins it — so a plausible grid can be told from a right one / IRM left on |
 | `with_styles()` | `ScreenWithStyles`, a `Display` with a `styles:` block; snapshot this to catch colour regressions |
 | `diff(&other)` | `ScreenDiff`: `is_empty()`, `cells()`, `changed_rows()`, `style_changes()`, and a `Display` of only the rows that changed |
-| `locate(needle)` | `Option<Location>`: `is_on_screen()`, `is_in_history()`, `col()` |
-| `mask_rect(cols, rows)` / `mask_matching(literal, fill)` / `mask_cells(pred)` | a new `Screen` with those cells replaced, styles and columns intact. `mask_matching` is a literal (rows included — it spans a wrap the way `find_all` does); `mask_cells` blanks by predicate |
-| `to_ansi()` / `to_svg()` / `to_html()` | renderings a person can see; `Screen::parse(text)` reads the text format back |
+| `mask_rect(cols, rows)` / `mask_matching(literal, fill)` / `mask_cells(pred)` | a new `Screen` with those cells replaced, styles and columns intact. `mask_matching` is a literal (a needle with `\n` spans rows, as `find_all`'s does; a value split by a soft wrap is two rows and is not matched); `mask_cells` blanks by predicate |
+| `to_ansi()` / `to_svg()` / `to_html()` | renderings a person can see — the SVG carries `role="img"` and a `<title>` naming its size and the app's title; `Screen::parse(text)` reads the text format back |
 
 **Style** (`Copy`, public fields): `fg`, `bg` (`Color::Default` /
 `Color::Indexed(u8)` / `Color::Rgb(u8, u8, u8)`), `bold`, `dim`, `italic`,
@@ -537,18 +553,28 @@ directory (see §9b).
 
 ## 9b. At a shell prompt, and in CI
 
-- `cargo install termlens-cli` gives the harness as a command: `termlens
+- `cargo install termlens-cli --locked` gives the harness as a command: `termlens
   inspect --size 120x40 myapp` prints what a program shows (`--ansi` for
   colour), `termlens diff old.snap new.snap.new` prints the cell diff of two
   saved screens and exits 1 if anything changed, `termlens render --svg
-  failing.snap` makes an image. A saved screen is any text termlens prints
-  — what `inspect` writes to stdout (`termlens inspect myapp > before.txt`;
-  its trailer goes to stderr), an insta `.snap`, the grid a wait error
-  leaves in a log — or the JSON the `serde` feature writes.
-- In CI, set `TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens` on the
-  test step and add `uses: vyncint/termlens/.github/actions/report@v0.11.0`
-  with `if: failure()` after it: every screen a failing wait embedded, and
-  every `.snap.new` with its diff, lands in the pull request's step summary.
+  failing.snap` makes an image (`--html`, `--ansi`, `--text` and `--json`
+  are the other formats — the last two are the ones another program can
+  parse; `--out shot.svg` writes to a file and leaves none behind if the
+  render fails). A saved screen is any text termlens prints — what
+  `inspect` writes to stdout (`termlens inspect myapp > before.txt`; its
+  trailer goes to stderr), an insta `.snap`, the grid a wait error leaves
+  in a log — or the JSON the `serde` feature writes.
+  `diff` and `render` read `-` as stdin (one operand of `diff` at most), and
+  `inspect --cwd DIR` runs the program somewhere other than here; a
+  relative program path such as `./demo` is then found inside `DIR`.
+- In CI, set `TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens` and
+  `INSTA_UPDATE: new` on the test step, and add
+  `uses: vyncint/termlens/.github/actions/report@v0.11.7` with
+  `if: failure()` after it: every screen a failing wait embedded, and every
+  `.snap.new` with its diff, lands in the pull request's step summary.
+  `INSTA_UPDATE: new` is not optional: insta's default writes no `.snap.new`
+  when `CI` is set, and GitHub sets it on every runner. Inline snapshots are
+  not rendered; insta keeps their new values in `.pending-snap` files.
 
 ## 10. A checklist before you finish
 
