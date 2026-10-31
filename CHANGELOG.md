@@ -12,6 +12,82 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **`check --package <name>` and `--exclude <name>`**, both repeatable, and
+  an `args` input on the Action to pass them. Upstream's single-source
+  layout links the CUDA host API, whose `cuda-bindings` build script needs
+  the CUDA toolkit; a workspace can now check the crate that holds the
+  kernels and leave the host crate out. Both READMEs say so, and a name
+  that is not a workspace member is refused before anything is built.
+  (#197)
+- **`check --require-kernels`** exits 2 when no `#[kernel]` was analyzed,
+  for a CI gate that must not pass on an empty run. (#196)
+
+### Changed
+
+- **`check` builds under the pinned nightly whatever `RUSTUP_TOOLCHAIN`
+  says.** rustup's `cargo` proxy exports that variable to every subcommand,
+  set to the toolchain it resolved for the project, so honouring it as "an
+  explicit choice" made a bare `cargo reconverge check` — the command the
+  README shows — load the driver against `stable` and exit 2 in any project
+  without the pin, with advice to run a `setup` that could not help. The
+  wrapped build now runs the pinned toolchain's own `cargo` as well. A driver
+  built against another toolchain is selected with the new
+  `RECONVERGE_TOOLCHAIN`, which nothing sets on the user's behalf. (#186)
+- **A run that analyzed no `#[kernel]` says so**:
+  `reconverge: no #[kernel] functions found in 1 crate — nothing was
+  analyzed`, still exit 0, and the Action raises a `::warning::` for it. A
+  wrong `working-directory`, a crate without the cuda-oxide dependency, or
+  kernels behind a disabled cfg used to print the exact summary of a clean
+  pass. (#196)
+- **`check` names the layer that failed.** A build script that failed (the
+  CUDA toolkit missing, typically), a driver that cannot start under the
+  toolchain, and ordinary compile errors used to share one message that
+  blamed the toolchain and recommended `setup`. cargo's own diagnostics now
+  pass through `check` rather than straight to the terminal, coloured when
+  stderr is one; cargo's progress bar is not shown. (#197)
+- **`witness` after a check that confirmed nothing exits 0**, saying there
+  is nothing to replay, instead of exit 2 and "run `cargo reconverge check`
+  first" right after one had run. A project where `check` has never run is
+  still exit 2. (#201)
+
+### Fixed
+
+- **Findings are keyed by target, not by package.** The driver names an
+  artifact after the target's crate name, and `check`, `inspect`, `witness`
+  and `triage` all filtered on the package's: a confirmed RC001 in a
+  `[[bin]]` (upstream's `atomic_f16` and `hashmap_v2` layout) was left out of
+  the report and exited 0; a renamed `[lib]` or a bin-only package exited 2
+  on every run as "not analyzed", having been analyzed twice; and a renamed
+  library with its old artifact present was reported from the old, clean
+  document. The set `check` gates on now comes from cargo's own build
+  messages — exactly the targets this run compiled — and the readers match
+  file names exactly against the workspace's lib and bin targets. (#187)
+- **A deleted or renamed target's artifacts are pruned.** Nothing ever
+  removed them, so a confirmed RC001 in a deleted `src/main.rs` went on
+  failing every run, pointing at a file that no longer existed, until
+  `target/reconverge` was deleted by hand. (#187)
+- **A truncated findings artifact heals instead of failing every run.** A
+  killed driver or a full disk left half a document; the build was fresh,
+  so nothing rewrote it, and every later run exited 2 with a serde error and
+  no hint. An unreadable artifact now gets one forced re-lint, like a
+  missing one, and if it is still unreadable the error names the directory
+  to delete. (#195)
+- **A newer schema is reported as one.** `deserialize_checked` parsed the
+  typed document before comparing `schema`, so a `findings.v2` from a newer
+  driver read as ``missing field `confidence` at line 1 column 1742`` — damage,
+  not a version. The tag is read first now, and `check` adds the `setup`
+  hint. (#195)
+- **Changing `--cc` re-lints the workspace members only.** Every unit's
+  fingerprint was dropped, so `--cc 8.6` followed by `--cc 9.0` recompiled
+  `syn`, `quote` and the rest of the dependency tree to re-lint one crate.
+  (#202)
+- **Outside a project, `check` says `error:` once.** cargo's own message was
+  nested under ours — `error: cargo metadata failed:`, then
+  ``error: could not find `Cargo.toml` …`` — and a trailing blank line.
+  (#199)
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G

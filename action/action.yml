@@ -48,6 +48,14 @@ inputs:
       github/codeql-action/upload-sarif in a follow-up step).
     required: false
     default: ""
+  args:
+    description: >-
+      Further `cargo reconverge check` arguments, split on whitespace —
+      for example `--package my-kernels` to check only the crate that holds
+      the kernels, `--exclude host`, or `--require-kernels` to fail the job
+      when no #[kernel] was analyzed.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -105,9 +113,28 @@ runs:
         INPUT_CC: ${{ inputs.cc }}
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_ARGS: ${{ inputs.args }}
       run: |
         args=()
         if [ -n "${INPUT_CC}" ]; then args+=(--cc "${INPUT_CC}"); fi
         if [ "${INPUT_STRICT}" = "true" ]; then args+=(--strict); fi
         if [ -n "${INPUT_SARIF}" ]; then args+=(--sarif "${INPUT_SARIF}"); fi
-        cargo-reconverge reconverge check "${args[@]}"
+        # Word-split on purpose, and only that: `read -a` does no globbing
+        # and no expansion, so the input stays data rather than shell.
+        if [ -n "${INPUT_ARGS}" ]; then
+          read -r -a extra <<< "${INPUT_ARGS}"
+          args+=("${extra[@]}")
+        fi
+        report="${RUNNER_TEMP}/reconverge-check.txt"
+        set +e
+        cargo-reconverge reconverge check "${args[@]}" | tee "${report}"
+        status="${PIPESTATUS[0]}"
+        set -e
+        # A run with no kernel passes, and a green check reads like a clean
+        # one: a wrong working-directory, a crate without the cuda-oxide
+        # dependency or kernels behind a disabled cfg all looked the same.
+        # Say so on the run's summary page; `--require-kernels` fails it.
+        if grep -q '^reconverge: no #\[kernel\] functions found' "${report}"; then
+          echo "::warning title=reconverge analyzed nothing::no #[kernel] functions were found, so nothing was analyzed. Check working-directory, or pass args: --require-kernels to fail the job instead."
+        fi
+        exit "${status}"
