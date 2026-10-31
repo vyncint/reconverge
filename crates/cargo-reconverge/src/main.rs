@@ -82,15 +82,18 @@ check options:
                               (repeatable; not with --package)
   --require-kernels           exit 2 when no #[kernel] was analyzed,
                               instead of passing with a note
-  The build uses the pinned toolchain whatever rustup resolved for the
-  project; RECONVERGE_TOOLCHAIN=<name> overrides it, for a driver built
-  by another toolchain (RECONVERGE_DRIVER)
   Note: --strict and --show-suppressed affect text output only;
         JSON is always the unfiltered record
 
 Exit codes: 0 = no findings at deny/confirmed confidence, 1 = findings,
 2 = tool error. Findings accepted by the baseline never gate the exit
 code, and their count is always reported.
+
+Environment:
+  RECONVERGE_TOOLCHAIN        the toolchain `check` builds under (default:
+                              the pinned nightly, whatever rustup chose
+                              for the project); only for a driver built
+                              by another toolchain
 ";
 
 fn main() -> ExitCode {
