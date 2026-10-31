@@ -45,6 +45,59 @@ the corpus; found-in-the-wild is the true north.
   upstream rewrote it at this pin to take `*mut u32` through
   `DeviceAtomicU32::from_ptr`.
 
+- **The README's `check` sample is a real run again** (#211). It said
+  `src/lib.rs:129:9` and `ThreadIndex::get`; 0.7.0 prints `184:9`,
+  `ThreadIndex::<'kernel, IndexSpace>::get` and a witness note the sample
+  lacked. It is now copied from `cargo reconverge check` over the sample
+  crate, and says where it came from.
+  Also: a **Prebuilt binaries** section (the two targets the release
+  archives cover, the checksum, one directory for all three binaries, and
+  the pinned nightly the driver links at run time), `--ascii` for the
+  views, the pin claim in the README and `action/README.md` (the pin is
+  upstream's toolchain at `conformance/PIN`, not upstream's today),
+  `upload-sarif@v4`, the publish order and a portable `sed` in
+  `docs/RELEASING.md`, an `[Unreleased]` link definition, and the
+  `MUTATION.md` paragraph that still called the unmasked warp wrappers
+  outside the surface — they are analyzed, and the generator says so now.
+- **The witness-debugger recording shows the current fixtures** (#211). It
+  had been recorded over the hand-written fixtures of the first commit
+  ("step 0/5", `lib.rs:20`), and `scripts/record-witness-demo.sh` still
+  pressed `l` four times "to the barrier" of a three-step replay. The key
+  schedule is now computed from the fixture, and the script refuses to
+  write a cast whose step counter disagrees with it.
+
+### Changed
+
+- **`required-green` now waits for the macOS job and for `commit-policy`**
+  (#209). It is the ruleset's only required context, and neither fed it: a
+  red macOS PTY run did not block a merge while the README called the views
+  gated on macOS, and PR #84 merged with the DCO/attribution gate red.
+  `ci.yml` calls `commit-policy.yml` as a reusable workflow, which keeps its
+  own triggers and is the one that posts the PR comment.
+
+### Fixed
+
+- **`pins.yml` sees upstream's monorepo** (#207). Upstream moved its device
+  crate to `cuda-oxide/crates/cuda-device` and its device toolchain beside
+  it; the watcher compared the root `rust-toolchain.toml` (the host
+  workspace's stable `1.98.0`) and `check-surface.sh` exited 2 on the old
+  path, which the workflow read as an empty list of unknown functions.
+  `scripts/upstream-layout.sh` now finds the crate in either layout and the
+  toolchain file rustup would apply to it; any exit of the surface gate
+  other than 0 or 1 fails the run with its output; and the open drift issue
+  is kept current — its body rewritten when the drift changes, a comment
+  added when the *kind* of drift does — instead of muting every later
+  report behind the first one's title. Against upstream `2d47e43` it now
+  reports `1.99.1` and ten undecided surface functions.
+- **`release.yml` holds the tag to the manifest, moves `v0` only forward,
+  and names a failed notification** (#210). A new first job fails unless
+  every published crate at the tag declares the tag's version, so a tag on
+  the wrong commit stops at the dry run instead of shipping archives and a
+  GitHub Release under the wrong name. `float-major-tag` leaves `v0` alone
+  when the dispatched tag is older than the release it points at. And the
+  `simt-diff` dispatch no longer exits on a failing `gh` before its warning
+  is printed — `bash -e` ended the step at the assignment.
+
 ## [0.7.0] — 2026-09-22
 
 The production-readiness release. It ships the correctness fix `main` had
@@ -1373,6 +1426,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[Unreleased]: https://github.com/vyncint/reconverge/compare/v0.7.0...HEAD
 [0.7.0]: https://github.com/vyncint/reconverge/releases/tag/v0.7.0
 [0.6.1]: https://github.com/vyncint/reconverge/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0

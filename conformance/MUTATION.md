@@ -39,10 +39,12 @@ removing a barrier must not conjure findings.
 - **wrapcol** — same mechanics as wrapbar, over the collectives the
 dialect classifies: the masked `*_sync` surface of cuda-device's warp
 module (`shuffle_*_sync` in every width, `ballot/any/all_sync`,
-`match_*_sync`, `redux_sync_*`, `elect_sync`) plus `sync_mask`. Sites
-hidden behind the unmasked convenience wrappers (`warp::shuffle`,
-`warp::ballot`, the `reduce_*` helpers) are outside the v1 surface
-and counted under site accounting below.
+`match_*_sync`, `redux_sync_*`, `elect_sync`), `sync_mask`, and the
+unmasked convenience wrappers (`warp::shuffle`, `warp::ballot`, `all`,
+`any`, `popc`, the `reduce_*` helpers), which the dialect reads as
+their `*_sync` counterpart with a full mask, so they are wrapped like
+any other site. `skipped_unclassified_collectives` under site
+accounting is the drift check on that agreement and reads zero.
 Promotion additionally needs a mask the analysis can evaluate; upstream
 writes masks as named consts, which `rustc_public` cannot evaluate at
 the pin, and an unevaluable mask is never witness-promoted — it could
