@@ -42,6 +42,11 @@ the corpus; found-in-the-wild is the true north.
   `explain` alias, `RECONVERGE_DRIVER`/`RECONVERGE_TUI`, and that `watch`
   exits with its last run's code. (#199)
 
+- **`reconverge-tui --version` (and `-V`).** `cargo reconverge setup`
+  installs three binaries that must be one release, and the TUI was the one
+  that could not say which it was: `--version` opened the artifact shell on
+  a file called `--version`. `--help` now lists every view (#206).
+
 ### Changed
 
 - **A run that analyzed no `#[kernel]` says so**:
@@ -83,6 +88,33 @@ the corpus; found-in-the-wild is the true north.
   gated on macOS, and PR #84 merged with the DCO/attribution gate red.
   `ci.yml` calls `commit-policy.yml` as a reusable workflow, which keeps its
   own triggers and is the one that posts the PR comment.
+
+- **`reconverge-tui` refuses an unknown option** with exit 2 and the usage,
+  instead of opening it as an artifact path — a misspelt `--asci` surfaced
+  inside the view as `No such file or directory`. `--` ends the options, for
+  a file whose name starts with a dash (#206).
+- **Ctrl-C in triage says what it threw away.** It is still the exit that
+  always works, mid-reason or not, but with unsaved baseline edits it now
+  prints `discarded N unsaved baseline edits` on stderr after the terminal
+  is restored and exits **130**, where it used to exit 0 having dropped a
+  review pass without a word. `cargo reconverge triage` passes the code on.
+  With nothing unsaved it is a plain quit, as before (#206).
+- **The Inspector's finding bar names the tier**, spelt as `check` prints
+  it: `finding 4/39 warning[RC005] …`. A lint-samples run loads 39 findings
+  there of which 25 are warnings `check` hides by default, and without the
+  word a hidden warning read exactly like a gating deny (#206).
+- **The witness view ranks its rows on a small terminal.** The lane strip
+  and the current step come first, then the verdict, and the timeline gives
+  way before any of them; below the strip's own size the view says
+  `terminal too small — the lane strip needs at least 47x10` instead of
+  drawing the ruler over blank rows, which is what 40x10 showed. The header
+  and the current step's statement wrap rather than ending in `block (…` and
+  "…without ever reaching the …" at 80 columns, so the 80x24 goldens move by
+  a row (#206).
+- **Lesson prose reflows** when an authored line does not fit, instead of
+  losing the end of every line at 46 columns ("the mask promis…"), and a
+  page that still runs out of rows ends in `… more below: enlarge the
+  terminal`. Where the authored breaks fit they are kept (#206).
 
 ### Breaking
 
@@ -168,6 +200,20 @@ the corpus; found-in-the-wild is the true north.
   when the dispatched tag is older than the release it points at. And the
   `simt-diff` dispatch no longer exits on a failing `gh` before its warning
   is printed — `bash -e` ended the step at the assignment.
+
+- **Killing a TUI view with SIGTERM, SIGHUP or SIGQUIT left the terminal
+  raw**, on the alternate screen, with the cursor hidden: `q`, Ctrl-C and a
+  panic restored it, and the signals a `timeout`, `tmux kill-pane` or a
+  parent shutting down send did not. A signal thread now runs the same
+  restore and re-raises the signal with its default action, so the shell
+  still reports a death by that signal (#205).
+- **After `f`, the Inspector's bottom line kept naming the previous
+  function's finding** over the new function's source. Switching function
+  now drops a finding that is about another kernel (#206).
+- **At 80x24 the `barriers` and `reconvergence` lessons cut the last line of
+  their kernel excerpt**, one row short of room — in `reconvergence`, the
+  `sync_threads()` the page is about. The replay's separating blank gives
+  way first now (#206).
 
 ### Documentation
 

@@ -1,0 +1,25 @@
+size: 80x24  cursor: hidden
+┌ reconverge witness ──────────────────────────────────────────────────────────┐
+│witness 1/1 — kernel `rc001_multiwarp_barrier` — RC001 — grid (1,1,1) block   │
+│(64,1,1)                                                                      │
+│                                                                              │
+│          0        8        16       24                                       │
+│w0        WWWWWWWW WWWWWWWW WWWWWWWW WWWWWWWW                                 │
+│w1        ........ ........ ........ ........                                 │
+│mask      (not at a warp collective)                                          │
+│                                                                              │
+│          o active   W waiting   . exited                                     │
+│                                                                              │
+│step 3/3  [==>]                                                               │
+│the other 32 lanes exit or move past reconvergence without ever reaching the  │
+│barrier                                                                       │
+│at lib.rs:432                                                                 │
+│                                                                              │
+│                                                                              │
+│   2  sync_threads() — 32 of 64 lanes arrive and wait             32 waiting  │
+│▸  3  the other 32 lanes exit or move past reconvergence without ever reachin…│
+│                                                                              │
+│verdict: undefined behavior (at step 3)                                       │
+│32 of 64 lanes wait at `sync_threads()` while 32 never arrive; the barrier    │
+│cannot be satisfied — undefined behavior on hardware, usually a permanent hang│
+└ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
