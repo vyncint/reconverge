@@ -46,6 +46,18 @@ the corpus; found-in-the-wild is the true north.
   nightly-2026-08-28 --profile minimal --no-self-update` — instead of
   `setup`, which recompiles the driver and the TUI from source. (#203)
 
+- **`reconverge-driver` built on the wrong toolchain, or failed to name the
+  right one.** Its build script checked for `rustc-dev` and nothing else:
+  `cargo +stable install reconverge-driver` got that component's message
+  with a `<toolchain>` placeholder, and another nightly *built* a driver
+  that then failed under `check` with `librustc_driver-….so: cannot open
+  shared object file`. The script now compares `rustc -vV`'s `commit-hash`
+  with the pinned nightly's and stops with one line to paste, ending in
+  `rustup run nightly-2026-08-28 cargo install --locked
+  reconverge-driver@VERSION`; a test holds the embedded pin to
+  `rust-toolchain.toml` and to the rustc it selects. The README's "four
+  `E0463`s", which no toolchain produced any more, are gone with it. (#204)
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G
