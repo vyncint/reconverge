@@ -28,6 +28,10 @@ pub enum ArgError {
     /// request reaches the printer without seven new signatures. `main`
     /// prints the usage text and exits 0.
     Help,
+    /// `--version` or `-V` after a subcommand, by the same route as
+    /// [`ArgError::Help`]: `check -V` is what a script asking which analyzer
+    /// it is about to run types, and it was told the flag does not exist.
+    Version,
 }
 
 impl ArgError {
@@ -41,6 +45,13 @@ impl ArgError {
     #[must_use]
     pub fn is_help(&self) -> bool {
         matches!(self, ArgError::Help)
+    }
+
+    /// Whether `flag` asks for the version. It sits beside [`ArgError::help`]
+    /// in every parse loop, below the value-taking flags for the same reason.
+    #[must_use]
+    pub fn version(flag: &str) -> bool {
+        matches!(flag, "--version" | "-V")
     }
 
     /// `Some(ArgError::Help)` when `flag` asks for the usage text.
@@ -67,6 +78,7 @@ impl fmt::Display for ArgError {
         match self {
             ArgError::Unknown(message) | ArgError::Value(message) => out.write_str(message),
             ArgError::Help => out.write_str("help requested"),
+            ArgError::Version => out.write_str("version requested"),
         }
     }
 }
@@ -109,24 +121,38 @@ pub(crate) fn reject_value(name: &str, inline: Option<&str>) -> Result<(), ArgEr
 }
 
 /// A required value. An inline `--flag=value` is accepted as-is, so a
-/// path that itself starts with `--` is written `--sarif=--weird`. A
-/// separate token that starts with `--` is not a value — that is how
-/// `--sarif --strict` used to write a report to a file named `--strict`.
+/// path that itself starts with `-` is written `--sarif=-weird`. A
+/// separate token that starts with `-` is not a value — that is how
+/// `--sarif --strict` used to write a report to a file named `--strict`,
+/// and `--baseline -h` read a baseline named `-h` rather than answering.
+///
+/// An empty value is refused in either form. `--sarif=` ran the whole
+/// analysis and only then failed with `cannot write SARIF to : …`, and
+/// `--baseline=` said `cannot read :` — a path nobody meant, discovered
+/// late, in a message that does not show it.
 pub(crate) fn require_value(
     name: &str,
     inline: Option<&str>,
     next: impl FnOnce() -> Option<String>,
 ) -> Result<String, ArgError> {
-    if let Some(value) = inline {
-        return Ok(value.to_string());
+    let value = match inline {
+        Some(value) => value.to_string(),
+        None => match next() {
+            Some(token) if token.starts_with('-') => {
+                return Err(ArgError::Value(format!(
+                    "`{name}` requires a value (got the flag `{token}`)"
+                )));
+            }
+            Some(value) => value,
+            None => return Err(ArgError::Value(format!("`{name}` requires a value"))),
+        },
+    };
+    if value.is_empty() {
+        return Err(ArgError::Value(format!(
+            "`{name}` requires a value (got an empty one)"
+        )));
     }
-    match next() {
-        Some(token) if token.starts_with("--") => Err(ArgError::Value(format!(
-            "`{name}` requires a value (got the flag `{token}`)"
-        ))),
-        Some(value) => Ok(value),
-        None => Err(ArgError::Value(format!("`{name}` requires a value"))),
-    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -198,5 +224,42 @@ mod tests {
             .unwrap(),
             "--weird"
         );
+    }
+
+    #[test]
+    fn a_value_flag_refuses_a_following_short_flag() {
+        // `--baseline -h` read a baseline named `-h`; `--sarif -x` wrote a
+        // report named `-x`.
+        for token in ["-h", "-x", "-V", "-"] {
+            let err = require_value("--baseline", None, || Some(token.into())).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("`--baseline` requires a value (got the flag `{token}`)")
+            );
+        }
+        assert_eq!(
+            require_value("--sarif", Some("-x"), || None).unwrap(),
+            "-x",
+            "inline, a leading `-` is a value"
+        );
+    }
+
+    #[test]
+    fn an_empty_value_is_refused_in_either_form() {
+        for (inline, next) in [(Some(""), None), (None, Some(String::new()))] {
+            let err = require_value("--sarif", inline, || next).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "`--sarif` requires a value (got an empty one)"
+            );
+            assert!(!err.wants_usage());
+        }
+    }
+
+    #[test]
+    fn version_is_recognised_and_is_not_a_failure() {
+        assert!(ArgError::version("--version") && ArgError::version("-V"));
+        assert!(!ArgError::version("-v") && !ArgError::version("--versions"));
+        assert!(!ArgError::Version.wants_usage());
     }
 }

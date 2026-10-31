@@ -55,9 +55,8 @@ pub fn page(code: &str) -> Option<&'static str> {
 /// a reserved-but-unshipped one.
 pub fn run(code: &str) -> u8 {
     let normalized = code.to_ascii_uppercase();
-    if let Some(page) = PAGES.iter().find(|p| p.code == normalized) {
-        print!("{}", page.text);
-        return 0;
+    if let Some(page) = page(&normalized) {
+        return crate::out::print_or_exit(page);
     }
     if let Some((_, what)) = RESERVED.iter().find(|(c, _)| *c == normalized) {
         eprintln!("error: {normalized} is reserved but not shipped yet: {what}");
@@ -76,6 +75,9 @@ pub fn parse(args: &[String]) -> Result<String, ArgError> {
     for arg in args {
         if ArgError::help(arg) {
             return Err(ArgError::Help);
+        }
+        if ArgError::version(arg) {
+            return Err(ArgError::Version);
         }
         if arg.starts_with('-') || code.is_some() {
             return Err(ArgError::unknown(arg));

@@ -593,8 +593,8 @@ fn help_explains_that_text_filters_do_not_change_json() {
         "stdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("--sarif=--weird"),
-        "help must say how a path beginning with -- is passed:\n{stdout}"
+        stdout.contains("--sarif=-weird"),
+        "help must say how a path beginning with - is passed:\n{stdout}"
     );
 }
 

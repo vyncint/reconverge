@@ -215,13 +215,15 @@ impl Counts {
         coverage: Option<RunCoverage>,
     ) -> String {
         use std::fmt::Write as _;
-        let total = self.deny + self.confirmed + self.warning;
+        // The noun agrees with the number beside it, not with the sum of
+        // three: `2 confirmed, 1 warning findings` and `1 confirmed, 0
+        // warning finding` were both what the total produced.
         let mut line = format!(
             "reconverge: {} deny, {} confirmed, {} warning {}",
             self.deny,
             self.confirmed,
             self.warning,
-            plural(total, "finding", "findings")
+            plural(self.warning, "finding", "findings")
         );
         if self.warning > 0 && !strict {
             let _ = write!(
@@ -329,6 +331,30 @@ mod tests {
                 warning: 1,
                 suppressed: 2
             }
+        );
+    }
+
+    #[test]
+    fn the_noun_agrees_with_the_count_beside_it() {
+        let line = |confirmed, warning| {
+            Counts {
+                confirmed,
+                warning,
+                ..Counts::default()
+            }
+            .summary_line(true, false, None)
+        };
+        assert_eq!(
+            line(2, 1),
+            "reconverge: 0 deny, 2 confirmed, 1 warning finding"
+        );
+        assert_eq!(
+            line(1, 0),
+            "reconverge: 0 deny, 1 confirmed, 0 warning findings"
+        );
+        assert_eq!(
+            line(0, 2),
+            "reconverge: 0 deny, 0 confirmed, 2 warning findings"
         );
     }
 

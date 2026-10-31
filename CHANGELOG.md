@@ -12,6 +12,65 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **`--cc` takes the arch spellings cuda-oxide itself uses.** `sm_90a`,
+  `sm_100f`, `sm_120a`, `compute_86` and `9.0a` were all refused, while
+  cargo-oxide's `--arch` is spelled that way throughout and the README said
+  "the CUDA spellings work". An `a`/`f` suffix selects an instruction set on
+  the same device, so it means the base capability's limits; it is still
+  checked, so `sm_86a` — which names no architecture — is an error rather
+  than a quiet 8.6. The table gains 10.3, 11.0 and 12.1, all in the CUDA 13
+  guide's memory table (12.1 as the second member of `12.x`). (#200)
+- **SARIF rules carry what code scanning shows beside an alert**: a
+  `fullDescription` (the explain page's opening paragraph) and the page
+  itself as `help.markdown`/`help.text`. A rule had only an id, a one-line
+  summary and a link. (#198)
+- **`cargo reconverge help`, and `--version`/`-V` after a subcommand**
+  (`check -V`) are answered instead of being reported as unrecognized
+  arguments with the usage text. The usage text now lists `--version`, the
+  `explain` alias, `RECONVERGE_DRIVER`/`RECONVERGE_TUI`, and that `watch`
+  exits with its last run's code. (#199)
+
+### Changed
+
+- **SARIF locations are relative to the repository root, and say so.** Each
+  `uri` was relative to the Cargo workspace root with no base, and GitHub
+  reads a relative URI from the repository root, so a workspace in a
+  subdirectory — the Action's `working-directory: kernels` — put every alert
+  on `src/lib.rs` instead of `kernels/src/lib.rs`. The report now finds the
+  repository around the workspace (a `.git` directory or file), spells each
+  path from there with `uriBaseId: "%SRCROOT%"`, and declares that directory
+  in `originalUriBaseIds`; a file outside the repository gets an absolute
+  `file://` URI. RC001's short description is now "an all-threads barrier
+  under thread-divergent control", not `sync_threads()` alone. (#198)
+- **A value-taking flag refuses an empty value and a following token that
+  begins with `-`.** `check --sarif=` ran the whole analysis and then failed
+  with `cannot write SARIF to : …`; `--baseline -h` read a baseline named
+  `-h`, and `--sarif -x` wrote a report named `-x`. A path that begins with
+  `-` is still accepted inline: `--sarif=-x`. (#199)
+
+### Breaking
+
+- **Action: a relative `sarif` path is written under the repository root**
+  (`$GITHUB_WORKSPACE`), not under `working-directory`, so the
+  `upload-sarif` step in action/README.md finds the file it names. A
+  workflow that worked around this by uploading
+  `<working-directory>/reconverge.sarif` must drop the prefix. (#198)
+
+### Fixed
+
+- **`--explain`, `--help` and `--version` no longer panic into a closed
+  pipe.** `cargo reconverge --explain RC001 | head -3` exited 101 with
+  `failed printing to stdout: Broken pipe`; these now go through the same
+  classified stdout as `check`'s report and exit 0. (#199)
+- **The summary's noun agrees with the count beside it**:
+  `0 deny, 2 confirmed, 1 warning finding`, not `… 1 warning findings`,
+  which pluralized on the total. (#199)
+- **The stale-baseline note quotes its entry once**: ``baseline entry
+  sample_kernels RC001 in `gone` no longer matches``, where the whole label
+  used to be wrapped in a second pair of backticks. (#199)
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G
