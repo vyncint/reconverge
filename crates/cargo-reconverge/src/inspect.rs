@@ -27,6 +27,7 @@ impl InspectOptions {
                 // Below the value-taking flags, so `--baseline --help` is
                 // still the missing value it was.
                 flag if ArgError::help(flag) => return Err(ArgError::Help),
+                flag if ArgError::version(flag) => return Err(ArgError::Version),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -57,33 +58,18 @@ pub fn run(options: &InspectOptions) -> Result<u8, String> {
 }
 
 /// The workspace root and the unimap and findings artifacts of the current
-/// workspace members, from `<target>/reconverge/`.
+/// workspace members' targets, from `<target>/reconverge/`.
 fn discover_artifacts() -> Result<(PathBuf, Vec<PathBuf>), String> {
     let metadata = check::cargo_metadata()?;
     let dir = metadata.target_directory.join("reconverge");
-    let mut artifacts = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|_| {
-        format!(
-            "no artifacts at {}; run `cargo reconverge check` first",
-            dir.display()
-        )
-    })?;
-    for entry in entries {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let recognized = name.ends_with(".json")
-            && (name.starts_with("unimap-") || name.starts_with("findings-"))
-            && metadata
-                .member_crates
-                .iter()
-                .any(|krate| name.contains(&format!("-{krate}-")));
-        if recognized {
-            artifacts.push(path);
-        }
-    }
-    artifacts.sort();
+    let artifacts = metadata
+        .artifacts_in(&dir, &["unimap", "findings"])
+        .map_err(|_| {
+            format!(
+                "no artifacts at {}; run `cargo reconverge check` first",
+                dir.display()
+            )
+        })?;
     if artifacts.iter().all(|p| {
         !p.file_name()
             .and_then(|n| n.to_str())

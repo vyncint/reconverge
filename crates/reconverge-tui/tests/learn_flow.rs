@@ -362,9 +362,16 @@ fn masks_verdict_is_whole_at_a_narrow_width() {
         .expect("interactive page");
     t.send(Key::Char('v')).expect("send Key::Char('v')");
     // Its final word fell off the panel before the fix — `finishes` here,
-    // the last word of the verdict the driver actually writes.
+    // the last word of the verdict the driver actually writes. The prose
+    // above it reflows rather than losing the end of every authored line
+    // ("the mask promis…"), and says so where the page runs out of rows.
     let frame = t
-        .wait_frame(|s| s.contains("verdict") && s.contains("finishes"))
+        .wait_frame(|s| {
+            s.contains("verdict")
+                && s.contains("finishes")
+                && s.contains("the mask promises all 32")
+                && s.contains("more below: enlarge the terminal")
+        })
         .expect("the masks verdict must appear in full at 46 columns");
     assert_golden(
         "learn-masks-46x24.txt",

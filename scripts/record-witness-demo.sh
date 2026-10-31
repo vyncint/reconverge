@@ -30,9 +30,26 @@ width, height = 80, 24
 # The walkthrough: step to the RC001 barrier, watch the hang verdict land,
 # rewind, jump to the divergence, then the RC002 witness and its mask
 # panel. Pacing is for human eyes.
-schedule = [
-    (1.5, "l"), (0.9, "l"), (0.9, "l"), (0.9, "l"),  # to the barrier
-    (2.2, "l"),                                        # verdict lands
+#
+# The step counts come from the fixture rather than being written here. A
+# hard-coded "l" x4 "to the barrier" outlived the hand-written five-step
+# fixtures it was counted against: after the fixtures were recorded from a
+# real run (three steps) the cast still showed "step 0/5" and lib.rs:20,
+# lines no current artifact has.
+def load(name):
+    with open(os.path.join(fixtures, name)) as f:
+        return json.load(f)
+
+rc001 = load("rc001-divergent-barrier.json")
+rc002 = load("rc002-partial-mask.json")
+steps = len(rc001["steps"])
+# Position p shows step p-1 (position 0 is the launch), so the barrier at
+# step index b is b+1 presses away.
+barrier = next(i for i, st in enumerate(rc001["steps"])
+               if st["statement"].startswith("sync_threads()"))
+to_barrier = [(1.5 if i == 0 else 0.9, "l") for i in range(barrier + 1)]
+to_verdict = [(2.2, "l")] * (steps - (barrier + 1))
+schedule = to_barrier + to_verdict + [
     (2.8, "g"),                                        # rewind
     (1.2, "d"),                                        # jump to the split
     (2.0, "n"),                                        # the RC002 witness
@@ -85,6 +102,52 @@ while True:
         next_key = (time.monotonic() + keys[0][0]) if keys else None
 
 os.waitpid(pid, 0)
+
+# Hold the recording to the fixtures before it replaces the checked-in
+# cast: every step counter on screen must name a fixture's length, and the
+# walk must have reached the RC001 verdict. The stream is a diff — after
+# the first frame only changed cells are written — so the counter is read
+# off a replayed grid, not searched for in the bytes. Cursor positioning
+# and text are all the views emit; every other sequence is skipped.
+import re
+
+def frames(events):
+    grid = [[" "] * width for _ in range(height)]
+    row = col = 0
+    for _, _, data in events:
+        i = 0
+        while i < len(data):
+            ch = data[i]
+            if ch == "\x1b":
+                m = re.match(r"\x1b\[([0-9;?]*)([@-~])", data[i:])
+                if m:
+                    if m.group(2) == "H":
+                        parts = (m.group(1) or "1;1").split(";")
+                        row = int(parts[0] or 1) - 1
+                        col = int(parts[1] or 1) - 1 if len(parts) > 1 else 0
+                    i += m.end()
+                else:
+                    i += 2
+                continue
+            if ch == "\r":
+                col = 0
+            elif ch == "\n":
+                row = min(row + 1, height - 1)
+            elif 0 <= row < height and 0 <= col < width:
+                grid[row][col] = ch
+                col += 1
+            i += 1
+        yield "\n".join("".join(r) for r in grid)
+
+seen = set()
+for frame in frames(events):
+    seen.update((int(a), int(b)) for a, b in re.findall(r"step (\d+)/(\d+)", frame))
+lengths = {len(rc001["steps"]), len(rc002["steps"])}
+totals = {b for _, b in seen}
+if not totals or not totals <= lengths:
+    sys.exit(f"cast shows step totals {sorted(totals)}; the fixtures have {sorted(lengths)}")
+if (steps, steps) not in seen:
+    sys.exit(f"the walk never reached step {steps}/{steps}, the RC001 verdict")
 header = {
     "version": 2,
     "width": width,

@@ -6,7 +6,7 @@
 //! and testable, and the one place that touches the filesystem is the one
 //! place that had to.
 
-use reconverge_artifacts::baseline::BaselineArtifact;
+use reconverge_artifacts::baseline::{BaselineArtifact, Entry};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::data::TriageData;
@@ -27,6 +27,8 @@ pub struct TriageState {
     /// Feedback from the last action, rendered in the status bar.
     pub status: Status,
     write_requested: bool,
+    /// The entries as they are on disk: loaded, or last written.
+    saved: Vec<Entry>,
 }
 
 /// A finding's suppression status.
@@ -71,6 +73,7 @@ impl TriageState {
     pub fn new(baseline: BaselineArtifact) -> TriageState {
         TriageState {
             selected: 0,
+            saved: baseline.entries.clone(),
             baseline,
             editing: None,
             dirty: false,
@@ -170,10 +173,37 @@ impl TriageState {
         match result {
             Ok(()) => {
                 self.dirty = false;
+                self.saved = self.baseline.entries.clone();
                 self.status = Status::Wrote(self.baseline.entries.len());
             }
             Err(message) => self.status = Status::WriteFailed(message),
         }
+    }
+
+    /// How many baseline entries differ from what is on disk: accepted,
+    /// re-reasoned or withdrawn since the load or the last write. A
+    /// suppression withdrawn again before writing is no edit at all, so this
+    /// counts the difference rather than the keystrokes.
+    #[must_use]
+    pub fn unsaved_edits(&self) -> usize {
+        let added_or_changed = self
+            .baseline
+            .entries
+            .iter()
+            .filter(|entry| !self.saved.contains(entry))
+            .count();
+        let withdrawn = self
+            .saved
+            .iter()
+            .filter(|saved| {
+                !self
+                    .baseline
+                    .entries
+                    .iter()
+                    .any(|entry| entry.matches_same_findings(saved))
+            })
+            .count();
+        added_or_changed + withdrawn
     }
 
     /// Whether `q` may exit now. Unsaved edits get one confirmation first —
