@@ -25,12 +25,20 @@ path to also write a SARIF 2.1.0 report, for upload with
 ```yaml
       - uses: vyncint/reconverge/action@v0
         with:
+          working-directory: kernels # optional
           sarif: reconverge.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: reconverge.sarif
 ```
+
+A relative `sarif` path is resolved against the repository root
+(`$GITHUB_WORKSPACE`), not against `working-directory`: the report above
+lands at `reconverge.sarif` in the repository root whichever directory was
+analyzed, which is where `upload-sarif` looks for it. The locations inside it
+are relative to the repository root too (`kernels/src/lib.rs`), so alerts
+land on the file that has the finding.
 
 Notes:
 

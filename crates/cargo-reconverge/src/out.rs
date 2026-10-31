@@ -14,7 +14,7 @@
 //! code. Mapping a broken pipe to `0` instead would turn a cosmetic bug into
 //! the silent pass this analyzer exists to prevent.
 
-use std::io;
+use std::io::{self, Write};
 
 /// Interpret the outcome of writing a report to stdout.
 ///
@@ -28,5 +28,27 @@ pub fn finish(result: io::Result<()>) -> Result<(), String> {
         // up. Stop writing and keep the verdict.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         Err(e) => Err(format!("cannot write to stdout: {e}")),
+    }
+}
+
+/// Print `text` whole — usage, a version line, an explain page — and give
+/// the exit code it earns: `0`, closed reader included, or `2` for a write
+/// that really failed.
+///
+/// `--explain RC001 | head -3` reads the heading and goes. Through `print!`
+/// that was a panic and exit 101, while `check` in the same pipe kept its
+/// code; every stdout write now takes the one route.
+pub fn print_or_exit(text: &str) -> u8 {
+    let mut stdout = io::stdout().lock();
+    match finish(
+        stdout
+            .write_all(text.as_bytes())
+            .and_then(|()| stdout.flush()),
+    ) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("error: {err}");
+            2
+        }
     }
 }
