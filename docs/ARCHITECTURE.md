@@ -123,7 +123,15 @@ model IR the driver builds from Stable MIR.
   driver models helpers per instance, which is what resolves a trait method
   or a closure to the body it runs; a call it cannot resolve is an opaque
   terminator. All of it is `warning` until the bounded inliner splices the
-  path into the kernel and the witness replays it.
+  path into the kernel and the witness replays it. The replay never steps
+  over a call that may synchronize and was not spliced: a lane that meets
+  one, or can still reach one, ends the replay.
+- **Scopes below the block.** Each value also carries the widest scope it is
+  constant over — thread, warp, block, cluster, grid. A barrier asks whether
+  its guard is constant over the barrier's participants; a warp collective
+  asks the same of one warp, so a `warp_id()` guard (under a block that lays
+  its warps along x) is convergent for a collective and divergent for
+  `sync_threads`.
 - **Degrades are declared.** An irreducible CFG degrades to all-divergent for
   that function and says so; opaque statements (`asm!`, unmodeled
   intrinsics) are counted and carried in `findings.v1` as a run-level
@@ -137,12 +145,15 @@ Findings above `warning` go to a lane interpreter that runs the same model
 the engine analyzed. It is deliberately not a kernel runtime: it exists to
 turn "this could hang" into "here is the launch where it does."
 
-One warp is the ordinary replay. When it finds nothing and the kernel's
-`#[launch_contract]` declares a one-dimensional block of several whole warps,
-barrier findings are replayed again at the declared width (64, 96 or 128) —
+A kernel's `#[launch_contract]` block is the only shape it is replayed in,
+2-D and 3-D included (lane *n* is the thread at linear index *n*, x fastest),
 so a `warp_id()`-guarded barrier that is safe at one warp and undefined at
-two is promoted exactly when the contract says two. Blocks that are 2D, not
-whole warps, or wider than 128 threads stay at the one-warp replay.
+two is promoted exactly when the contract says two. A kernel with no contract
+is replayed as one warp. A declared block that is not a whole number of
+warps, or is wider than 128 threads, is not replayed at all — replaying it as
+something else would witness a launch the contract excludes — and a
+collective site is replayed only under a one-warp block. Either way the
+finding stays at `warning` with a `replay:` note.
 
 - **It only runs as far as it must.** A lane stops as soon as it either
   reaches the site in question or enters code from which that site can no

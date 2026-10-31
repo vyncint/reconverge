@@ -124,6 +124,26 @@ fn function_cycling_resets_the_selection() {
     assert_eq!(state.selected, "_1");
 }
 
+/// `f` leaves a finding about another kernel behind: the bar along the
+/// bottom used to keep naming `divergent_barrier` over `scale`'s source.
+#[test]
+fn switching_function_drops_a_finding_about_another_kernel() {
+    let data = fixture_data();
+    let mut state = InspectorState::new(&data);
+    // Finding 3, RC001 in `divergent_barrier`.
+    for _ in 0..3 {
+        state.update(KeyAction::NextFinding, &data);
+    }
+    assert_eq!(state.finding, Some(2));
+    assert!(state.update(KeyAction::NextFunction, &data));
+    assert_eq!(data.functions[state.function].function.name, "scale");
+    assert_eq!(state.finding, None);
+
+    // `n` then starts over from the first finding, as it does on launch.
+    assert!(state.update(KeyAction::NextFinding, &data));
+    assert_eq!(state.finding, Some(0));
+}
+
 /// The T1 gate property, checked headlessly: the RC001 finding's chain is
 /// navigable in the unimap from the branch condition down to a
 /// thread-index source.

@@ -93,8 +93,16 @@ pub enum Operand {
 pub enum Eval {
     /// Plain copy, reference-to-scalar, or literal.
     Use(Operand),
-    /// A binary operation on two operands, wrapping at 128 bits.
-    Binary(BinOp, Operand, Operand),
+    /// A binary operation on two operands of the given integer type,
+    /// evaluated exactly as the program would: wrapping at the type's
+    /// width, and with the signed meaning of order, division and right
+    /// shift when the type is signed.
+    ///
+    /// It carried no type until #192, and the store's zero-extended
+    /// embedding then made every comparison unsigned: `-(lane as i32) < 1`
+    /// read `0xffff_ffe1 < 1` and sent 31 lanes the wrong way, which is a
+    /// lane split the program never has, promoted to `confirmed`.
+    Binary(BinOp, Operand, Operand, IntType),
     /// Unary operation evaluated at the operand's own width in bits.
     ///
     /// The width is the whole point: the store is an untyped `u128`, so a
@@ -121,11 +129,38 @@ pub enum Eval {
     CheckedBinary(BinOp, Operand, Operand, u32),
 }
 
+/// The operand type of an [`Eval::Binary`]: its width in bits and whether
+/// it is signed. The store holds every value zero-extended from `bits`, so
+/// this is what says how to read one back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IntType {
+    /// Width in bits, 1 (`bool`) to 128.
+    pub bits: u32,
+    /// Two's complement rather than unsigned.
+    pub signed: bool,
+}
+
+impl IntType {
+    /// An unsigned integer (or `bool`, at one bit) of `bits` bits.
+    #[must_use]
+    pub const fn unsigned(bits: u32) -> Self {
+        Self {
+            bits,
+            signed: false,
+        }
+    }
+
+    /// A two's complement integer of `bits` bits.
+    #[must_use]
+    pub const fn signed(bits: u32) -> Self {
+        Self { bits, signed: true }
+    }
+}
+
 /// Integer/boolean operators the interpreter evaluates. Comparison results
-/// are 0/1; arithmetic wraps at 128 bits (kernels index with unsigned
-/// values far below that). Width-sensitive operations do not live here —
-/// see [`Eval::Unary`], [`Eval::Cast`] and [`Eval::CheckedBinary`], which
-/// carry the width they need.
+/// are 0/1. The operand type travels beside the operator — see
+/// [`Eval::Binary`], [`Eval::Unary`], [`Eval::Cast`] and
+/// [`Eval::CheckedBinary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     /// Addition.

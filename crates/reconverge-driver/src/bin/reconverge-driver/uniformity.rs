@@ -3,6 +3,7 @@
 use reconverge_artifacts::findings::{
     Confidence, Finding, ProvenanceStep, RunCoverage, SourceSpan,
 };
+use reconverge_artifacts::plural;
 use reconverge_artifacts::unimap;
 use reconverge_artifacts::witness::{
     FindingRef, LaneChange, LaneState, Launch, Step, Verdict, WitnessArtifact,
@@ -17,7 +18,7 @@ use reconverge_core::inline::{MAX_DEPTH, inline_all, inline_calls};
 use reconverge_core::interproc::{self, KernelContext, Reached};
 use reconverge_core::model::{FnId, FnModel, TermKind};
 use reconverge_core::{LaunchScope, Uniformity};
-use reconverge_witness::{NoWitness, Replay, SiteKind, ascii_warp_diagram};
+use reconverge_witness::{NoWitness, Replay, ReplayEnv, SiteKind, ascii_warp_diagram};
 
 use crate::adapt::CrateModels;
 
@@ -57,48 +58,34 @@ struct ReplaySite {
     arrived_glyph: char,
 }
 
-/// `model` as a replay may run it: every call that could synchronize inside
-/// a body the replay does not enter becomes a jump it declines at.
+/// `model` as a replay may run it, for the calls the interpreter's own
+/// rail cannot see.
 ///
-/// The interpreter steps over an ordinary call, which is right for a
-/// callee that only computes a value — its result is unknown, and unknowns
-/// are handled. A callee that may hold a barrier is different: a lane
-/// stepping over it is a lane the replay claims did not wait there, and a
-/// verdict naming which lanes "never arrive" would rest on that claim. So a
-/// local callee whose summary says it may synchronize must be spliced in
-/// (the bounded inliner) or the lane declines; so must a call the analysis
-/// cannot see into at all (#188, #189). Inline asm is left as it was:
-/// its outputs are statements, so its terminator carries no destination.
+/// The witness ends a replay at a local call whose summary says it may
+/// synchronize and that was not spliced in, and treats every lane that can
+/// still reach one as unfollowed rather than absent (#191). It asks the
+/// call's direct callee. Two calls have none and still may synchronize:
+/// a library call handed a closure that does (`for_each(|_| sync())`,
+/// `Callee::may_call`), and a call the analysis cannot see into at all, an
+/// opaque terminator with a destination (#188, #189). Inline asm is left
+/// as it was: its outputs are statements, so its terminator carries no
+/// destination.
 ///
-/// A lane that never gets to such a call is unaffected, which is right for
-/// every call but one kind: a callee that can reach the site's own function
-/// again — recursion — reaches the very barrier being replayed, so the
-/// lanes that take it have not "never arrived". Those calls also get an
-/// edge to the site, so a lane heading for one is still a lane that can
-/// reach the site, and declines there instead of being counted absent.
-fn replay_model(
-    models: &CrateModels,
-    summaries: &Summaries,
-    model: &FnModel,
-    site: &ReplaySite,
-    site_fn: Option<FnId>,
-) -> FnModel {
+/// Each such call becomes a `Jump` — the terminator the interpreter declines
+/// at — with an extra edge to the site, so the same rule holds: a lane that
+/// can still reach one can still reach the site, and declines instead of
+/// being counted as never arriving.
+fn replay_model(summaries: &Summaries, model: &FnModel, site: &ReplaySite) -> FnModel {
     let n = summaries.may_contain_barrier.len();
     let may_sync =
         |c: FnId| c < n && (summaries.may_contain_barrier[c] || summaries.may_contain_warp_op[c]);
-    let reenters = |c: FnId| {
-        site_fn.is_some_and(|s| c < n && interproc::reachable(&models.fns, c).contains(&s))
-    };
     let mut out = model.clone();
     for block in &mut out.blocks {
         let declined = match &block.term.kind {
             TermKind::Call { callee, target, .. }
                 if callee.kind == CallKind::Other
-                    && callee
-                        .local_fn
-                        .into_iter()
-                        .chain(callee.may_call.iter().copied())
-                        .any(may_sync) =>
+                    && callee.local_fn.is_none()
+                    && callee.may_call.iter().copied().any(may_sync) =>
             {
                 Some(*target)
             }
@@ -109,25 +96,54 @@ fn replay_model(
             } => Some(*target),
             _ => None,
         };
-        let reentering = match &block.term.kind {
-            TermKind::Call { callee, .. } => callee
-                .local_fn
-                .into_iter()
-                .chain(callee.may_call.iter().copied())
-                .any(reenters),
-            _ => false,
-        };
         if let Some(target) = declined {
-            let mut targets: Vec<usize> = target.into_iter().collect();
-            if reentering {
-                targets.push(site.block);
-            }
-            // `Jump` is the terminator the interpreter declines at, and
-            // with no target it is still one: a lane reaching it bails.
+            let targets = target.into_iter().chain([site.block]).collect();
             block.term.kind = TermKind::Jump { targets };
         }
     }
     out
+}
+
+/// The `replay:` note for a replay that was declined rather than run to a
+/// result, when there is a reason a reader can act on.
+fn declined_note(model: &FnModel, kind: SiteKind, outcome: NoWitness) -> Option<String> {
+    match outcome {
+        NoWitness::UnsupportedLaunch => {
+            let [x, y, z] = model.declared_block?;
+            let threads = u64::from(x) * u64::from(y) * u64::from(z);
+            let why = if threads % 32 != 0 {
+                format!(
+                    "{threads} {}, not a whole number of warps",
+                    plural(threads, "thread", "threads")
+                )
+            } else if threads > 128 {
+                format!("{threads} threads, more than the 128 the replay runs")
+            } else {
+                debug_assert!(!matches!(kind, SiteKind::Barrier));
+                format!(
+                    "{} warps, and a collective is replayed only within a one-warp block",
+                    threads / 32
+                )
+            };
+            Some(format!(
+                "replay: not attempted — the launch contract declares a ({x}, {y}, {z}) block \
+                 ({why}). Replaying any other shape would show a launch the contract \
+                 excludes, so this stays a warning"
+            ))
+        }
+        NoWitness::UnfollowedCall { block } => {
+            let TermKind::Call { callee, .. } = &model.blocks[block].term.kind else {
+                return None;
+            };
+            Some(format!(
+                "replay: not promoted — lanes reach a call to `{}`, which may execute a \
+                 barrier or a warp collective and was not inlined (recursion, or more than \
+                 {MAX_DEPTH} frames deep), so the replay cannot follow them past it",
+                callee.display
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// What every replay attempt shares: the models, the summaries that say
@@ -139,36 +155,21 @@ struct Replayer<'a> {
 }
 
 impl Replayer<'_> {
-    /// Replay one site of `model`: one warp, then the declared block. `site_fn`
-    /// is the function the site's block was copied from, when it was spliced
-    /// in from a helper.
-    fn replay_at_launch(
-        &self,
-        model: &FnModel,
-        site: &ReplaySite,
-        site_fn: Option<FnId>,
-    ) -> Result<Replay, NoWitness> {
-        let model = &replay_model(self.models, self.summaries, model, site, site_fn);
-        // One warp first — a divergent lane pair inside a warp is the common
-        // case. When that finds nothing and the kernel's launch contract
-        // declares a one-dimensional block of several whole warps, replay the
-        // declared block: whole-warp divergence (a `warp_id()` guard) has no
-        // divergent pair inside 32 lanes and only exists at the declared size.
-        match reconverge_witness::replay_outcome(model, site.block, site.kind, site.cause_span) {
-            Ok(replay) => Ok(replay),
-            Err(one_warp) => match model.declared_block {
-                // The declared shape is the launch this kernel claims, so when
-                // it is replayed its answer is the one to report.
-                Some([x, 1, 1]) if x > 32 => reconverge_witness::replay_outcome_at(
-                    model,
-                    site.block,
-                    site.kind,
-                    site.cause_span,
-                    x,
-                ),
-                _ => Err(one_warp),
-            },
-        }
+    /// Replay a site under the launch the kernel claims: its declared
+    /// block, or one warp when it declares none.
+    ///
+    /// Only the declared block. Replaying one warp first and the declared
+    /// block second reported whatever the first found, and a `(16, 16, 1)`
+    /// contract was then "confirmed" with `threadIdx.x` at 16..31 — a launch
+    /// the contract excludes, and a hang no allowed launch has (#190). A
+    /// declared shape the replay cannot run is declined and says so.
+    fn replay_declared(&self, model: &FnModel, site: &ReplaySite) -> Result<Replay, NoWitness> {
+        let model = &replay_model(self.summaries, model, site);
+        let env = ReplayEnv {
+            block: model.declared_block.unwrap_or(ReplayEnv::ONE_WARP.block),
+            summaries: Some(self.summaries),
+        };
+        reconverge_witness::replay_outcome_at(model, site.block, site.kind, site.cause_span, &env)
     }
 
     /// Attempt a witness replay for a direct site. On success: promote the
@@ -176,17 +177,28 @@ impl Replayer<'_> {
     /// warp diagram to its notes (they render in text and SARIF alike), and
     /// assemble the `witness.v1` artifact.
     fn try_witness(&mut self, f: &FnModel, finding: &mut Finding, site: &ReplaySite) {
-        let mut outcome = self.replay_at_launch(f, site, None);
+        let mut outcome = self.replay_declared(f, site);
+        // Why a declined replay declined, read off the model it ran on.
+        let mut declined = outcome
+            .as_ref()
+            .err()
+            .and_then(|&no| declined_note(f, site.kind, no));
         // A guard that reads a helper's return value — `if
         // get_global_thread_id() % 2 == 0` — is an unknown to the replay while
         // the helper is a call, and arithmetic once it is spliced in (#188).
         // Splicing appends the callees, so the site keeps its block id. Only a
         // replay that could not decide is retried; a decided one already used
         // every value it needed.
-        if matches!(outcome, Err(NoWitness::Indeterminate))
-            && let Some(inlined) = inline_all(&self.models.fns, f, MAX_DEPTH)
+        if matches!(
+            outcome,
+            Err(NoWitness::Indeterminate | NoWitness::UnfollowedCall { .. })
+        ) && let Some(inlined) = inline_all(&self.models.fns, f, MAX_DEPTH)
         {
-            let retried = self.replay_at_launch(&inlined.model, site, None);
+            let retried = self.replay_declared(&inlined.model, site);
+            declined = retried
+                .as_ref()
+                .err()
+                .and_then(|&no| declined_note(&inlined.model, site.kind, no));
             if retried.is_ok() {
                 finding.notes.push(
                     "witness: the helpers on this path were inlined, so the values it branches \
@@ -226,6 +238,10 @@ impl Replayer<'_> {
                 ));
                 return;
             }
+            Err(NoWitness::UnsupportedLaunch | NoWitness::UnfollowedCall { .. }) => {
+                finding.notes.extend(declined);
+                return;
+            }
             Err(NoWitness::Uniform | NoWitness::Indeterminate) => return,
         };
         self.promote(f, finding, &replay, site.arrived_glyph);
@@ -241,7 +257,7 @@ impl Replayer<'_> {
         arrived_glyph: char,
     ) {
         finding.confidence = Confidence::Confirmed;
-        let warps = replay.block[0].div_ceil(32);
+        let warps = replay.threads().div_ceil(32);
         finding.notes.push(format!(
             "witness: replayed with grid ({},{},{}) x block ({},{},{}), {} — {}",
             replay.grid[0],
@@ -260,7 +276,7 @@ impl Replayer<'_> {
         finding.notes.extend(ascii_warp_diagram(
             replay.arrived,
             replay.never_arrives,
-            replay.block[0],
+            replay.threads(),
             arrived_glyph,
         ));
         self.witnesses
@@ -288,6 +304,11 @@ impl Replayer<'_> {
         let Some((_, sites)) = inlined.exposed.iter().find(|(b, _)| *b == call_block) else {
             return;
         };
+        // The calls the inliner left in place — recursion, and frames past
+        // its depth — are still calls in the spliced model, and the replay
+        // refuses to step over one that may synchronize. That refusal is the
+        // reason a reader needs, so the first one is kept for the note.
+        let mut declined = None;
         for &block in sites {
             let Some(kind) = site_kind_of(&inlined.model.blocks[block]) else {
                 continue;
@@ -298,17 +319,22 @@ impl Replayer<'_> {
                 cause_span,
                 arrived_glyph,
             };
-            let site_fn = inlined.origins[block].map(|(id, _)| id);
-            if let Ok(replay) = self.replay_at_launch(&inlined.model, &site, site_fn) {
-                finding.notes.push(
-                    "witness: the callee was inlined at the call site, so this is a \
-                 concrete path rather than a summary bit"
-                        .to_string(),
-                );
-                self.promote(f, finding, &replay, arrived_glyph);
-                return;
+            match self.replay_declared(&inlined.model, &site) {
+                Ok(replay) => {
+                    finding.notes.push(
+                        "witness: the callee was inlined at the call site, so this is a \
+                         concrete path rather than a summary bit"
+                            .to_string(),
+                    );
+                    self.promote(f, finding, &replay, arrived_glyph);
+                    return;
+                }
+                Err(outcome) => {
+                    declined = declined.or_else(|| declined_note(&inlined.model, kind, outcome));
+                }
             }
         }
+        finding.notes.extend(declined);
     }
 
     /// Replay a site inside a helper, against the kernel that reaches it (#188).
@@ -331,6 +357,7 @@ impl Replayer<'_> {
         let Some(inlined) = inline_calls(&self.models.fns, kernel, MAX_DEPTH) else {
             return;
         };
+        let mut declined = None;
         for (copy, origin) in inlined.origins.iter().enumerate() {
             if *origin != Some((helper, block)) {
                 continue;
@@ -344,16 +371,22 @@ impl Replayer<'_> {
                 cause_span,
                 arrived_glyph,
             };
-            if let Ok(replay) = self.replay_at_launch(&inlined.model, &site, Some(helper)) {
-                finding.notes.push(
-                    "witness: the helper was inlined into the kernel, so this is a concrete path \
-                 with the arguments this kernel passes"
-                        .to_string(),
-                );
-                self.promote(kernel, finding, &replay, arrived_glyph);
-                return;
+            match self.replay_declared(&inlined.model, &site) {
+                Ok(replay) => {
+                    finding.notes.push(
+                        "witness: the helper was inlined into the kernel, so this is a \
+                         concrete path with the arguments this kernel passes"
+                            .to_string(),
+                    );
+                    self.promote(kernel, finding, &replay, arrived_glyph);
+                    return;
+                }
+                Err(outcome) => {
+                    declined = declined.or_else(|| declined_note(&inlined.model, kind, outcome));
+                }
             }
         }
+        finding.notes.extend(declined);
     }
 }
 
@@ -388,12 +421,13 @@ fn witness_artifact(
     finding: &Finding,
     replay: &Replay,
 ) -> WitnessArtifact {
+    let lanes = replay.threads();
     let launch = Launch {
         grid: replay.grid,
         block: replay.block,
         // A one-warp replay is warp 0; a whole-block replay is not a single
         // warp's view.
-        warp: (replay.block[0] == 32).then_some(0),
+        warp: (lanes == 32).then_some(0),
     };
     let steps = replay
         .steps
@@ -431,8 +465,8 @@ fn witness_artifact(
     let mut artifact = WitnessArtifact::new(
         f.name.clone(),
         launch,
-        u8::try_from(replay.block[0]).unwrap_or(32),
-        vec![LaneState::Active; replay.block[0] as usize],
+        u8::try_from(lanes).unwrap_or(32),
+        vec![LaneState::Active; lanes as usize],
         steps,
         verdict,
     );
@@ -775,10 +809,32 @@ pub fn rc002_nonconvergent_warp_ops(
             let scope = SiteScope { kernel, reached };
             let helper = scope.helper(models);
             let analysis = &reached.analysis;
+            // Without a contract, `warp_id() == 0` is not provably
+            // warp-uniform — a (48, 2, 1) block puts two rows in one warp —
+            // so it is still reported. It is under any 1-D block, though,
+            // and a reader should be told that the contract is what settles
+            // it rather than be left with a warning on the idiom (#194).
+            // Asked once per kernel, only when there is something to ask
+            // about, and only of the kernel's own sites: a helper's would
+            // need the arguments the kernel passes it, which the note does
+            // not need to be right about to be useful.
+            let mut one_dimensional: Option<Analysis> = None;
             for site in &analysis.warp_ops {
                 let Some(cause) = site.divergent_cause else {
                     continue;
                 };
+                let uniform_if_one_dimensional =
+                    helper.is_none() && kernel.declared_block.is_none() && {
+                        let assumed = one_dimensional.get_or_insert_with(|| {
+                            let mut declared = kernel.clone();
+                            declared.declared_block = Some(ReplayEnv::ONE_WARP.block);
+                            engine::analyze(&declared, &results.summaries)
+                        });
+                        assumed
+                            .warp_ops
+                            .iter()
+                            .any(|w| w.block == site.block && w.divergent_cause.is_none())
+                    };
                 let message = if site.interprocedural {
                     format!(
                         "kernel `{}` calls `{}`, which may execute a warp collective, under \
@@ -821,6 +877,16 @@ pub fn rc002_nonconvergent_warp_ops(
                             .to_string(),
                     ),
                     None => {}
+                }
+                if uniform_if_one_dimensional {
+                    notes.push(
+                        "the guard is the same on every lane of a warp in a one-dimensional \
+                         block — `warp_id()` and `threadIdx_x() / 32` are a warp number there \
+                         — but this kernel declares no `#[launch_contract]`, and in a block \
+                         such as (48, 2, 1) one warp spans two rows; declaring the block shape \
+                         settles it"
+                            .to_string(),
+                    );
                 }
                 if let Some(helper) = helper {
                     notes.push(helper_note(helper, &kernel.name));
@@ -1017,7 +1083,9 @@ fn values_of(models: &CrateModels, f: &FnModel, analysis: &Analysis) -> Vec<unim
 fn value_source(kind: &ReasonKind, call: Option<CallKind>) -> unimap::ValueSource {
     match kind {
         ReasonKind::Source => match call {
-            Some(CallKind::ThreadIndexWitness) => unimap::ValueSource::ThreadIndex,
+            Some(CallKind::ThreadIndexWitness | CallKind::ThreadIndexX { .. }) => {
+                unimap::ValueSource::ThreadIndex
+            }
             Some(CallKind::AtomicRmw) => unimap::ValueSource::AtomicReturn,
             _ => unimap::ValueSource::Derived,
         },

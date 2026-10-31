@@ -88,6 +88,46 @@ pub fn fit(s: &str, width: usize, ascii: bool) -> String {
     out
 }
 
+/// Greedy word wrap to a display width, for text that must arrive whole
+/// rather than end in [`fit`]'s ellipsis: breaks between words, and a word
+/// wider than a line is split across lines rather than cut. Transliterated
+/// under `--ascii` first, like [`fit`], so the widths are the drawn ones.
+/// Always at least one line, so an empty text still holds its row.
+#[must_use]
+pub fn wrap(s: &str, width: usize, ascii: bool) -> Vec<String> {
+    let s = if ascii { asciify(s) } else { s.to_string() };
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut used = 0;
+    for word in s.split_whitespace() {
+        let w = word.width();
+        if used > 0 && used + 1 + w <= width {
+            line.push(' ');
+            line.push_str(word);
+            used += 1 + w;
+            continue;
+        }
+        if used > 0 {
+            lines.push(std::mem::take(&mut line));
+            used = 0;
+        }
+        for grapheme in word.graphemes(true) {
+            let g = grapheme.width();
+            if used > 0 && used + g > width {
+                lines.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            line.push_str(grapheme);
+            used += g;
+        }
+    }
+    if used > 0 || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// `--ascii` transliteration: the shell's own punctuation gets a faithful
 /// spelling, anything else non-ASCII degrades to `?` rather than leaking.
 fn asciify(s: &str) -> String {
@@ -194,6 +234,27 @@ mod tests {
     fn ascii_mode_transliterates_content() {
         assert_eq!(fit("a — b · c…", 40, true), "a -- b * c...");
         assert_eq!(fit("ph\u{e2}n k\u{1ef3}", 40, true), "ph?n k?");
+    }
+
+    #[test]
+    fn wrap_breaks_between_words_and_never_drops_text() {
+        assert_eq!(wrap("", 10, false), vec![""]);
+        assert_eq!(wrap("short", 10, false), vec!["short"]);
+        // Exactly the width stays on one line.
+        assert_eq!(wrap("12345 789", 9, false), vec!["12345 789"]);
+        assert_eq!(wrap("12345 7890", 9, false), vec!["12345", "7890"]);
+        // A word wider than the line is split, not cut.
+        assert_eq!(
+            wrap("abcdefgh ij", 3, false),
+            vec!["abc", "def", "gh", "ij"]
+        );
+        // Widths are display widths, after transliteration.
+        assert_eq!(wrap("a \u{2014} b", 4, true), vec!["a --", "b"]);
+        assert_eq!(
+            wrap("\u{6f22}\u{5b57} ab", 4, false),
+            vec!["\u{6f22}\u{5b57}", "ab"]
+        );
+        assert_eq!(wrap("anything", 0, false).concat(), "anything");
     }
 
     #[test]

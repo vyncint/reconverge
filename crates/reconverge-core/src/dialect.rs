@@ -67,6 +67,23 @@ pub enum CallKind {
     /// Mints a per-thread index witness (`index_1d`, `threadIdx_x`, lane
     /// id, …): the result is divergent by definition.
     ThreadIndexWitness,
+    /// The thread's position along the block's x axis over `divisor`:
+    /// `threadIdx_x` itself (divisor 1), and `warp::warp_id`, which
+    /// cuda-device defines as `threadIdx_x() / 32`. A thread-index witness
+    /// in every other respect.
+    ///
+    /// Singled out because the one per-warp fact a full-mask collective
+    /// needs is about this axis: `threadIdx.x / 32k` is the same on every
+    /// lane of a warp *when the block lays its warps along x* — a 1-D
+    /// block, a row width that is a whole number of warps, or a row no
+    /// wider than the divisor. That is a property of the launch, so the
+    /// engine decides it from the declared block, and with no
+    /// `#[launch_contract]` it does not assume it: under a `(48, 2, 1)`
+    /// block, warp 1 holds `x` 32..47 of row 0 and `x` 0..15 of row 1.
+    ThreadIndexX {
+        /// What `threadIdx.x` is divided by: 1, or 32 for `warp_id`.
+        divisor: u32,
+    },
     /// Atomic read-modify-write returning the old value: divergent.
     AtomicRmw,
     /// Uniform within a block, and **not** guaranteed beyond it
@@ -173,6 +190,7 @@ impl CallKind {
     pub fn result_base(self) -> Option<crate::Uniformity> {
         match self {
             CallKind::ThreadIndexWitness
+            | CallKind::ThreadIndexX { .. }
             | CallKind::AtomicRmw
             | CallKind::WarpCollective { .. }
             | CallKind::DivergentEnvRead => Some(crate::Uniformity::Divergent),
@@ -198,15 +216,18 @@ impl CallKind {
     #[must_use]
     pub fn result_scope(self) -> Option<crate::LaunchScope> {
         match self {
-            // Per-lane reads are narrower than a block, but the lane
-            // lattice has already called them divergent; `Block` is the
-            // narrowest this axis expresses and the divergence check fires
-            // first either way.
+            // Per-lane reads. A collective's result can be warp-uniform (a
+            // ballot) and can not (a shuffle); `Thread` is the answer that
+            // never quiets a finding. `warp_id` and its kin are `Thread`
+            // here too: whether `threadIdx.x / 32` is constant across a
+            // warp depends on the block shape, which the engine reads from
+            // the model rather than from the call.
             CallKind::ThreadIndexWitness
+            | CallKind::ThreadIndexX { .. }
             | CallKind::AtomicRmw
             | CallKind::WarpCollective { .. }
-            | CallKind::DivergentEnvRead
-            | CallKind::BlockUniform => Some(crate::LaunchScope::Block),
+            | CallKind::DivergentEnvRead => Some(crate::LaunchScope::Thread),
+            CallKind::BlockUniform => Some(crate::LaunchScope::Block),
             CallKind::ClusterUniform => Some(crate::LaunchScope::Cluster),
             CallKind::GridUniform | CallKind::UniformMarker => Some(crate::LaunchScope::Grid),
             CallKind::Barrier

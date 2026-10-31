@@ -20,6 +20,8 @@
 //! `warning` like any other, and only a concrete replay — the bounded
 //! inliner, which does tell the calls apart — promotes it.
 
+use std::borrow::Cow;
+
 use crate::Uniformity;
 use crate::analysis::{
     Analysis, ParamSeed, ProvenanceStep, Reason, ReasonKind, Summaries, analyze, analyze_with,
@@ -131,6 +133,22 @@ fn passed(term: &TermKind, param: usize, direct: bool) -> Vec<Local> {
     arg_uses[param.min(arg_uses.len() - 1)].clone()
 }
 
+/// `f` as it runs under `kernel`: a helper has no launch contract of its
+/// own, and runs in the block its kernel declares. That is what lets a
+/// `threadIdx_x() / 32` inside a helper be warp-uniform exactly when it is
+/// in the kernel.
+fn in_launch(fns: &[FnModel], kernel: FnId, f: FnId) -> Cow<'_, FnModel> {
+    let model = &fns[f];
+    match fns[kernel].declared_block {
+        Some(block) if model.declared_block.is_none() => {
+            let mut launched = model.clone();
+            launched.declared_block = Some(block);
+            Cow::Owned(launched)
+        }
+        _ => Cow::Borrowed(model),
+    }
+}
+
 /// Analyze one kernel and every function it reaches.
 #[must_use]
 pub fn analyze_kernel(fns: &[FnModel], summaries: &Summaries, kernel: FnId) -> KernelContext {
@@ -149,7 +167,8 @@ pub fn analyze_kernel(fns: &[FnModel], summaries: &Summaries, kernel: FnId) -> K
         while i < order.len() {
             let f = order[i];
             i += 1;
-            let model = &fns[f];
+            let model = in_launch(fns, kernel, f);
+            let model = model.as_ref();
             let a = analyze_with(model, summaries, &seeds[f]);
             let cfg = Cfg::build(model);
             let live = graph::reachable(&cfg, 0);
@@ -212,7 +231,7 @@ pub fn analyze_kernel(fns: &[FnModel], summaries: &Summaries, kernel: FnId) -> K
         .into_iter()
         .map(|id| Reached {
             id,
-            analysis: analyze_with(&fns[id], summaries, &seeds[id]),
+            analysis: analyze_with(&in_launch(fns, kernel, id), summaries, &seeds[id]),
             origins: std::mem::take(&mut origins[id]),
         })
         .collect();

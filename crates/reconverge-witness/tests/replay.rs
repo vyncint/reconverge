@@ -4,9 +4,9 @@
 use reconverge_artifacts::witness::VerdictKind;
 use reconverge_core::dialect::{CallKind, MaskSource};
 use reconverge_core::model::{
-    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind, UnOp,
+    BinOp, Block, Callee, Eval, FnModel, IntType, Local, Operand, Stmt, Term, TermKind, UnOp,
 };
-use reconverge_witness::{SiteKind, replay_hang};
+use reconverge_witness::{ReplayEnv, SiteKind, replay_hang};
 
 fn term(kind: TermKind) -> Term {
     Term { kind, span: 0 }
@@ -94,12 +94,22 @@ fn canonical(site: TermKind) -> FnModel {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(5),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 // switchInt(cond): 0 → skip, otherwise → the site block.
@@ -304,12 +314,22 @@ fn unknowable_diamond_before_the_site_is_skipped() {
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::Rem, Operand::Local(5), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(5),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         7,
                         &[6],
-                        Eval::Binary(BinOp::Eq, Operand::Local(6), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(6),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -386,12 +406,22 @@ fn diamond_hiding_a_sync_point_is_not_skipped() {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(5),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -502,12 +532,22 @@ fn deadlock_behind_an_upstream_barrier_still_witnesses_the_site() {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(5),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 // evens → the upstream barrier, odds → onward.
@@ -525,7 +565,12 @@ fn deadlock_behind_an_upstream_barrier_still_witnesses_the_site() {
                 stmts: vec![stmt_eval(
                     7,
                     &[5],
-                    Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(1)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(5),
+                        Operand::Const(1),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 // odds → the site, evens (if ever released) → exit.
                 term: term(TermKind::Branch {
@@ -598,7 +643,12 @@ fn warp_uniform_guard_upstream_does_not_ungate_the_site() {
                 stmts: vec![stmt_eval(
                     8,
                     &[7],
-                    Eval::Binary(BinOp::Eq, Operand::Local(7), Operand::Const(0)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(7),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 // warp 0 (everyone, under one warp) → the upstream barrier.
                 term: term(TermKind::Branch {
@@ -616,12 +666,22 @@ fn warp_uniform_guard_upstream_does_not_ungate_the_site() {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::Eq, Operand::Local(5), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(5),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -714,7 +774,12 @@ fn the_lane_ordinal_idiom_replays() {
                 stmts: vec![stmt_eval(
                     4,
                     &[3],
-                    Eval::Binary(BinOp::Gt, Operand::Local(3), Operand::Const(4)),
+                    Eval::Binary(
+                        BinOp::Gt,
+                        Operand::Local(3),
+                        Operand::Const(4),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 4,
@@ -757,7 +822,12 @@ fn lanemask_guard(register: &str, op: BinOp, k: u128) -> FnModel {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(op, Operand::Local(2), Operand::Const(k)),
+                    Eval::Binary(
+                        op,
+                        Operand::Local(2),
+                        Operand::Const(k),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -814,7 +884,12 @@ fn guard_inside_a_loop_is_witnessed() {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(4)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(4),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(6, &[], Eval::Use(Operand::Const(0))),
                 ],
@@ -825,7 +900,12 @@ fn guard_inside_a_loop_is_witnessed() {
                 stmts: vec![stmt_eval(
                     7,
                     &[6, 5],
-                    Eval::Binary(BinOp::Lt, Operand::Local(6), Operand::Local(5)),
+                    Eval::Binary(
+                        BinOp::Lt,
+                        Operand::Local(6),
+                        Operand::Local(5),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 7,
@@ -839,12 +919,22 @@ fn guard_inside_a_loop_is_witnessed() {
                     stmt_eval(
                         8,
                         &[4],
-                        Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         9,
                         &[8],
-                        Eval::Binary(BinOp::Eq, Operand::Local(8), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(8),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -900,7 +990,12 @@ fn checked_arithmetic_never_fabricates_a_wrapped_value() {
                     stmt_eval(
                         3,
                         &[2],
-                        Eval::Binary(BinOp::Gt, Operand::Local(2), Operand::Const(5)),
+                        Eval::Binary(
+                            BinOp::Gt,
+                            Operand::Local(2),
+                            Operand::Const(5),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -951,7 +1046,12 @@ fn whole_warp_divergence_is_witnessed_at_the_declared_block() {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(0)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(2),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -974,7 +1074,8 @@ fn whole_warp_divergence_is_witnessed_at_the_declared_block() {
         replay_hang(&f, 2, SiteKind::Barrier, 0).is_none(),
         "at one warp the guard is uniform — nothing to witness"
     );
-    let replay = replay_hang_at(&f, 2, SiteKind::Barrier, 0, 64).expect("two warps diverge");
+    let replay = replay_hang_at(&f, 2, SiteKind::Barrier, 0, &ReplayEnv::block([64, 1, 1]))
+        .expect("two warps diverge");
     assert_eq!(replay.arrived, 0xffff_ffff, "warp 0 arrives");
     assert_eq!(
         replay.never_arrives, 0xffff_ffff_0000_0000,
@@ -1024,7 +1125,12 @@ fn a_uniform_collective_no_longer_aborts_the_multi_warp_replay() {
                 stmts: vec![stmt_eval(
                     3,
                     &[3],
-                    Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(0)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(3),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -1042,8 +1148,14 @@ fn a_uniform_collective_no_longer_aborts_the_multi_warp_replay() {
             },
         ],
     );
-    let replay = reconverge_witness::replay_hang_at(&f, 3, SiteKind::Barrier, 0, 64)
-        .expect("the collective is uniform; the barrier below is not");
+    let replay = reconverge_witness::replay_hang_at(
+        &f,
+        3,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([64, 1, 1]),
+    )
+    .expect("the collective is uniform; the barrier below is not");
     assert_eq!(replay.arrived, 0x0000_0000_ffff_ffff_u128, "warp 0");
     assert_eq!(replay.never_arrives, 0xffff_ffff_0000_0000_u128, "warp 1");
 }
@@ -1075,7 +1187,12 @@ fn a_warp_split_between_a_collective_and_a_barrier_is_declined() {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(2)),
+                    Eval::Binary(
+                        BinOp::Rem,
+                        Operand::Local(2),
+                        Operand::Const(2),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -1110,7 +1227,14 @@ fn a_warp_split_between_a_collective_and_a_barrier_is_declined() {
         ],
     );
     assert!(
-        reconverge_witness::replay_hang_at(&f, 4, SiteKind::Barrier, 0, 64).is_none(),
+        reconverge_witness::replay_hang_at(
+            &f,
+            4,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([64, 1, 1])
+        )
+        .is_none(),
         "a warp-scoped and a block-scoped wait cannot both be satisfied"
     );
 }
@@ -1140,7 +1264,12 @@ fn thread_idx_y_is_zero_not_the_lane_id() {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(0)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(2),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -1189,12 +1318,22 @@ fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
                     stmt_eval(
                         3,
                         &[2],
-                        Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(2)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(2),
+                            Operand::Const(2),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         4,
                         &[3],
-                        Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(0)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(3),
+                            Operand::Const(0),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -1213,8 +1352,14 @@ fn lane_id_wraps_per_warp_in_a_multi_warp_replay() {
             },
         ],
     );
-    let replay = reconverge_witness::replay_hang_at(&f, 2, SiteKind::Barrier, 0, 64)
-        .expect("even lanes of both warps diverge");
+    let replay = reconverge_witness::replay_hang_at(
+        &f,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([64, 1, 1]),
+    )
+    .expect("even lanes of both warps diverge");
     assert_eq!(replay.arrived, 0x5555_5555_5555_5555_u128);
     assert_eq!(replay.never_arrives, 0xaaaa_aaaa_aaaa_aaaa_u128);
 }
@@ -1239,7 +1384,12 @@ fn warp_id_guard_model(op: BinOp, const_val: u128) -> FnModel {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(op, Operand::Local(2), Operand::Const(const_val)),
+                    Eval::Binary(
+                        op,
+                        Operand::Local(2),
+                        Operand::Const(const_val),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -1279,12 +1429,22 @@ fn warp_id_rem_eq_model(modulus: u128, target: u128) -> FnModel {
                     stmt_eval(
                         3,
                         &[2],
-                        Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(modulus)),
+                        Eval::Binary(
+                            BinOp::Rem,
+                            Operand::Local(2),
+                            Operand::Const(modulus),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(
                         4,
                         &[3],
-                        Eval::Binary(BinOp::Eq, Operand::Local(3), Operand::Const(target)),
+                        Eval::Binary(
+                            BinOp::Eq,
+                            Operand::Local(3),
+                            Operand::Const(target),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -1316,18 +1476,39 @@ fn multi_warp_replay_differential_launch_matrix_warp_id() {
     // 1. `warp_id == 0`:
     let eq_zero = warp_id_guard_model(BinOp::Eq, 0);
     // Block 32 (1 warp): warp 0 arrives -> uniform -> no witness.
-    assert!(replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 32).is_none());
+    assert!(
+        replay_hang_at(
+            &eq_zero,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([32, 1, 1])
+        )
+        .is_none()
+    );
     // Block 64 (2 warps): warp 0 arrives (32 lanes), warp 1 never does (32 lanes) -> hang witnessed.
-    let replay_64 = replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 64)
-        .expect("warp_id == 0 must witness divergence at 64 threads");
+    let replay_64 = replay_hang_at(
+        &eq_zero,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([64, 1, 1]),
+    )
+    .expect("warp_id == 0 must witness divergence at 64 threads");
     assert_eq!(replay_64.arrived, 0x0000_0000_ffff_ffff_u128);
     assert_eq!(replay_64.never_arrives, 0xffff_ffff_0000_0000_u128);
     assert_eq!(replay_64.block, [64, 1, 1]);
     assert!(replay_64.verdict_message.contains("32 of 64 lanes"));
 
     // Block 128 (4 warps): warp 0 arrives (32 lanes), warps 1..3 never do (96 lanes) -> hang witnessed.
-    let replay_128 = replay_hang_at(&eq_zero, 2, SiteKind::Barrier, 0, 128)
-        .expect("warp_id == 0 must witness divergence at 128 threads");
+    let replay_128 = replay_hang_at(
+        &eq_zero,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([128, 1, 1]),
+    )
+    .expect("warp_id == 0 must witness divergence at 128 threads");
     assert_eq!(replay_128.arrived, 0xffff_ffff_u128);
     assert_eq!(
         replay_128.never_arrives,
@@ -1339,12 +1520,36 @@ fn multi_warp_replay_differential_launch_matrix_warp_id() {
     // 2. `warp_id < 2`:
     let lt_two = warp_id_guard_model(BinOp::Lt, 2);
     // Block 32 (1 warp): warp 0 < 2 -> true for all 32 lanes -> uniform -> no witness.
-    assert!(replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 32).is_none());
+    assert!(
+        replay_hang_at(
+            &lt_two,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([32, 1, 1])
+        )
+        .is_none()
+    );
     // Block 64 (2 warps): warps 0, 1 < 2 -> true for all 64 lanes -> uniform -> no witness (SAFE at block 64).
-    assert!(replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 64).is_none());
+    assert!(
+        replay_hang_at(
+            &lt_two,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([64, 1, 1])
+        )
+        .is_none()
+    );
     // Block 128 (4 warps): warps 0, 1 arrive (64 lanes), warps 2, 3 never do (64 lanes) -> hang witnessed.
-    let replay_lt2_128 = replay_hang_at(&lt_two, 2, SiteKind::Barrier, 0, 128)
-        .expect("warp_id < 2 must witness divergence at 128 threads");
+    let replay_lt2_128 = replay_hang_at(
+        &lt_two,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([128, 1, 1]),
+    )
+    .expect("warp_id < 2 must witness divergence at 128 threads");
     assert_eq!(replay_lt2_128.arrived, 0xffff_ffff_ffff_ffff_u128);
     assert_eq!(
         replay_lt2_128.never_arrives,
@@ -1356,15 +1561,36 @@ fn multi_warp_replay_differential_launch_matrix_warp_id() {
     // 3. `warp_id % 2 == 0`:
     let rem_even = warp_id_rem_eq_model(2, 0);
     // Block 32 (1 warp): warp 0 % 2 == 0 -> uniform -> no witness.
-    assert!(replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 32).is_none());
+    assert!(
+        replay_hang_at(
+            &rem_even,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([32, 1, 1])
+        )
+        .is_none()
+    );
     // Block 64 (2 warps): warp 0 arrives (32 lanes), warp 1 never does (32 lanes) -> hang witnessed.
-    let replay_rem_64 = replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 64)
-        .expect("warp_id % 2 == 0 must witness divergence at 64 threads");
+    let replay_rem_64 = replay_hang_at(
+        &rem_even,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([64, 1, 1]),
+    )
+    .expect("warp_id % 2 == 0 must witness divergence at 64 threads");
     assert_eq!(replay_rem_64.arrived, 0x0000_0000_ffff_ffff_u128);
     assert_eq!(replay_rem_64.never_arrives, 0xffff_ffff_0000_0000_u128);
     // Block 128 (4 warps): warps 0, 2 arrive (64 lanes), warps 1, 3 never do (64 lanes) -> hang witnessed.
-    let replay_rem_128 = replay_hang_at(&rem_even, 2, SiteKind::Barrier, 0, 128)
-        .expect("warp_id % 2 == 0 must witness divergence at 128 threads");
+    let replay_rem_128 = replay_hang_at(
+        &rem_even,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([128, 1, 1]),
+    )
+    .expect("warp_id % 2 == 0 must witness divergence at 128 threads");
     assert_eq!(
         replay_rem_128.arrived,
         0x0000_0000_ffff_ffff_0000_0000_ffff_ffff_u128
@@ -1386,15 +1612,36 @@ fn multi_warp_replay_safe_launches_produce_no_findings() {
     // `warp_id < 4` is uniform for block 32 (1 warp), block 64 (2 warps), and block 128 (4 warps).
     let lt_four = warp_id_guard_model(BinOp::Lt, 4);
     assert!(
-        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 32).is_none(),
+        replay_hang_at(
+            &lt_four,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([32, 1, 1])
+        )
+        .is_none(),
         "block 32 safe launch must not produce a witness"
     );
     assert!(
-        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 64).is_none(),
+        replay_hang_at(
+            &lt_four,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([64, 1, 1])
+        )
+        .is_none(),
         "block 64 safe launch must not produce a witness"
     );
     assert!(
-        replay_hang_at(&lt_four, 2, SiteKind::Barrier, 0, 128).is_none(),
+        replay_hang_at(
+            &lt_four,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([128, 1, 1])
+        )
+        .is_none(),
         "block 128 safe launch must not produce a witness"
     );
 
@@ -1402,7 +1649,14 @@ fn multi_warp_replay_safe_launches_produce_no_findings() {
     let lt_large = warp_id_guard_model(BinOp::Lt, 128);
     for &threads in &[32, 64, 128] {
         assert!(
-            replay_hang_at(&lt_large, 2, SiteKind::Barrier, 0, threads).is_none(),
+            replay_hang_at(
+                &lt_large,
+                2,
+                SiteKind::Barrier,
+                0,
+                &ReplayEnv::block([threads, 1, 1])
+            )
+            .is_none(),
             "block {threads} uniform warp_id guard must produce no finding"
         );
     }
@@ -1446,7 +1700,12 @@ fn bitwise_not_evaluates_at_the_operand_width() {
                     stmt_eval(
                         6,
                         &[5],
-                        Eval::Binary(BinOp::BitAnd, Operand::Local(5), Operand::Const(1)),
+                        Eval::Binary(
+                            BinOp::BitAnd,
+                            Operand::Local(5),
+                            Operand::Const(1),
+                            IntType::unsigned(32),
+                        ),
                     ),
                 ],
                 term: term(TermKind::Branch {
@@ -1507,7 +1766,12 @@ fn a_narrowing_cast_truncates_rather_than_passing_the_value_through() {
                     stmt_eval(
                         5,
                         &[4],
-                        Eval::Binary(BinOp::Mul, Operand::Local(4), Operand::Const(16)),
+                        Eval::Binary(
+                            BinOp::Mul,
+                            Operand::Local(4),
+                            Operand::Const(16),
+                            IntType::unsigned(32),
+                        ),
                     ),
                     stmt_eval(6, &[5], Eval::Cast(Operand::Local(5), 8)),
                 ],
@@ -1633,7 +1897,12 @@ fn count_ones_declines_an_operand_wider_than_its_type() {
                 stmts: vec![stmt_eval(
                     5,
                     &[4],
-                    Eval::Binary(BinOp::Sub, Operand::Const(0), Operand::Local(4)),
+                    Eval::Binary(
+                        BinOp::Sub,
+                        Operand::Const(0),
+                        Operand::Local(4),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(call(
                     CallKind::CountOnes { bits: 32 },
@@ -1647,7 +1916,12 @@ fn count_ones_declines_an_operand_wider_than_its_type() {
                 stmts: vec![stmt_eval(
                     7,
                     &[6],
-                    Eval::Binary(BinOp::Gt, Operand::Local(6), Operand::Const(40)),
+                    Eval::Binary(
+                        BinOp::Gt,
+                        Operand::Local(6),
+                        Operand::Const(40),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 7,
@@ -1724,7 +1998,12 @@ fn not_feeding_popcount_does_not_fabricate_a_witness() {
                 stmts: vec![stmt_eval(
                     7,
                     &[6],
-                    Eval::Binary(BinOp::Gt, Operand::Local(6), Operand::Const(0)),
+                    Eval::Binary(
+                        BinOp::Gt,
+                        Operand::Local(6),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 7,
@@ -1804,7 +2083,12 @@ fn a_site_no_lane_reaches_is_reported_as_unreachable_not_unknown() {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::Eq, Operand::Local(2), Operand::Const(99)),
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(2),
+                        Operand::Const(99),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,
@@ -1848,5 +2132,549 @@ fn uniform_arrival_is_reported_as_uniform() {
     assert_eq!(
         reconverge_witness::replay_outcome(&f, 0, SiteKind::Barrier, 0).err(),
         Some(reconverge_witness::NoWitness::Uniform)
+    );
+}
+
+/// `if <source>() <op> c { sync_threads() }` with the comparison typed `ty`.
+///
+/// locals: 0 ret, 1 param, 2 source, 3 cond. The site is block 2.
+fn guarded_barrier(source: CallKind, display: &str, op: BinOp, c: u128, ty: IntType) -> FnModel {
+    kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(source, display, vec![], Some(2), 1)),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(op, Operand::Local(2), Operand::Const(c), ty),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    )
+}
+
+/// #190: lane `n` is the thread at linear index `n`, x fastest. Under a
+/// declared `(16, 2, 1)` block lanes 16..31 are row 1, so a `y == 0` guard
+/// splits the warp — a hang the fixed `(32, 1, 1)` replay could not see,
+/// because every lane had `y = 0` there.
+#[test]
+fn a_declared_2d_block_is_replayed_in_its_own_shape() {
+    let f = guarded_barrier(
+        CallKind::ThreadIndexWitness,
+        "threadIdx_y",
+        BinOp::Eq,
+        0,
+        IntType::unsigned(32),
+    );
+    let replay = reconverge_witness::replay_hang_at(
+        &f,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([16, 2, 1]),
+    )
+    .expect("row 0 waits, row 1 never arrives");
+    assert_eq!(replay.block, [16, 2, 1]);
+    assert_eq!(replay.threads(), 32);
+    assert_eq!(replay.arrived, 0x0000_ffff);
+    assert_eq!(replay.never_arrives, 0xffff_0000);
+    assert_eq!(
+        reconverge_witness::replay_outcome(&f, 2, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::Uniform),
+        "the one-warp shape puts every lane in row 0"
+    );
+}
+
+/// #190, the false confirmation itself: `threadIdx_x() < 16` under a
+/// declared `(16, 2, 1)` block admits every thread. Only the excluded
+/// `(32, 1, 1)` shape has lanes at x = 16..31.
+#[test]
+fn the_x_index_stays_inside_the_declared_row() {
+    let f = guarded_barrier(
+        CallKind::ThreadIndexX { divisor: 1 },
+        "threadIdx_x",
+        BinOp::Lt,
+        16,
+        IntType::unsigned(32),
+    );
+    assert_eq!(
+        reconverge_witness::replay_outcome_at(
+            &f,
+            2,
+            SiteKind::Barrier,
+            0,
+            &ReplayEnv::block([16, 2, 1])
+        )
+        .err(),
+        Some(reconverge_witness::NoWitness::Uniform)
+    );
+    assert!(
+        replay_hang(&f, 2, SiteKind::Barrier, 0).is_some(),
+        "at (32, 1, 1) the split is real — which is why that shape must not \
+         stand in for a declared one"
+    );
+}
+
+/// `warp_id()` is `threadIdx_x() / 32` upstream — the x index, not the
+/// linear one. Under `(48, 2, 1)` warp 1 holds x 32..47 of row 0 (warp id 1)
+/// and x 0..15 of row 1 (warp id 0), and warp 2 holds x 16..47 of row 1, of
+/// which 32..47 read 1 again.
+#[test]
+fn warp_id_is_the_x_index_over_32_in_a_2d_block() {
+    let f = guarded_barrier(
+        CallKind::ThreadIndexX { divisor: 32 },
+        "warp_id",
+        BinOp::Eq,
+        1,
+        IntType::unsigned(32),
+    );
+    let replay = reconverge_witness::replay_hang_at(
+        &f,
+        2,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv::block([48, 2, 1]),
+    )
+    .expect("x 32..47 of row 0 wait");
+    assert_eq!(replay.threads(), 96);
+    assert_eq!(replay.arrived, (0xffff_u128 << 32) | (0xffff_u128 << 80));
+}
+
+/// A block the replay does not run is a distinct answer, never a replay in
+/// some other shape: over 128 threads, not whole warps, or a collective site
+/// beyond one warp.
+#[test]
+fn a_block_the_replay_cannot_run_is_declined_as_such() {
+    let f = guarded_barrier(
+        CallKind::ThreadIndexX { divisor: 1 },
+        "threadIdx_x",
+        BinOp::Lt,
+        16,
+        IntType::unsigned(32),
+    );
+    for block in [[16, 16, 1], [16, 1, 1], [33, 1, 1], [256, 1, 1], [0, 1, 1]] {
+        assert_eq!(
+            reconverge_witness::replay_outcome_at(
+                &f,
+                2,
+                SiteKind::Barrier,
+                0,
+                &ReplayEnv::block(block)
+            )
+            .err(),
+            Some(reconverge_witness::NoWitness::UnsupportedLaunch),
+            "{block:?}"
+        );
+    }
+    let collective = SiteKind::Collective {
+        mask: Some(0xffff_ffff),
+    };
+    assert!(!reconverge_witness::replayable([64, 1, 1], collective));
+    assert!(reconverge_witness::replayable([16, 2, 1], collective));
+    assert!(reconverge_witness::replayable(
+        [16, 4, 1],
+        SiteKind::Barrier
+    ));
+}
+
+/// `-(lane as i32)`, then a comparison typed `ty`.
+///
+/// locals: 0 ret, 1 param, 2 lane, 3 as i32, 4 negated, 5 cond.
+fn negated_lane_guard(op: BinOp, c: u128, ty: IntType) -> FnModel {
+    kernel(
+        6,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(3, &[2], Eval::Cast(Operand::Local(2), 32)),
+                    stmt_eval(4, &[3], Eval::Unary(UnOp::Neg, Operand::Local(3), 32)),
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(op, Operand::Local(4), Operand::Const(c), ty),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 5,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    )
+}
+
+/// #192: `-(lane as i32) < 1` holds on every lane. Read unsigned, -1 is
+/// `0xffffffff` and 31 lanes "never arrive" — the false confirmation.
+#[test]
+fn signed_order_is_signed() {
+    let signed = negated_lane_guard(BinOp::Lt, 1, IntType::signed(32));
+    assert_eq!(
+        reconverge_witness::replay_outcome(&signed, 2, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::Uniform)
+    );
+    let unsigned = negated_lane_guard(BinOp::Lt, 1, IntType::unsigned(32));
+    let replay =
+        replay_hang(&unsigned, 2, SiteKind::Barrier, 0).expect("as a u32 only lane 0 is below 1");
+    assert_eq!(replay.arrived, 1);
+
+    // `x > -1`, the literal stored as its 32-bit pattern: every lane, not
+    // none ("unreachable under the declared launch" was the old answer).
+    let gt_minus_one = negated_lane_guard(BinOp::Gt, 0xffff_ffe0, IntType::signed(32));
+    assert_eq!(
+        reconverge_witness::replay_outcome(&gt_minus_one, 2, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::Uniform),
+        "-lane > -32 holds for lanes 0..31"
+    );
+}
+
+/// Signed division truncates toward zero: `-(lane) / 2 < -7` exactly when
+/// `lane >= 16`.
+#[test]
+fn signed_division_truncates_toward_zero() {
+    let f = kernel(
+        7,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![
+                    stmt_eval(3, &[2], Eval::Cast(Operand::Local(2), 32)),
+                    stmt_eval(4, &[3], Eval::Unary(UnOp::Neg, Operand::Local(3), 32)),
+                    stmt_eval(
+                        5,
+                        &[4],
+                        Eval::Binary(
+                            BinOp::Div,
+                            Operand::Local(4),
+                            Operand::Const(2),
+                            IntType::signed(32),
+                        ),
+                    ),
+                    // -7 as an i32 bit pattern.
+                    stmt_eval(
+                        6,
+                        &[5],
+                        Eval::Binary(
+                            BinOp::Lt,
+                            Operand::Local(5),
+                            Operand::Const(0xffff_fff9),
+                            IntType::signed(32),
+                        ),
+                    ),
+                ],
+                term: term(TermKind::Branch {
+                    cond: 6,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 3)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    let replay = replay_hang(&f, 2, SiteKind::Barrier, 0).expect("the upper half waits");
+    assert_eq!(replay.arrived, 0xffff_0000);
+}
+
+/// A call into local function 1, which the replay may or may not follow.
+fn local_call(dest: Option<Local>, target: usize) -> TermKind {
+    TermKind::Call {
+        callee: Callee {
+            scope: reconverge_core::LaunchScope::Block,
+            kind: CallKind::Other,
+            display: "helper".to_string(),
+            local_fn: Some(1),
+            may_call: Vec::new(),
+        },
+        args: Vec::new(),
+        arg_uses: Vec::new(),
+        const_args: Vec::new(),
+        arg_operands: Vec::new(),
+        dest,
+        target: Some(target),
+    }
+}
+
+/// Local function 1: a barrier, or nothing.
+fn helper(with_barrier: bool) -> FnModel {
+    let mut blocks = Vec::new();
+    if with_barrier {
+        blocks.push(Block {
+            stmts: vec![],
+            term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 1)),
+        });
+    }
+    blocks.push(Block {
+        stmts: vec![],
+        term: term(TermKind::Return),
+    });
+    kernel(1, blocks)
+}
+
+/// Replay `f` with the summaries of `[f, helper(with_barrier)]`.
+fn with_helper(
+    f: &FnModel,
+    site: usize,
+    with_barrier: bool,
+) -> Result<reconverge_witness::Replay, reconverge_witness::NoWitness> {
+    let summaries =
+        reconverge_core::analysis::Summaries::compute(&[f.clone(), helper(with_barrier)]);
+    reconverge_witness::replay_outcome_at(
+        f,
+        site,
+        SiteKind::Barrier,
+        0,
+        &ReplayEnv {
+            block: [32, 1, 1],
+            summaries: Some(&summaries),
+        },
+    )
+}
+
+/// #191: a call on the way to the site is stepped over only when the
+/// summaries clear it. One that may hold a barrier ends the replay — the
+/// lanes may be waiting inside it.
+#[test]
+fn a_call_that_may_synchronize_is_not_stepped_over() {
+    // locals: 0 ret, 1 param, 2 lane, 3 cond. Site: block 3.
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(local_call(None, 2)),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(
+                        BinOp::Lt,
+                        Operand::Local(2),
+                        Operand::Const(16),
+                        IntType::unsigned(32),
+                    ),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert_eq!(
+        with_helper(&f, 3, true).err(),
+        Some(reconverge_witness::NoWitness::UnfollowedCall { block: 1 })
+    );
+    assert!(
+        with_helper(&f, 3, false).is_ok(),
+        "a callee the summaries clear is stepped over as before"
+    );
+    assert_eq!(
+        reconverge_witness::replay_outcome(&f, 3, SiteKind::Barrier, 0).err(),
+        Some(reconverge_witness::NoWitness::UnfollowedCall { block: 1 }),
+        "without summaries every local callee may synchronize"
+    );
+}
+
+/// #191, the recursion shape: a lane that can no longer reach the site is
+/// "never arrives" — unless what it can still reach is a call that may hold
+/// a barrier, which can be the same `sync_threads()` one frame down.
+#[test]
+fn a_lane_heading_into_an_unfollowable_call_is_not_called_absent() {
+    // locals: 0 ret, 1 param, 2 lane, 3 cond. Site: block 2.
+    let f = kernel(
+        4,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(
+                        BinOp::Eq,
+                        Operand::Local(2),
+                        Operand::Const(0),
+                        IntType::unsigned(32),
+                    ),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![3, 2],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(local_call(None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert_eq!(
+        with_helper(&f, 2, true).err(),
+        Some(reconverge_witness::NoWitness::UnfollowedCall { block: 3 })
+    );
+    let replay = with_helper(&f, 2, false).expect("lanes 1..31 really leave");
+    assert_eq!(replay.arrived, 1);
+}
+
+/// #191 in the diamond skip: an unknown branch over a call that may
+/// synchronize is not a region whose effects can be erased and stepped past.
+#[test]
+fn an_unknown_diamond_over_an_unfollowable_call_is_not_skipped() {
+    // locals: 0 ret, 1 param, 2 lane, 3 cond, 4 unknown. Site: block 5.
+    let f = kernel(
+        5,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::ThreadIndexWitness,
+                    "lane_id",
+                    vec![],
+                    Some(2),
+                    1,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Opaque {
+                    uses: vec![],
+                    dest: Some(4),
+                    target: Some(2),
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Branch {
+                    cond: 4,
+                    targets: vec![4, 3],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(local_call(None, 4)),
+            },
+            Block {
+                stmts: vec![stmt_eval(
+                    3,
+                    &[2],
+                    Eval::Binary(
+                        BinOp::Lt,
+                        Operand::Local(2),
+                        Operand::Const(16),
+                        IntType::unsigned(32),
+                    ),
+                )],
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![6, 5],
+                    values: vec![Some(0), None],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", vec![], None, 6)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    assert_eq!(
+        with_helper(&f, 5, true).err(),
+        Some(reconverge_witness::NoWitness::UnfollowedCall { block: 3 })
+    );
+    assert!(
+        with_helper(&f, 5, false).is_ok(),
+        "a sync-free call inside the diamond is still skipped with it"
     );
 }

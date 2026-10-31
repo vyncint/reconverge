@@ -30,10 +30,10 @@ pub struct WitnessArtifact {
     pub finding: Option<FindingRef>,
     /// Concrete thread configuration the search found.
     pub launch: Launch,
-    /// Lanes in the replay: 32 for the ordinary one-warp replay, or the
-    /// declared block when the contract names several whole warps (64, 96,
-    /// 128). Blocks that are 2D, not whole warps, or wider than 128 stay at
-    /// the one-warp replay.
+    /// Lanes in the replay: the replayed block's thread count — 32 for the
+    /// one-warp replay of an undeclared kernel, or the declared block's
+    /// `x * y * z` (32, 64, 96 or 128, any shape). A declared block of any
+    /// other size is not replayed, so no artifact carries one.
     ///
     /// This said "always 32" — and the schema pinned it there — while the
     /// driver had been writing 64, 96 and 128 since 0.1.12. The artifacts

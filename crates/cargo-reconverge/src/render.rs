@@ -57,14 +57,25 @@ pub fn render_text(
         out.write_all(render_item(&item, workspace_root).as_bytes())?;
         out.write_all(b"\n")?;
     }
-    writeln!(
-        out,
-        "{}",
+    let summary = if review.found_no_kernels() {
+        no_kernels_line(review.artifacts.len())
+    } else {
         review
             .counts()
             .summary_line(strict, show_suppressed, review.coverage())
-    )?;
+    };
+    writeln!(out, "{summary}")?;
     out.flush()
+}
+
+/// The summary of a run that had nothing to analyze. Still exit 0 —
+/// `--require-kernels` is the hard gate — but never worded like a clean
+/// pass, which is a statement about kernels that were read.
+pub(crate) fn no_kernels_line(crates: usize) -> String {
+    format!(
+        "reconverge: no #[kernel] functions found in {crates} {} \u{2014} nothing was analyzed",
+        reconverge_artifacts::plural(crates, "crate", "crates")
+    )
 }
 
 fn render_item(item: &Item<'_>, workspace_root: &Path) -> String {

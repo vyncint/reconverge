@@ -41,6 +41,7 @@ impl TriageOptions {
                 // Below the value-taking flags, so `--baseline --help` is
                 // still the missing value it was.
                 flag if ArgError::help(flag) => return Err(ArgError::Help),
+                flag if ArgError::version(flag) => return Err(ArgError::Version),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -78,32 +79,15 @@ pub fn run(options: &TriageOptions) -> Result<u8, String> {
     Ok(u8::try_from(status.code().unwrap_or(2)).unwrap_or(2))
 }
 
-/// The findings artifacts of the current workspace members.
+/// The findings artifacts of the current workspace members' targets.
 fn discover_findings(metadata: &check::Metadata) -> Result<Vec<PathBuf>, String> {
     let dir = metadata.target_directory.join("reconverge");
-    let mut artifacts = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|_| {
+    let artifacts = metadata.artifacts_in(&dir, &["findings"]).map_err(|_| {
         format!(
             "no artifacts at {}; run `cargo reconverge check` first",
             dir.display()
         )
     })?;
-    for entry in entries {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let recognized = name.ends_with(".json")
-            && name.starts_with("findings-")
-            && metadata
-                .member_crates
-                .iter()
-                .any(|krate| name.contains(&format!("-{krate}-")));
-        if recognized {
-            artifacts.push(path);
-        }
-    }
-    artifacts.sort();
     if artifacts.is_empty() {
         return Err(format!(
             "no findings artifacts at {}; run `cargo reconverge check` first",

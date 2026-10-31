@@ -11,14 +11,14 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph};
 use reconverge_artifacts::witness::{VerdictKind, WitnessArtifact};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::lessons::{Lesson, Page};
 use super::state::{LearnState, Screen};
-use crate::view::fit;
+use crate::view::{fit, wrap};
 use crate::witness::view as wview;
 
 /// Everything one frame of the learn view needs.
@@ -116,45 +116,71 @@ fn render_list(frame: &mut Frame<'_>, view: &LearnView<'_>, area: Rect) {
 fn render_page(frame: &mut Frame<'_>, view: &LearnView<'_>, area: Rect) {
     let lesson = &view.lessons[view.state.lesson];
     let page = &lesson.pages[view.state.page];
-    // Build the replay panel first, then size it to the rows its lines
-    // actually take: every strip is one row, and only the verdict wraps, so
-    // this gives a long verdict the room to be read in full instead of being
-    // cut at the panel's edge — capped at the box so it cannot spill over.
-    let replay = page.witness.as_ref().map(|witness| {
-        let lines = replay_lines(view, witness, area.width as usize, area.height as usize);
-        let rows = lines
-            .iter()
-            .map(|line| wview::wrapped_rows(&line_text(line), area.width))
-            .sum::<u16>()
-            .min(area.height);
-        (lines, rows)
-    });
-    let replay_rows = replay.as_ref().map_or(0, |(_, rows)| *rows);
+    // Build the replay panel first, then size it to the rows its lines take:
+    // every line is one row, the verdict already wrapped into as many as it
+    // needs, so a long verdict is read in full instead of being cut at the
+    // panel's edge — capped at the box so it cannot spill over.
+    let mut replay = page
+        .witness
+        .as_ref()
+        .map(|witness| replay_lines(view, witness, area.width as usize))
+        .unwrap_or_default();
+    let text = text_lines(view, lesson, page, area.width as usize);
+    // The blank that opens the replay panel is the first row to give up when
+    // the page is a row short: at 80x24 two pages lost the last line of their
+    // kernel excerpt to it — in `reconvergence`, the `sync_threads()` the
+    // page is about — without a mark.
+    if !replay.is_empty() && text.len() + replay.len() > usize::from(area.height) {
+        replay.remove(0);
+    }
+    let replay_rows = u16::try_from(replay.len())
+        .unwrap_or(u16::MAX)
+        .min(area.height);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(replay_rows)])
         .split(area);
 
-    render_text(frame, view, lesson, page, rows[0]);
-    if let Some((lines, _)) = replay {
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[1]);
-    }
+    render_text(frame, view, text, rows[0]);
+    frame.render_widget(Paragraph::new(replay), rows[1]);
 }
 
-/// The plain text of a rendered line, for measuring how many rows it wraps to.
-fn line_text(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect()
+/// A lesson's prose at `width`: each paragraph keeps the line breaks it was
+/// written with while they fit, and is reflowed as a whole when one does not.
+///
+/// Cutting each authored line at the edge, as this did, lost the end of
+/// every line at 46 columns ("the mask promis…"), which is most of a lesson.
+/// Reflowing always would rewrap the prose at 120 columns into lines too long
+/// to read; the authored breaks are the better layout wherever they fit.
+fn prose_lines(body: &str, width: usize, ascii: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, paragraph) in body.split("\n\n").enumerate() {
+        if i > 0 {
+            out.push(String::new());
+        }
+        if paragraph
+            .lines()
+            .all(|line| line_width(line, ascii) <= width)
+        {
+            out.extend(paragraph.lines().map(|line| fit(line, width, ascii)));
+        } else {
+            out.extend(wrap(paragraph, width, ascii));
+        }
+    }
+    out
+}
+
+/// The drawn width of `line`, after `--ascii` transliteration.
+fn line_width(line: &str, ascii: bool) -> usize {
+    fit(line, usize::MAX, ascii).width()
 }
 
 /// `fit`, but for a strip built from many styled spans — the lanes row, where
 /// each lane carries its own state colour and so cannot be one `&str` through
 /// `fit`. Clips the spans to `width` display columns, grapheme-safe, with the
 /// same ellipsis `fit` uses, keeping each span's style. This keeps the strip a
-/// single row under `Wrap` (so it never pushes the verdict off the panel) and
+/// single row (so it never pushes the verdict off the panel) and
 /// column-aligned with the fitted strips above it.
 fn fit_spans(spans: Vec<Span<'static>>, width: usize, ascii: bool) -> Vec<Span<'static>> {
     let total: usize = spans.iter().map(|span| span.content.as_ref().width()).sum();
@@ -186,14 +212,13 @@ fn fit_spans(spans: Vec<Span<'static>>, width: usize, ascii: bool) -> Vec<Span<'
     out
 }
 
-fn render_text(
-    frame: &mut Frame<'_>,
+/// The page's text column: heading, prose, and the kernel excerpt.
+fn text_lines(
     view: &LearnView<'_>,
     lesson: &Lesson,
     page: &Page,
-    area: Rect,
-) {
-    let width = area.width as usize;
+    width: usize,
+) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled(
             fit(
@@ -212,9 +237,11 @@ fn render_text(
         )),
         Line::default(),
     ];
-    for text in page.body().lines() {
-        lines.push(Line::from(fit(text, width, view.ascii)));
-    }
+    lines.extend(
+        prose_lines(page.body(), width, view.ascii)
+            .into_iter()
+            .map(Line::from),
+    );
     if let Some(code) = page.code {
         lines.push(Line::default());
         for text in code.lines() {
@@ -224,18 +251,35 @@ fn render_text(
             )));
         }
     }
+    lines
+}
+
+fn render_text(frame: &mut Frame<'_>, view: &LearnView<'_>, mut lines: Vec<Line<'_>>, area: Rect) {
+    // Prose that wraps can outgrow a short terminal. Say so on the last row
+    // rather than letting the page end mid-paragraph as if that were all.
+    let height = area.height as usize;
+    if lines.len() > height && height > 0 {
+        lines.truncate(height - 1);
+        lines.push(Line::from(Span::styled(
+            fit(
+                "\u{2026} more below: enlarge the terminal",
+                area.width as usize,
+                view.ascii,
+            ),
+            view.accent(Style::default().add_modifier(Modifier::DIM)),
+        )));
+    }
     frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// The compact replay panel's lines: the debugger's lane strip, mask panel,
 /// and event line, driven by the page's embedded witness at the lesson's
-/// current position. `height` bounds the verdict, the one line allowed to
-/// wrap to several rows; every other line is a single-row strip.
+/// current position. Every line is one row; the verdict, the one text
+/// allowed to take several, arrives already wrapped.
 fn replay_lines(
     view: &LearnView<'_>,
     witness: &WitnessArtifact,
     width: usize,
-    height: usize,
 ) -> Vec<Line<'static>> {
     let position = view.state.position;
     let total = witness.steps.len();
@@ -337,21 +381,17 @@ fn replay_lines(
             _ => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         });
         // The verdict is the line the lesson exists to deliver, so it wraps
-        // rather than truncates: fit only asciifies and caps it to the panel
-        // (a whole-box budget), and `Wrap` lays it across as many rows as it
-        // needs — the rows the panel was sized for above.
-        lines.push(Line::from(Span::styled(
-            fit(
-                &format!(
-                    "verdict: {} — {}",
-                    wview::verdict_word(witness.verdict.kind),
-                    witness.verdict.message
-                ),
-                width.saturating_mul(height.max(1)),
-                view.ascii,
-            ),
-            verdict_style,
-        )));
+        // rather than truncates, into the rows the panel is sized for above.
+        let verdict = format!(
+            "verdict: {} — {}",
+            wview::verdict_word(witness.verdict.kind),
+            witness.verdict.message
+        );
+        lines.extend(
+            wrap(&verdict, width, view.ascii)
+                .into_iter()
+                .map(|text| Line::from(Span::styled(text, verdict_style))),
+        );
     } else if let Some(barrier) = executed.and_then(|s| s.barrier.as_ref()) {
         lines.push(Line::from(Span::styled(
             fit(

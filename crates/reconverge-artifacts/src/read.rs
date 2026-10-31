@@ -68,6 +68,21 @@ impl std::error::Error for ReadError {
 /// [`ReadError::Schema`] when it parses but names a different artifact kind
 /// or version.
 pub fn deserialize_checked<T: Artifact>(text: &str) -> Result<T, ReadError> {
+    // The tag first, and on its own. Parsing the typed struct first meant a
+    // document from a newer driver failed on whatever field it had changed —
+    // `missing field `confidence` at line 1 column 1742` — which reads as
+    // damage, when the document had said what it was in its first line.
+    // A version statement gets the answer `ReadError::Schema` exists for.
+    if let Ok(Tag {
+        schema: Some(declared),
+    }) = serde_json::from_str::<Tag<'_>>(text)
+        && declared != T::SCHEMA
+    {
+        return Err(ReadError::Schema {
+            declared: declared.into_owned(),
+            expected: T::SCHEMA,
+        });
+    }
     let parsed: T = serde_json::from_str(text).map_err(ReadError::Parse)?;
     if parsed.declared_schema() != T::SCHEMA {
         return Err(ReadError::Schema {
@@ -76,6 +91,13 @@ pub fn deserialize_checked<T: Artifact>(text: &str) -> Result<T, ReadError> {
         });
     }
     Ok(parsed)
+}
+
+/// Just the `schema` field of a document, every other field skipped.
+#[derive(serde::Deserialize)]
+struct Tag<'a> {
+    #[serde(borrow, default)]
+    schema: Option<std::borrow::Cow<'a, str>>,
 }
 
 #[cfg(test)]
@@ -125,6 +147,35 @@ mod tests {
         let err = deserialize_checked::<FindingsArtifact>("not json at all").unwrap_err();
         assert!(matches!(err, ReadError::Parse(_)));
         assert!(err.to_string().contains("expected ident"), "{err}");
+    }
+
+    #[test]
+    fn a_newer_schema_is_named_before_its_fields_are_parsed() {
+        // A `findings.v2` that dropped a field v1 requires. Parsing the
+        // struct first reported the missing field, and a version statement
+        // read as a damaged file.
+        let text = r#"{
+            "schema": "findings.v2",
+            "tool": { "name": "reconverge", "version": "9.9.9" },
+            "crate": "k",
+            "findings": [ { "code": "RC001", "message": "m" } ]
+        }"#;
+        let err = deserialize_checked::<FindingsArtifact>(text).unwrap_err();
+        assert!(matches!(err, ReadError::Schema { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "schema is `findings.v2`, expected `findings.v1`"
+        );
+    }
+
+    #[test]
+    fn a_truncated_document_is_a_parse_failure() {
+        // A killed driver or a full disk: the tag is there, the document is
+        // not. That is damage, not a version statement.
+        let text = r#"{ "schema": "findings.v1", "tool": { "name": "reconv"#;
+        let err = deserialize_checked::<FindingsArtifact>(text).unwrap_err();
+        assert!(matches!(err, ReadError::Parse(_)), "{err}");
+        assert!(err.to_string().contains("EOF"), "{err}");
     }
 
     #[test]

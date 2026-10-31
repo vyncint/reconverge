@@ -2,7 +2,7 @@
 use reconverge_core::dialect::CallKind;
 use reconverge_core::inline::inline_calls;
 use reconverge_core::model::{
-    BinOp, Block, Callee, Eval, FnId, FnModel, Local, Operand, Stmt, Term, TermKind,
+    BinOp, Block, Callee, Eval, FnId, FnModel, IntType, Local, Operand, Stmt, Term, TermKind,
 };
 
 fn term(kind: TermKind) -> Term {
@@ -83,7 +83,12 @@ fn kernel_calling(helper_id: FnId) -> FnModel {
                 stmts: vec![stmt_eval(
                     3,
                     &[2],
-                    Eval::Binary(BinOp::Rem, Operand::Local(2), Operand::Const(2)),
+                    Eval::Binary(
+                        BinOp::Rem,
+                        Operand::Local(2),
+                        Operand::Const(2),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: 3,

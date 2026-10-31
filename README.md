@@ -51,25 +51,26 @@ pub fn rc001_divergent_barrier(mut out: DisjointSlice<u32>) {
 }
 ```
 
+<!-- Verbatim from `cargo reconverge check` over
+     crates/cargo-reconverge/tests/lint-samples. Regenerate it; do not edit
+     it by hand — the hand-edited copy drifted to a line number, a path and
+     a note no release printed. -->
 ```console
 $ cargo reconverge check
 error[RC001]: kernel `rc001_divergent_barrier` may execute `sync_threads()` under thread-divergent control
-  --> src/lib.rs:129:9
+   --> src/lib.rs:184:9
     |
-129 |         thread::sync_threads();
+184 |         thread::sync_threads();
     |         ^^^^^^^^^^^^^^^^^^^^^^
-   = note: lanes that skip the barrier never arrive, and the lanes that reach it wait for them
-           forever — on hardware this is undefined behavior, usually a permanent hang with no error
-   = note: witness: replayed with grid (1,1,1) x block (32,1,1), warp 0 — 16 of 32 lanes wait at
-           `sync_threads()` while 16 never arrive; the barrier cannot be satisfied
-   = note: lanes 0..31 at the failure point: W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.
-   = note: (W = reaches the call, . = never arrives)
-   = provenance: thread-divergent branch (src/lib.rs:128)
-   = provenance: _7: result of `ThreadIndex::get` on divergent _8 (src/lib.rs:128)
-   = provenance: _8: derived from divergent `i` (src/lib.rs:128)
-   = provenance: `i`: thread-index witness `index_1d()` (src/lib.rs:125)
-   = help: make every thread of the block reach the barrier: hoist it out of the divergent
-           branch, or make the branch condition uniform
+    = note: lanes that skip the barrier never arrive, and the lanes that reach it wait for them forever — on hardware this is undefined behavior, usually a permanent hang with no error
+    = note: witness: replayed with grid (1,1,1) x block (32,1,1), warp 0 — 16 of 32 lanes wait at `sync_threads()` while 16 never arrive; the barrier cannot be satisfied — undefined behavior on hardware, usually a permanent hang
+    = note: lanes 0..31 at the failure point: W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.
+    = note: (W = reaches the call, . = never arrives)
+    = provenance: thread-divergent branch (src/lib.rs:183)
+    = provenance: _7: result of `ThreadIndex::<'kernel, IndexSpace>::get` on divergent _8 (src/lib.rs:183)
+    = provenance: _8: derived from divergent `i` (src/lib.rs:183)
+    = provenance: `i`: thread-index witness `index_1d()` (src/lib.rs:182)
+    = help: make every thread of the block reach the barrier: hoist it out of the divergent branch, or make the branch condition uniform
 ```
 
 Three things in that output are worth pointing at:
@@ -142,7 +143,9 @@ flowchart TB
 Nothing on that path touches a GPU vendor SDK. The analysis reads *your* Rust
 through the compiler's own intermediate form, and the warp rules it checks
 against come from public documentation. That is why it runs anywhere: in CI,
-on a laptop, in a container, with no driver installed.
+on a laptop, in a container, with no driver installed. (Your crate still has
+to build: one that links the CUDA host API needs the toolkit's headers for
+that — see [Using it](#using-it).)
 
 ## What it catches
 
@@ -202,7 +205,8 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 
 ```
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block (…│
+│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block   │
+│(32,1,1) warp 0                                                               │
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo                                 │
@@ -212,8 +216,9 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │                                                                              │
 │step 2/3  [=>.]                                                               │
 │sync_threads() — 16 of 32 lanes arrive and wait                               │
-│at lib.rs:180                                                                 │
+│at lib.rs:184                                                                 │
 │barrier: 16 of 32 threads arrived                                             │
+│                                                                              │
 │                                                                              │
 │   0  launch                                                                  │
 │   1  lanes evaluate the guarding branch — 16 continue toward `sync_threads`,…│
@@ -221,8 +226,6 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │   3  the other 16 lanes exit or move past reconvergence without ever reachin…│
 │                                                                              │
 │verdict: undefined behavior (at step 3)                                       │
-│                                                                              │
-│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
 ```
@@ -233,6 +236,11 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 | **witness** | `cargo reconverge witness` | step one warp through the replay: 32 lanes, barrier arrivals, mask vs. active — with the whole run listed beside it, so the shape of the bug is legible without stepping |
 | **learn** | `cargo reconverge learn` | four lessons — divergence, barriers, masks, reconvergence — driving the same replay engine over shipped recordings, fully offline |
 | **triage** | `cargo reconverge triage` | review findings and record the accepted ones, with reasons, in the baseline |
+
+Every view takes `--ascii` for a terminal or font without the box-drawing
+glyphs: borders become `+`, `-` and `|`, and the other marks (`—`, `…`, the
+`▸` cursor) get ASCII stand-ins. The lane letters (`o`, `W`, `.`) are ASCII
+already, so the diagram reads the same in both.
 
 An [asciinema recording](docs/demo/witness-debugger.cast) of the debugger
 walking the canonical hang and the mask mismatch is in `docs/demo/`.
@@ -267,21 +275,66 @@ components from this repository's `rust-toolchain.toml`; a crates.io
 install carries no toolchain file, so it has to be asked for. The
 driver's build script checks for it and says so directly.
 
+### Prebuilt binaries
+
+Each [GitHub release](https://github.com/vyncint/reconverge/releases)
+carries one archive per target, built by `release.yml`, for exactly two:
+`x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`. Anywhere else —
+Intel macOS, Linux on ARM, Windows — install from crates.io as above.
+
+```console
+$ shasum -a 256 -c reconverge-vX.Y.Z-<triple>.tar.gz.sha256
+$ tar -xzf reconverge-vX.Y.Z-<triple>.tar.gz
+$ rustup toolchain install nightly-2026-08-28 --profile minimal --no-self-update
+$ cp reconverge-vX.Y.Z-<triple>/{cargo-reconverge,reconverge-driver,reconverge-tui} ~/.cargo/bin/
+```
+
+Two things make or break it:
+
+- **Keep the three binaries in one directory on your `PATH`.**
+  `cargo-reconverge` looks for the driver and the views beside its own
+  executable first.
+- **The pinned nightly must be installed.** The driver links that
+  toolchain's `librustc_driver` dynamically and does not ship it;
+  `cargo-reconverge` puts the toolchain's library directory on the
+  driver's search path when it runs it. `rustc-dev` is needed to *build*
+  the driver, not to run it, so the minimal profile is enough here.
+
 ## Using it
 
 ```console
 $ cargo reconverge check                       # analyze; exit 1 on deny/confirmed findings
 $ cargo reconverge check --strict              # include warning-tier findings
 $ cargo reconverge check --cc 8.6              # target capacity context for RC004
-$ cargo reconverge check --cc sm_86            # the CUDA spellings work: sm_86, 86
+$ cargo reconverge check --cc sm_90a           # the CUDA spellings work: sm_86, compute_86, 86, sm_90a
 $ cargo reconverge check --sarif out.sarif     # SARIF 2.1.0 for code scanning
 $ cargo reconverge check --message-format json # one findings.v1 document per target
+$ cargo reconverge check --package my-kernels  # only this member (repeatable); --exclude for the rest
+$ cargo reconverge check --require-kernels     # exit 2 when no #[kernel] was analyzed
 $ cargo reconverge watch                       # re-run on every save
 $ cargo reconverge --explain RC002             # why it is a bug, and the idiomatic fix
 ```
 
 Exit codes: `0` clean, `1` findings at deny/confirmed confidence, `2` tool
-error. In CI, the [GitHub Action](action/README.md) is three lines:
+error. Every lib and bin target of the workspace is analyzed and gated, under
+the target's own crate name, so kernels in `src/bin/*.rs` count too. A run
+that found no `#[kernel]` at all still exits `0`, but says so —
+`no #[kernel] functions found in 1 crate — nothing was analyzed` — rather
+than reading like a clean pass; `--require-kernels` makes it a failure.
+
+The build always runs under the pinned nightly, whatever toolchain rustup
+picked for your project; set `RECONVERGE_TOOLCHAIN` only for a driver you
+built with another one (`RECONVERGE_DRIVER`).
+
+**No GPU is needed, but the build has to succeed.** `check` builds the crates
+it analyzes the way `cargo check` does, build scripts included. A
+single-source crate that links the CUDA host API (`cuda-host`, `cuda-core`)
+runs `cuda-bindings`' build script, which needs the CUDA toolkit's headers —
+not a GPU, not a driver, but the toolkit. Either install the toolkit where
+`check` runs, or keep the kernels in a device-only crate and check that one:
+`cargo reconverge check --package my-kernels`.
+
+In CI, the [GitHub Action](action/README.md) is three lines:
 
 ```yaml
 - uses: actions/checkout@v7
@@ -353,10 +406,13 @@ one that does less.
   it, and the replay splices the helper into the kernel — the bounded
   inliner: non-recursive callees, at most two frames, and a ceiling on the
   spliced result. That replays the *actual* calls, not the join the static
-  finding rests on. A lane whose path crosses a call that may synchronize
-  and was not spliced declines the replay rather than being counted as
-  absent. Nothing is promoted on a summary; the summary raises the finding,
-  a trace confirms it.
+  finding rests on. Nothing is promoted on a summary; the summary raises
+  the finding, a trace confirms it. A call the inliner left in place is
+  never stepped over either: when a lane's path meets one whose summary
+  says it may synchronize, the replay stops and the finding carries a
+  `replay:` note naming the call — until 0.8.0 such a call read as a
+  statement with no barrier, and a recursion every thread completed was
+  "confirmed" with one lane waiting.
 
   What is *not* followed: a call through a function pointer or a `dyn`
   method, a trait method on a generic kernel's type parameter, and a
@@ -436,8 +492,11 @@ one that does less.
   The arithmetic a 32-bit mask flows through is width-typed: integer `!`
   is the complement at the operand's own width, casts truncate to their
   target width, and overflow-checked arithmetic was already width-typed.
-  Where a width is unavailable the interpreter yields unknown rather than
-  assuming one.
+  Every binary operator carries its operand's type too, signedness
+  included, so `x < 0`, `x / 2` and `x >> 1` on an `i32` are the signed
+  operations — they were unsigned until 0.8.0, which made
+  `-(lane as i32) < 1` false on 31 lanes. Where a type is unavailable the
+  interpreter yields unknown rather than assuming one.
 
 - **Every site is attempted, but an unknown branch over a barrier stops the
   ones below it.** Promotion is per site, so a function with several
@@ -461,13 +520,19 @@ one that does less.
 
   In both, the finding stays at `warning` and the upstream barrier is
   itself reported — which is where the reader should be looking anyway.
-- **Whole-warp divergence is witnessed at the declared block.** When the
-  one-warp replay finds nothing and the kernel's `#[launch_contract]`
-  declares a one-dimensional block of several whole warps (64, 96, or
-  128), barrier findings are replayed again at that size — so a
-  `warp_id()`-guarded barrier that is safe at one warp and undefined at
-  two gates exactly when the contract says two. Blocks that are 2D, not
-  whole warps, or wider than 128 threads stay at the one-warp replay.
+- **The replay runs the declared block, and only that.** A kernel whose
+  `#[launch_contract]` declares `block = (x, y, z)` is replayed in that
+  shape — 2-D and 3-D included, lane *n* being the thread at linear index
+  *n* with x fastest, which is how warps are formed — so `threadIdx_y()`
+  under `(16, 2, 1)` is 1 on lanes 16..31, and a `warp_id()`-guarded
+  barrier that is safe at one warp and undefined at two gates exactly when
+  the contract says two. A kernel with no contract is replayed as one warp,
+  `(32, 1, 1)`. A declared block the replay cannot run — not a whole
+  number of warps, or wider than 128 threads — is not replayed at all: the
+  finding stays at `warning` with a `replay:` note naming the shape. Until
+  0.8.0 such a block was replayed as `(32, 1, 1)`, a launch the contract
+  excludes, and a `(16, 16, 1)` kernel whose every thread passed a
+  `threadIdx_x() < 16` guard was "confirmed" as a hang.
   A collective on a lane's path does not stop the replay: collectives
   are modeled per warp, so a warp whose still-running lanes are all at the
   same collective passes it whatever the other warps are doing, while the
@@ -476,7 +541,21 @@ one that does less.
   warp-scoped collective and a block-scoped barrier — is declined rather
   than approximated. The *site* itself must still be a barrier beyond one
   warp: a mask comparison is a per-warp question, and an error there would
-  produce a witness that looks exactly like a correct one.
+  produce a witness that looks exactly like a correct one. A collective
+  site under a declared multi-warp block therefore stays at `warning`, with
+  a `replay:` note saying so.
+- **A warp-uniform guard is not a divergent one for a collective.** A
+  warp collective's participants are one warp, so a guard that every lane
+  of a warp reads the same — `warp_id() == 0`, `threadIdx_x() / 32 == k`,
+  `threadIdx_x() >> 5` — lets each warp take the branch whole, and a
+  full-mask collective under it is not RC002. A barrier under the same
+  guard still is RC001: whole warps skipping `sync_threads()` is the hang.
+  Whether `threadIdx_x() / 32` is a warp number depends on the block —
+  under `(48, 2, 1)` one warp holds x 32..47 of one row and 0..15 of the
+  next — so it counts only when the declared block is 1-D, has rows of
+  whole warps, or has rows no wider than the divisor. A kernel with no
+  contract keeps the warning, with a note that declaring the block settles
+  it.
 - **Opaque regions are reported, not guessed at.** `asm!`, unmodeled
   intrinsics, and calls the analysis cannot follow (a function pointer, a
   `dyn` method, a sibling workspace crate, an `extern` device function) are
@@ -500,11 +579,18 @@ one that does less.
   ("expected int of size 8, but got size 4") — after resolving the value,
   so what is missing is an API that returns it at its own width.
 - **The pinned nightly is not optional.** A rustc-driver tool and the rustc
-  it wraps must be the same build; the pin matches upstream cuda-oxide's own,
-  and `pins.yml` opens an issue each week upstream moves — its commit, its
-  toolchain, or a device-surface function this dialect has not decided.
+  it wraps must be the same build. The pin is the toolchain upstream
+  cuda-oxide used at the commit this release is verified against
+  ([`conformance/PIN`](conformance/PIN)), not necessarily the one upstream
+  pins today: upstream has since split into a monorepo whose device crate
+  is on `1.99.1`. Until the pin moves, analyze kernels written against
+  that commit. `pins.yml` checks every week and keeps one issue current
+  with what moved — the commit, the toolchain governing upstream's device
+  crate, or a device-surface function this dialect has not decided.
 - **Platforms: Linux, macOS and Windows, all gated in CI.** Nothing here
-  needs a GPU or a vendor SDK on any of them, and the analysis, `check`, the
+  needs a GPU or a vendor SDK on any of them (a crate that links the CUDA
+  host API needs the toolkit to build at all; see
+  [Using it](#using-it)), and the analysis, `check`, the
   artifact round-trip, the schemas and the CLI contract are tested on all
   three. **The four terminal views are gated on Linux and macOS only.** They
   are believed to work on Windows and are not held to it: under ConPTY the
@@ -513,6 +599,9 @@ one that does less.
   delivers what an application wrote rather than in what these views render.
   Root-causing it needs a Windows machine (#162). A Windows clone also needs
   the lesson prose checked out with LF, which `.gitattributes` handles here.
+  Prebuilt archives exist for two targets only (see
+  [Prebuilt binaries](#prebuilt-binaries)); every platform installs from
+  crates.io.
 
 ## Status
 

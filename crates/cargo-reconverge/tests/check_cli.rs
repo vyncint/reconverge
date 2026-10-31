@@ -64,6 +64,28 @@ fn check(project: &Path, args: &[&str]) -> Output {
         .expect("failed to spawn cargo-reconverge")
 }
 
+/// The path a `file:///` URI names, percent-decoded.
+fn file_uri_path(uri: &str) -> PathBuf {
+    let rest = uri.strip_prefix("file:///").expect("a file URI");
+    let mut bytes = Vec::new();
+    let mut raw = rest.bytes();
+    while let Some(byte) = raw.next() {
+        if byte == b'%' {
+            let hex = [raw.next().unwrap(), raw.next().unwrap()];
+            bytes.push(u8::from_str_radix(std::str::from_utf8(&hex).unwrap(), 16).unwrap());
+        } else {
+            bytes.push(byte);
+        }
+    }
+    let path = String::from_utf8(bytes).unwrap();
+    // `file:///C:/x` on Windows, `file:///home/x` elsewhere.
+    if cfg!(windows) {
+        PathBuf::from(path)
+    } else {
+        PathBuf::from(format!("/{path}"))
+    }
+}
+
 fn prepared_copy(name: &str, source: &Path) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     // Refresh sources but keep the target dir: dependency builds stay
@@ -476,6 +498,34 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         .collect();
     assert_eq!(rule_ids, ["RC001", "RC002", "RC003", "RC004", "RC005"]);
     assert_eq!(run["results"].as_array().unwrap().len(), expected.len());
+    // What code scanning shows beside an alert: both descriptions and the
+    // explain page.
+    for rule in run["tool"]["driver"]["rules"].as_array().unwrap() {
+        assert!(rule["fullDescription"]["text"].is_string(), "{rule}");
+        assert!(rule["help"]["markdown"].is_string(), "{rule}");
+    }
+    // Every location names a file that exists once its base is applied.
+    // The bare workspace-relative `src/lib.rs` named a file only relative
+    // to a directory the report never stated, and GitHub read it from the
+    // repository root instead.
+    let base = run["originalUriBaseIds"]["%SRCROOT%"]["uri"]
+        .as_str()
+        .expect("the report declares its base");
+    assert!(
+        base.starts_with("file:///") && base.ends_with('/'),
+        "{base}"
+    );
+    for result in run["results"].as_array().unwrap() {
+        let location = &result["locations"][0]["physicalLocation"]["artifactLocation"];
+        assert_eq!(location["uriBaseId"], "%SRCROOT%", "{location}");
+        let file = file_uri_path(&format!("{base}{}", location["uri"].as_str().unwrap()));
+        assert!(file.is_file(), "{location} resolves to {}", file.display());
+        assert!(
+            file.starts_with(&project),
+            "{location} must resolve inside the analyzed project {}",
+            project.display()
+        );
+    }
     let sarif_messages = run["results"]
         .as_array()
         .unwrap()
@@ -522,7 +572,8 @@ fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
     assert_eq!(
         stderr.trim(),
         "error: `8x` is not a compute capability; expected e.g. `8.6` \
-         (the `sm_86` and `86` spellings are accepted too)",
+         (`sm_86`, `compute_86`, `86` and the `sm_90a`/`sm_100f` suffixes \
+         are accepted too)",
         "a value error is the whole of stderr:\n{stderr}"
     );
 
@@ -623,8 +674,8 @@ fn help_explains_that_text_filters_do_not_change_json() {
         "stdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("--sarif=--weird"),
-        "help must say how a path beginning with -- is passed:\n{stdout}"
+        stdout.contains("--sarif=-weird"),
+        "help must say how a path beginning with - is passed:\n{stdout}"
     );
 }
 
