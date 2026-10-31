@@ -234,7 +234,7 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
         );
     }
     if let Some(path) = &options.sarif_path {
-        sarif::write_report(path, &review)
+        sarif::write_report(path, &review, &metadata.workspace_root)
             .map_err(|e| format!("cannot write SARIF to {}: {e}", path.display()))?;
     }
 

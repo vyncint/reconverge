@@ -46,6 +46,11 @@ const RESERVED: &[(&str, &str)] = &[
     ),
 ];
 
+/// The page for a shipped `code`, exactly as `--explain` prints it.
+pub fn page(code: &str) -> Option<&'static str> {
+    PAGES.iter().find(|p| p.code == code).map(|p| p.text)
+}
+
 /// Print the page for `code`. Exit 0 on success, 2 on an unknown code or
 /// a reserved-but-unshipped one.
 pub fn run(code: &str) -> u8 {
