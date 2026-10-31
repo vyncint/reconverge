@@ -32,8 +32,9 @@ inputs:
   cc:
     description: >-
       Target compute capability (X.Y, e.g. 8.6) for shared-memory capacity
-      context (RC004). The CUDA spellings are accepted too: `sm_86` and `86`
-      both mean 8.6.
+      context (RC004). The CUDA spellings are accepted too: `sm_86`,
+      `compute_86` and `86` all mean 8.6, and an `a`/`f` suffix (`sm_90a`,
+      `sm_100f`) means the base capability.
     required: false
     default: ""
   strict:

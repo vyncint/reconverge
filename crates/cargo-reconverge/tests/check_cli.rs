@@ -441,7 +441,8 @@ fn a_bad_value_answers_in_one_line_and_an_unknown_argument_gets_the_usage() {
     assert_eq!(
         stderr.trim(),
         "error: `8x` is not a compute capability; expected e.g. `8.6` \
-         (the `sm_86` and `86` spellings are accepted too)",
+         (`sm_86`, `compute_86`, `86` and the `sm_90a`/`sm_100f` suffixes \
+         are accepted too)",
         "a value error is the whole of stderr:\n{stderr}"
     );
 
