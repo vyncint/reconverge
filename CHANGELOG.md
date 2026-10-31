@@ -49,6 +49,25 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
+- **A full-mask collective under a warp-uniform guard is no longer RC002.**
+  `warp_id() == 0`, `threadIdx_x() / 32 == k` and `threadIdx_x() >> 5` read
+  the same on every lane of a warp, so each warp takes the branch whole and
+  the mask names only lanes that are there. Uniformity now has a warp scope
+  below the block for this one question; the same guard over
+  `sync_threads()` is still RC001, because whole warps skipping a block
+  barrier is the hang. `warp_id()` is `threadIdx_x() / 32` upstream, so this
+  holds only when the declared block lays its warps along x — 1-D, rows a
+  whole number of warps wide, or rows no wider than the divisor. Under
+  `(48, 2, 1)` warp 1 holds x 32..47 of one row and 0..15 of the next, and a
+  kernel with no contract could be launched that way: it keeps the warning,
+  with a note that declaring the block settles it. (#194)
+
+- **A collective site under a declared multi-warp block is no longer
+  promoted.** It used to be confirmed from a one-warp `(32, 1, 1)` replay,
+  which is a launch the contract excludes; it stays at `warning` with a
+  `replay:` note, because a collective site is replayed only within one
+  warp. (#190)
+
 - **A run that analyzed no `#[kernel]` says so**:
   `reconverge: no #[kernel] functions found in 1 crate — nothing was
   analyzed`, still exit 0, and the Action raises a `::warning::` for it. A
@@ -118,6 +137,16 @@ the corpus; found-in-the-wild is the true north.
 
 ### Breaking
 
+- `reconverge-core`: `LaunchScope` gains `Thread` and `Warp` below `Block`;
+  `Eval::Binary` carries the operand's `IntType` (new: width and
+  signedness); `Analysis` gains `block_warp_divergent` and
+  `block_warp_cause`; `CallKind` gains `ThreadIndexX { divisor }`, which
+  `threadIdx_x` and `warp::warp_id` now classify as. `reconverge-witness`:
+  `replay_hang_at` and `replay_outcome_at` take a `&ReplayEnv` — the block
+  as `(x, y, z)` and the crate's summaries — instead of a lane count, and
+  `NoWitness` gains `UnsupportedLaunch` and `UnfollowedCall`. `Replay::threads`
+  is the lane count now that `block[0]` is not. (#190, #191, #192, #194)
+
 - **The wrapped build always uses the pin; to run a driver built against
   another toolchain, set `RECONVERGE_TOOLCHAIN`.** `RUSTUP_TOOLCHAIN` is no
   longer consulted. rustup's `cargo` proxy exports it to every subcommand,
@@ -134,6 +163,36 @@ the corpus; found-in-the-wild is the true north.
   `<working-directory>/reconverge.sarif` must drop the prefix. (#198)
 
 ### Fixed
+
+- **The witness replayed `(32, 1, 1)` whatever block the contract
+  declared, and confirmed hangs no allowed launch has.** `threadIdx_x()` ran
+  0..31 under a `(16, 16, 1)` contract, so `if threadIdx_x() < 16 {
+  sync_threads() }` — every thread arrives — was a gating `confirmed`, and
+  `threadIdx_y() == 0` was 0 on every lane, so the real hang under
+  `(16, 2, 1)` was missed. The declared block is now the only shape
+  replayed, in its own shape: lane *n* is the thread at linear index *n*,
+  x fastest, and `threadIdx`, `blockDim`, `warp_id` and `live_lanes_1d` are
+  read from it. A declared block that is not a whole number of warps, or is
+  wider than 128 threads, is not replayed at all and says so in a
+  `replay:` note. (#190)
+
+- **The witness stepped over calls the inliner left in place, barrier and
+  all.** A recursive helper keeps its recursive call, and a chain deeper
+  than two frames keeps its third, and the interpreter treated either as a
+  statement with no barrier — so a recursion every thread completed at the
+  same `sync_threads()` was confirmed with "1 of 32 lanes wait, 31 never
+  arrive", and the diagram of a real one was wrong. A lane whose path meets
+  a call that the summaries say may synchronize now ends the replay, in the
+  diamond skip as well, and the finding stays at `warning` with a
+  `replay:` note naming the call. A call the summaries clear is stepped over
+  as before. (#191)
+
+- **The witness compared, divided and shifted signed integers as
+  unsigned.** `-(lane as i32) < 1` holds on every lane and was confirmed as
+  "1 of 32 lanes wait"; `x > -1` holds on every lane and was reported
+  "unreachable under the declared launch". Binary operators now carry the
+  operand's width and signedness, results wrap at that width, and an operand
+  wider than its type yields unknown rather than a guess. (#192)
 
 - **Findings are keyed by target, not by package.** The driver names an
   artifact after the target's crate name, and `check`, `inspect`, `witness`

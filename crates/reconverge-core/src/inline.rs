@@ -218,7 +218,7 @@ fn remap_block(block: &mut Block, local_base: Local, block_base: BlockId, ret_id
         if let Some(e) = &mut s.eval {
             match e {
                 Eval::Use(a) | Eval::Unary(_, a, _) | Eval::Cast(a, _) => op(a),
-                Eval::Binary(_, a, b) | Eval::CheckedBinary(_, a, b, _) => {
+                Eval::Binary(_, a, b, _) | Eval::CheckedBinary(_, a, b, _) => {
                     op(a);
                     op(b);
                 }

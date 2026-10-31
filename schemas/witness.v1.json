@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/vyncint/reconverge/blob/main/schemas/witness.v1.json",
   "title": "witness.v1",
-  "description": "Witness artifact: a concrete replay of one finding under one launch configuration -- one warp, or the declared block when a #[launch_contract] names several whole warps (64, 96, 128). Blocks that are 2D, not whole warps, or wider than 128 threads stay at the one-warp replay. Lane states are delta-encoded per step (only changes are recorded), so a 10k-step trace stays small. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::witness is the Rust binding; fixtures/witness/ are the API tests.",
+  "description": "Witness artifact: a concrete replay of one finding under one launch configuration -- the declared block when a #[launch_contract] names one of whole warps up to 128 threads (any shape: lane n is the thread at linear index n, x fastest), and one warp when it names none. A declared block of any other size is not replayed, and is never replayed as some other shape. Lane states are delta-encoded per step (only changes are recorded), so a 10k-step trace stays small. Additive-only within v1; consumers must tolerate unknown fields. reconverge-artifacts::witness is the Rust binding; fixtures/witness/ are the API tests.",
   "type": "object",
   "required": ["schema", "tool", "crate", "kernel", "launch", "lanes", "initial_lane_states", "steps", "verdict"],
   "properties": {
@@ -36,7 +36,7 @@
         "warp": { "type": "integer", "minimum": 0, "description": "Index of the replayed warp within its block." }
       }
     },
-    "lanes": { "type": "integer", "minimum": 32, "maximum": 128, "multipleOf": 32, "description": "32 for the ordinary one-warp replay, or the declared block when the contract names several whole warps. This was `const: 32` through 0.4.0 while the driver had been writing 64, 96 and 128 since 0.1.12 -- so the artifacts that failed validation were exactly the gating ones." },
+    "lanes": { "type": "integer", "minimum": 32, "maximum": 128, "multipleOf": 32, "description": "The replayed block's thread count: 32 for an undeclared kernel's one-warp replay, or the declared block's x*y*z. This was `const: 32` through 0.4.0 while the driver had been writing 64, 96 and 128 since 0.1.12 -- so the artifacts that failed validation were exactly the gating ones." },
     "initial_lane_states": {
       "type": "array",
       "description": "One entry per lane: `lanes` long.",

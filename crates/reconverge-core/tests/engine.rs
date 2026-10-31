@@ -6,7 +6,9 @@
 use reconverge_core::Uniformity;
 use reconverge_core::analysis::{self, ReasonKind, Summaries};
 use reconverge_core::dialect::{CallKind, MaskSource};
-use reconverge_core::model::{Block, Callee, FnModel, Local, Stmt, Term, TermKind};
+use reconverge_core::model::{
+    BinOp, Block, Callee, Eval, FnModel, IntType, Local, Operand, Stmt, Term, TermKind,
+};
 
 fn stmt(dest: Local, uses: &[Local]) -> Stmt {
     Stmt {
@@ -658,4 +660,187 @@ fn opaque_code_is_counted_and_conservative() {
     assert_eq!(a.opaque_statements, 1);
     assert_eq!(a.analyzed_statements, 1); // the return terminator
     assert_eq!(a.locals[1], Uniformity::Divergent);
+}
+
+fn stmt_eval(dest: Local, uses: &[Local], eval: Eval) -> Stmt {
+    Stmt {
+        eval: Some(eval),
+        ..stmt(dest, uses)
+    }
+}
+
+/// `if <guard on _3> { ballot_sync(FULL); sync_threads() }`, with `prelude`
+/// computing `_3` from `_2 = <source>()`. Collective in block 2, barrier
+/// in block 3.
+fn warp_guard_model(source: CallKind, prelude: Vec<Stmt>, locals: usize) -> FnModel {
+    let mut f = kernel(
+        locals,
+        0,
+        vec![
+            Block {
+                stmts: vec![],
+                term: term(call(source, "source", Some(2), 1)),
+            },
+            Block {
+                stmts: prelude,
+                term: term(TermKind::Branch {
+                    cond: 3,
+                    targets: vec![4, 2],
+                    values: vec![],
+                }),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(
+                    CallKind::WarpCollective {
+                        mask: MaskSource::ImplicitFull,
+                    },
+                    "ballot",
+                    None,
+                    3,
+                )),
+            },
+            Block {
+                stmts: vec![],
+                term: term(call(CallKind::Barrier, "sync_threads", None, 4)),
+            },
+            Block {
+                stmts: vec![],
+                term: term(TermKind::Return),
+            },
+        ],
+    );
+    f.declared_block = None;
+    f
+}
+
+fn eq_zero(dest: Local, of: Local) -> Stmt {
+    stmt_eval(
+        dest,
+        &[of],
+        Eval::Binary(
+            BinOp::Eq,
+            Operand::Local(of),
+            Operand::Const(0),
+            IntType::unsigned(32),
+        ),
+    )
+}
+
+/// What the collective and the barrier under the guard see, per block.
+fn verdicts(f: &FnModel, block: Option<[u32; 3]>) -> (bool, bool) {
+    let mut f = f.clone();
+    f.declared_block = block;
+    let a = analysis::analyze(&f, &no_summaries());
+    (
+        a.warp_ops[0].divergent_cause.is_some(),
+        a.barriers[0].divergent_cause.is_some(),
+    )
+}
+
+/// #194: `warp_id() == 0` lets each warp take the branch whole, so a
+/// full-mask collective under it is convergent for its warp — while the
+/// barrier beside it is still a hang, whole warps skipping it.
+///
+/// Only when the block lays its warps along x. `warp_id()` is
+/// `threadIdx_x() / 32`, and under `(48, 2, 1)` warp 1 holds x 32..47 and
+/// 0..15; with no contract the block could be that one.
+#[test]
+fn a_warp_uniform_guard_is_convergent_for_a_collective_only() {
+    let f = warp_guard_model(
+        CallKind::ThreadIndexX { divisor: 32 },
+        vec![eq_zero(3, 2)],
+        4,
+    );
+    for (block, collective_divergent) in [
+        (Some([64, 1, 1]), false),
+        (Some([48, 1, 1]), false),
+        (Some([64, 2, 1]), false),
+        (Some([16, 4, 1]), false),
+        (Some([48, 2, 1]), true),
+        (None, true),
+    ] {
+        assert_eq!(
+            verdicts(&f, block),
+            (collective_divergent, true),
+            "block {block:?}: (collective divergent, barrier divergent)"
+        );
+    }
+}
+
+/// The same guard as arithmetic on `threadIdx_x()`: a division by a whole
+/// number of warps, or a right shift by at least five.
+#[test]
+fn x_over_whole_warps_is_warp_uniform() {
+    for (op, c, uniform) in [
+        (BinOp::Div, 32, true),
+        (BinOp::Div, 64, true),
+        (BinOp::Shr, 5, true),
+        (BinOp::Shr, 6, true),
+        (BinOp::Div, 16, false),
+        (BinOp::Shr, 4, false),
+    ] {
+        let f = warp_guard_model(
+            CallKind::ThreadIndexX { divisor: 1 },
+            vec![
+                stmt_eval(
+                    4,
+                    &[2],
+                    Eval::Binary(
+                        op,
+                        Operand::Local(2),
+                        Operand::Const(c),
+                        IntType::unsigned(32),
+                    ),
+                ),
+                eq_zero(3, 4),
+            ],
+            5,
+        );
+        assert_eq!(
+            verdicts(&f, Some([128, 1, 1])),
+            (!uniform, true),
+            "{op:?} {c}"
+        );
+    }
+}
+
+/// Scope follows control the way divergence does: a warp number
+/// overwritten on half of each warp is not a warp number any more.
+#[test]
+fn a_warp_number_written_under_a_lane_guard_is_not_warp_uniform() {
+    // locals: 0 ret, 2 w = warp_id(), 3 cond, 5 lane, 6 lane < 16.
+    let lane_guard = |f: &mut FnModel| {
+        // bb0: w = warp_id() -> bb5; bb5: lane = lane_id() -> bb6;
+        // bb6: if lane < 16 -> bb7 (w = 5) -> bb1, else bb1.
+        f.blocks[0].term = term(call(
+            CallKind::ThreadIndexX { divisor: 32 },
+            "warp_id",
+            Some(2),
+            5,
+        ));
+        f.blocks.push(Block {
+            stmts: vec![],
+            term: term(call(CallKind::ThreadIndexWitness, "lane_id", Some(5), 6)),
+        });
+        f.blocks.push(Block {
+            stmts: vec![stmt(6, &[5])],
+            term: term(TermKind::Branch {
+                cond: 6,
+                targets: vec![1, 7],
+                values: vec![],
+            }),
+        });
+        f.blocks.push(Block {
+            stmts: vec![stmt_eval(2, &[], Eval::Use(Operand::Const(5)))],
+            term: term(TermKind::Goto { target: 1 }),
+        });
+    };
+    let mut f = warp_guard_model(
+        CallKind::ThreadIndexX { divisor: 32 },
+        vec![eq_zero(3, 2)],
+        7,
+    );
+    lane_guard(&mut f);
+    assert_eq!(verdicts(&f, Some([64, 1, 1])), (true, true));
 }
