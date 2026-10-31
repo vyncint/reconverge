@@ -12,6 +12,18 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-31
+
+The first-run release. A deep review of 0.7.0 from a new user's seat found
+that the README's own `cargo reconverge check` exited 2 in any project
+without the pinned nightly, that a confirmed hang in a `[[bin]]` passed
+with exit 0, that a barrier one function call away was never looked at, and
+that the witness confirmed hangs on code where every thread arrives. This
+release fixes those, and the twenty-two smaller things the same review
+filed (#186–#211): the first run works from any project, every target's
+findings gate, divergence crosses function boundaries, and a `confirmed`
+verdict is one the replay earned under the declared launch.
+
 ### Added
 
 - **An install is verified again, through the first run, and the Action is
@@ -1802,7 +1814,8 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
-[Unreleased]: https://github.com/vyncint/reconverge/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/vyncint/reconverge/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/vyncint/reconverge/releases/tag/v0.8.0
 [0.7.0]: https://github.com/vyncint/reconverge/releases/tag/v0.7.0
 [0.6.1]: https://github.com/vyncint/reconverge/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0
