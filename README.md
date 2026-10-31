@@ -389,22 +389,42 @@ one that does less.
 - **Reducible CFGs.** An irreducible control-flow graph degrades to
   all-divergent for that function, and the diagnostic says so rather than
   pretending otherwise.
-- **Interprocedural analysis is summary-based in v1** — per-function
-  `may_contain_barrier` / `may_contain_warp_op` bits, no context sensitivity.
-  A call-site finding is still raised from those bits alone.
+- **Interprocedural analysis is per kernel and context-insensitive.**
+  Since 0.8.0 every local function a kernel reaches is analyzed — its body,
+  its parameters and its return value (#188) — so a divergent barrier
+  inside a helper, a barrier guarded by a parameter the kernel passes a
+  thread index, and a branch on a helper that *returns* one are all
+  reported, against each kernel that reaches them. Inside one kernel a
+  helper is analyzed once, each parameter joined over every call to it; two
+  kernels never share a join, so a helper a second kernel calls with
+  uniform arguments is not blamed on it. A return value is summarized on
+  its own (divergent, and how widely constant) and *added* to the call's
+  arguments, never substituted for them. Trait methods, generic functions
+  and closures resolve to the body they run, per instance (#189).
 
-  It is witness-promoted only when the callee can be *inlined*, which
-  replaces "the summary says this may reach a barrier" with an actual
-  path: non-recursive callees, at most two frames, and a ceiling on the
-  spliced result. Anything outside those bounds — recursion, a deeper
-  chain, a callee whose body was not modeled — keeps the summary tier and
-  stays at `warning`. Nothing is promoted on a summary bit; the bit raises
+  A finding reached this way stays at `warning` unless a replay confirms
+  it, and the replay splices the helper into the kernel — the bounded
+  inliner: non-recursive callees, at most two frames, and a ceiling on the
+  spliced result. That replays the *actual* calls, not the join the static
+  finding rests on. Nothing is promoted on a summary; the summary raises
   the finding, a trace confirms it. A call the inliner left in place is
   never stepped over either: when a lane's path meets one whose summary
   says it may synchronize, the replay stops and the finding carries a
   `replay:` note naming the call — until 0.8.0 such a call read as a
   statement with no barrier, and a recursion every thread completed was
   "confirmed" with one lane waiting.
+
+  What is *not* followed: a call through a function pointer or a `dyn`
+  method, a trait method on a generic kernel's type parameter, and a
+  function in another crate of the workspace — each crate is compiled, and
+  analyzed, on its own. Those calls are counted as opaque (below) rather
+  than read as barrier-free, and their results are divergent rather than
+  guessed. A closure handed to a library function (`for_each`, `map`) is
+  analyzed and counts toward the call, but nothing says how often the
+  library runs it, so such a finding is never promoted. Library code that
+  calls *back* into a local trait impl (`Iterator::sum` over a local
+  iterator) is not followed, and value flow through memory is not tracked
+  here any more than inside one function.
 - **RC001 covers the all-threads barriers** — `thread::sync_threads`,
   `cluster::cluster_sync` and the blocking half of the raw pair behind it
   (`barrier_cluster_wait*`; the arrival half signals and returns, so it
@@ -536,8 +556,10 @@ one that does less.
   whole warps, or has rows no wider than the divisor. A kernel with no
   contract keeps the warning, with a note that declaring the block settles
   it.
-- **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
-  intrinsics are counted, and the tally is a property of the *run*, not of
+- **Opaque regions are reported, not guessed at.** `asm!`, unmodeled
+  intrinsics, and calls the analysis cannot follow (a function pointer, a
+  `dyn` method, a sibling workspace crate, an `extern` device function) are
+  counted, and the tally is a property of the *run*, not of
   a finding: it rides in `findings.v1` as `coverage`, is printed as a note
   on every finding in the affected kernel, and closes the summary line
   whenever anything was left unread — including a run with no findings at

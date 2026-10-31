@@ -21,6 +21,7 @@ the corpus; found-in-the-wild is the true north.
   kernels and leave the host crate out. Both READMEs say so, and a name
   that is not a workspace member is refused before anything is built.
   (#197)
+
 - **`check --require-kernels`** exits 2 when no `#[kernel]` was analyzed,
   for a CI gate that must not pass on an empty run. (#196)
 
@@ -32,10 +33,12 @@ the corpus; found-in-the-wild is the true north.
   checked, so `sm_86a` — which names no architecture — is an error rather
   than a quiet 8.6. The table gains 10.3, 11.0 and 12.1, all in the CUDA 13
   guide's memory table (12.1 as the second member of `12.x`). (#200)
+
 - **SARIF rules carry what code scanning shows beside an alert**: a
   `fullDescription` (the explain page's opening paragraph) and the page
   itself as `help.markdown`/`help.text`. A rule had only an id, a one-line
   summary and a link. (#198)
+
 - **`cargo reconverge help`, and `--version`/`-V` after a subcommand**
   (`check -V`) are answered instead of being reported as unrecognized
   arguments with the usage text. The usage text now lists `--version`, the
@@ -74,12 +77,14 @@ the corpus; found-in-the-wild is the true north.
   wrong `working-directory`, a crate without the cuda-oxide dependency, or
   kernels behind a disabled cfg used to print the exact summary of a clean
   pass. (#196)
+
 - **`check` names the layer that failed.** A build script that failed (the
   CUDA toolkit missing, typically), a driver that cannot start under the
   toolchain, and ordinary compile errors used to share one message that
   blamed the toolchain and recommended `setup`. cargo's own diagnostics now
   pass through `check` rather than straight to the terminal, coloured when
   stderr is one; cargo's progress bar is not shown. (#197)
+
 - **`witness` after a check that confirmed nothing exits 0**, saying there
   is nothing to replay, instead of exit 2 and "run `cargo reconverge check`
   first" right after one had run. A project where `check` has never run is
@@ -95,6 +100,7 @@ the corpus; found-in-the-wild is the true north.
   in `originalUriBaseIds`; a file outside the repository gets an absolute
   `file://` URI. RC001's short description is now "an all-threads barrier
   under thread-divergent control", not `sync_threads()` alone. (#198)
+
 - **A value-taking flag refuses an empty value and a following token that
   begins with `-`.** `check --sarif=` ran the whole analysis and then failed
   with `cannot write SARIF to : …`; `--baseline -h` read a baseline named
@@ -112,16 +118,19 @@ the corpus; found-in-the-wild is the true north.
   instead of opening it as an artifact path — a misspelt `--asci` surfaced
   inside the view as `No such file or directory`. `--` ends the options, for
   a file whose name starts with a dash (#206).
+
 - **Ctrl-C in triage says what it threw away.** It is still the exit that
   always works, mid-reason or not, but with unsaved baseline edits it now
   prints `discarded N unsaved baseline edits` on stderr after the terminal
   is restored and exits **130**, where it used to exit 0 having dropped a
   review pass without a word. `cargo reconverge triage` passes the code on.
   With nothing unsaved it is a plain quit, as before (#206).
+
 - **The Inspector's finding bar names the tier**, spelt as `check` prints
   it: `finding 4/39 warning[RC005] …`. A lint-samples run loads 39 findings
   there of which 25 are warnings `check` hides by default, and without the
   word a hidden warning read exactly like a gating deny (#206).
+
 - **The witness view ranks its rows on a small terminal.** The lane strip
   and the current step come first, then the verdict, and the timeline gives
   way before any of them; below the strip's own size the view says
@@ -130,10 +139,31 @@ the corpus; found-in-the-wild is the true north.
   and the current step's statement wrap rather than ending in `block (…` and
   "…without ever reaching the …" at 80 columns, so the 80x24 goldens move by
   a row (#206).
+
 - **Lesson prose reflows** when an authored line does not fit, instead of
   losing the end of every line at 46 columns ("the mask promis…"), and a
   page that still runs out of rows ends in `… more below: enlarge the
   terminal`. Where the authored breaks fit they are kept (#206).
+
+- **A call the analysis cannot follow is opaque, not barrier-free** (#189).
+  A function pointer, a `dyn` method, a trait method on a generic kernel's
+  type parameter, an `extern` device function, and a function in another
+  crate of the workspace — each crate is compiled, and analyzed, on its
+  own — are counted in `coverage`, so the summary line says `… opaque in N
+  functions` where it used to say nothing, and their results are divergent
+  rather than guessed. Calls into the standard library and `cuda_device`
+  are unchanged.
+
+- **Coverage includes the helpers a kernel reaches.** The per-finding
+  `coverage:` note sums the kernel and every function it calls, and the
+  run-level tally counts each reached function once.
+
+- **A replay declines at a call it cannot follow, whoever made it.** Beside
+  the local calls of #191 below, two calls have no direct callee and still
+  may synchronize: a library call handed a closure that does
+  (`for_each(|_| sync_threads())`), and a call the analysis cannot see into.
+  A lane that meets either, or can still reach one, now ends the replay too.
+  Nothing in the conformance corpus or the mutation table moved.
 
 ### Breaking
 
@@ -161,6 +191,17 @@ the corpus; found-in-the-wild is the true north.
   `upload-sarif` step in action/README.md finds the file it names. A
   workflow that worked around this by uploading
   `<working-directory>/reconverge.sarif` must drop the prefix. (#198)
+
+- `reconverge-core`: the model and the summaries gain what crossing a
+  function boundary needs (#188, #189). `TermKind::Call` gains `arg_uses`
+  (the locals each argument reads, by position) and `Callee` gains
+  `may_call` (local closures and functions a library call is handed);
+  `Summaries` gains `returns_divergent` and `return_scope`; `ReasonKind`
+  gains `Parameter` and `Returned`; `inline::Inlined` gains `origins`. New
+  API beside them: `analysis::analyze_with` and `ParamSeed`, the
+  `interproc` module, and `inline::inline_all`. A hand-built model that
+  leaves `arg_uses` empty still analyzes, with every parameter joined over
+  all of the call's arguments.
 
 ### Fixed
 
@@ -204,25 +245,30 @@ the corpus; found-in-the-wild is the true north.
   document. The set `check` gates on now comes from cargo's own build
   messages — exactly the targets this run compiled — and the readers match
   file names exactly against the workspace's lib and bin targets. (#187)
+
 - **A deleted or renamed target's artifacts are pruned.** Nothing ever
   removed them, so a confirmed RC001 in a deleted `src/main.rs` went on
   failing every run, pointing at a file that no longer existed, until
   `target/reconverge` was deleted by hand. (#187)
+
 - **A truncated findings artifact heals instead of failing every run.** A
   killed driver or a full disk left half a document; the build was fresh,
   so nothing rewrote it, and every later run exited 2 with a serde error and
   no hint. An unreadable artifact now gets one forced re-lint, like a
   missing one, and if it is still unreadable the error names the directory
   to delete. (#195)
+
 - **A newer schema is reported as one.** `deserialize_checked` parsed the
   typed document before comparing `schema`, so a `findings.v2` from a newer
   driver read as ``missing field `confidence` at line 1 column 1742`` — damage,
   not a version. The tag is read first now, and `check` adds the `setup`
   hint. (#195)
+
 - **Changing `--cc` re-lints the workspace members only.** Every unit's
   fingerprint was dropped, so `--cc 8.6` followed by `--cc 9.0` recompiled
   `syn`, `quote` and the rest of the dependency tree to re-lint one crate.
   (#202)
+
 - **Outside a project, `check` says `error:` once.** cargo's own message was
   nested under ours — `error: cargo metadata failed:`, then
   ``error: could not find `Cargo.toml` …`` — and a trailing blank line.
@@ -232,9 +278,11 @@ the corpus; found-in-the-wild is the true north.
   pipe.** `cargo reconverge --explain RC001 | head -3` exited 101 with
   `failed printing to stdout: Broken pipe`; these now go through the same
   classified stdout as `check`'s report and exit 0. (#199)
+
 - **The summary's noun agrees with the count beside it**:
   `0 deny, 2 confirmed, 1 warning finding`, not `… 1 warning findings`,
   which pluralized on the total. (#199)
+
 - **The stale-baseline note quotes its entry once**: ``baseline entry
   sample_kernels RC001 in `gone` no longer matches``, where the whole label
   used to be wrapped in a second pair of backticks. (#199)
@@ -251,6 +299,7 @@ the corpus; found-in-the-wild is the true north.
   added when the *kind* of drift does — instead of muting every later
   report behind the first one's title. Against upstream `2d47e43` it now
   reports `1.99.1` and ten undecided surface functions.
+
 - **`release.yml` holds the tag to the manifest, moves `v0` only forward,
   and names a failed notification** (#210). A new first job fails unless
   every published crate at the tag declares the tag's version, so a tag on
@@ -266,13 +315,53 @@ the corpus; found-in-the-wild is the true north.
   parent shutting down send did not. A signal thread now runs the same
   restore and re-raises the signal with its default action, so the shell
   still reports a death by that signal (#205).
+
 - **After `f`, the Inspector's bottom line kept naming the previous
   function's finding** over the new function's source. Switching function
   now drops a finding that is about another kernel (#206).
+
 - **At 80x24 the `barriers` and `reconvergence` lessons cut the last line of
   their kernel excerpt**, one row short of room — in `reconvergence`, the
   `sync_threads()` the page is about. The replay's separating blank gives
   way first now (#206).
+
+- **A divergent barrier or collective inside a helper is reported** (#188).
+  Divergence used to stop at every function boundary: only kernels were
+  analyzed, a helper's parameters started uniform, and a call's result was
+  uniform whenever its arguments were. `if threadIdx_x() == 0 {
+  sync_threads() }` one call away, a barrier guarded by a parameter the
+  kernel passes a thread index, a vote under `lane < 16` in a helper given
+  `lane_id()`, a branch on upstream's own `get_global_thread_id()`, and
+  `grid::sync()` under a helper returning `blockIdx` — each printed `0 deny,
+  0 confirmed, 0 warning findings`, `--strict` included, while the same
+  kernel with the read inlined was `confirmed`.
+
+  Every local function a kernel reaches is now analyzed, with its
+  parameters joined over the calls to it *from that kernel*, and a
+  function's return value is summarized and added to the call's result. A
+  site inside a helper is reported against each kernel that reaches it
+  ("…, inside `leader_sync`"), with a provenance chain that crosses the
+  parameter or the return value back to the source. Such a finding is
+  `warning` until the witness replays it, and the replay splices the helper
+  into the kernel and runs the actual calls — four of the five shapes above
+  are `confirmed` that way; the block-scoped one is a cross-block finding,
+  which never promotes.
+
+- **Trait methods, generic functions and closures resolve to the body they
+  run** (#189). A call was looked up by its definition path, which for a
+  trait method names the trait (`Stage::run`), for a closure names
+  `Fn::call`, and for a function pointer names nothing — none resolved, and
+  each was treated as barrier-free. Helpers are now modeled per instance and
+  calls resolved through `Instance::resolve`, so `t.run()` and
+  `generic_stage(&t)` under a divergent guard are `confirmed`, and
+  `(0..2).for_each(|_| sync_threads())` is a `warning` (nothing says how
+  often `for_each` runs the closure).
+
+- **RC004 counts shared statics declared in helpers** (#193). It read the
+  kernel's own body only, so 64 KiB of `SharedArray` in a function the
+  kernel called came back clean and failed later in ptxas. It now walks the
+  kernel's call graph, counting each static once however many helpers
+  reach it.
 
 ### Documentation
 
@@ -321,6 +410,7 @@ the corpus; found-in-the-wild is the true north.
   `docs/RELEASING.md`, an `[Unreleased]` link definition, and the
   `MUTATION.md` paragraph that still called the unmasked warp wrappers
   outside the surface — they are analyzed, and the generator says so now.
+
 - **The witness-debugger recording shows the current fixtures** (#211). It
   had been recorded over the hand-written fixtures of the first commit
   ("step 0/5", `lib.rs:20`), and `scripts/record-witness-demo.sh` still

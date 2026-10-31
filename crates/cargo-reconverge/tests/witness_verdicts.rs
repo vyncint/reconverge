@@ -78,11 +78,17 @@ fn every_confirmed_verdict_is_earned() {
         "the confirmed controls gate\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
 
-    let findings: Vec<serde_json::Value> = stdout
+    let all: Vec<serde_json::Value> = stdout
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON line"))
         .flat_map(|artifact| artifact["findings"].as_array().cloned().unwrap_or_default())
         .collect();
+    // A site inside a helper is reported against the kernel too (#188), and
+    // says which helper. Those are checked on their own below; the verdicts
+    // this test is about are the kernels' own sites.
+    let (in_helpers, findings): (Vec<_>, Vec<_>) = all
+        .into_iter()
+        .partition(|f| f["message"].as_str().unwrap().contains(", inside `"));
     let inventory: BTreeMap<(String, String), String> = findings
         .iter()
         .map(|f| {
@@ -128,6 +134,31 @@ fn every_confirmed_verdict_is_earned() {
     })
     .collect();
     assert_eq!(inventory, expected, "stdout:\n{stdout}");
+
+    // The two kernels whose helpers hold a barrier under their own divergent
+    // guard: each such site is found, and none is promoted — the replay
+    // meets the same call the inliner left in place.
+    let mut helper_sites: Vec<(String, String)> = in_helpers
+        .iter()
+        .map(|f| {
+            (
+                f["kernel"].as_str().unwrap().to_string(),
+                f["confidence"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    helper_sites.sort();
+    assert_eq!(
+        helper_sites,
+        [
+            ("depth_past_the_inliner", "warning"),
+            ("depth_past_the_inliner", "warning"),
+            ("recursion_all_arrive", "warning"),
+            ("recursion_all_arrive", "warning"),
+        ]
+        .map(|(k, c)| (k.to_string(), c.to_string())),
+        "stdout:\n{stdout}"
+    );
 
     // The tier is half the contract; the other half is that a declined
     // replay says why, and a result the replay did not reach is not one it

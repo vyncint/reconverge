@@ -34,26 +34,54 @@ pub struct Inlined {
     /// These are the sites an interprocedural finding can now be replayed
     /// against.
     pub exposed: Vec<(BlockId, Vec<BlockId>)>,
+    /// Per block of `model`: the callee block it is a copy of, or `None`
+    /// for the caller's own blocks and the glue the splice adds. A site
+    /// inside a helper (#188) is replayed at every copy of its block.
+    pub origins: Vec<Option<(FnId, BlockId)>>,
 }
 
 /// Splice non-recursive local callees of `f` into it, up to `depth`.
 ///
 /// Returns `None` when nothing was inlined, or when the bounds above are
 /// exceeded — in both cases the caller should keep its existing behaviour.
+/// Also `None` when inlining exposed no barrier or collective; see
+/// [`inline_all`] for a replay that needs the callees' *values* instead.
 #[must_use]
 pub fn inline_calls(fns: &[FnModel], f: &FnModel, depth: u32) -> Option<Inlined> {
+    inline_all(fns, f, depth).filter(|inlined| !inlined.exposed.is_empty())
+}
+
+/// As [`inline_calls`], whether or not inlining exposed a site.
+///
+/// A direct site under `if get_global_thread_id() % 2 == 0` needs the
+/// helper's return value, not its barriers: the call alone is an unknown
+/// the replay declines on, and the same call spliced in is the arithmetic
+/// it can evaluate (#188). The caller's own block ids are unchanged by the
+/// splice — callees are appended — so a site found before inlining is
+/// still the same block after it.
+#[must_use]
+pub fn inline_all(fns: &[FnModel], f: &FnModel, depth: u32) -> Option<Inlined> {
     let mut active = Vec::new();
     let mut out = f.clone();
     let mut exposed = Vec::new();
-    if !splice(fns, &mut out, depth, &mut active, &mut exposed) {
+    let mut origins = vec![None; f.blocks.len()];
+    if !splice(
+        fns,
+        &mut out,
+        depth,
+        &mut active,
+        &mut exposed,
+        &mut origins,
+    ) {
         return None;
     }
-    if exposed.is_empty() || out.blocks.len() > MAX_BLOCKS {
+    if out.blocks.len() == f.blocks.len() || out.blocks.len() > MAX_BLOCKS {
         return None;
     }
     Some(Inlined {
         model: out,
         exposed,
+        origins,
     })
 }
 
@@ -65,6 +93,7 @@ fn splice(
     depth: u32,
     active: &mut Vec<FnId>,
     exposed: &mut Vec<(BlockId, Vec<BlockId>)>,
+    origins: &mut Vec<Option<(FnId, BlockId)>>,
 ) -> bool {
     if depth == 0 {
         return true;
@@ -94,7 +123,16 @@ fn splice(
         let mut body = fns[id].clone();
         active.push(id);
         let mut nested = Vec::new();
-        let ok = splice(fns, &mut body, depth - 1, active, &mut nested);
+        let mut body_origins: Vec<Option<(FnId, BlockId)>> =
+            (0..body.blocks.len()).map(|i| Some((id, i))).collect();
+        let ok = splice(
+            fns,
+            &mut body,
+            depth - 1,
+            active,
+            &mut nested,
+            &mut body_origins,
+        );
         active.pop();
         if !ok {
             return false;
@@ -128,6 +166,8 @@ fn splice(
             caller.blocks.push(block);
         }
         caller.blocks.push(ret_block);
+        origins.extend(body_origins);
+        origins.push(None);
         for (_, inner) in nested {
             sites.extend(inner.into_iter().map(|s| s + base));
         }
@@ -235,12 +275,14 @@ fn remap_block(block: &mut Block, local_base: Local, block_base: BlockId, ret_id
         TermKind::Jump { targets } => targets.iter_mut().for_each(t),
         TermKind::Call {
             args,
+            arg_uses,
             arg_operands,
             dest,
             target,
             ..
         } => {
             args.iter_mut().for_each(l);
+            arg_uses.iter_mut().flatten().for_each(l);
             arg_operands.iter_mut().flatten().for_each(op);
             if let Some(d) = dest {
                 l(d);

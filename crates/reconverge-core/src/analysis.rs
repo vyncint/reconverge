@@ -18,11 +18,12 @@
 
 use crate::dialect::CallKind;
 use crate::graph::{self, Cfg};
-use crate::model::{BinOp, BlockId, Eval, FnModel, Local, Operand, SpanRef, TermKind};
+use crate::model::{BinOp, BlockId, Eval, FnId, FnModel, Local, Operand, SpanRef, TermKind};
 use crate::{LaunchScope, Uniformity};
 
-/// Interprocedural summary bits (docs/ARCHITECTURE.md): whether each function may
-/// execute a barrier / warp collective, directly or transitively.
+/// Interprocedural summaries (docs/ARCHITECTURE.md): whether each function
+/// may execute a barrier / warp collective, directly or transitively, and
+/// what its return value is on its own.
 #[derive(Debug, Clone)]
 pub struct Summaries {
     /// Per function, indexed like the input slice: may execute a barrier,
@@ -31,6 +32,21 @@ pub struct Summaries {
     /// Per function, indexed like the input slice: may execute a warp
     /// collective, directly or through a local callee.
     pub may_contain_warp_op: Vec<bool>,
+    /// Per function, indexed like the input slice: the return value is
+    /// divergent whatever the arguments are — `index_1d().get()` wrapped in
+    /// a helper (#188).
+    ///
+    /// A call's result is divergent when this is set *or* any argument is,
+    /// so the summary only ever adds divergence to what the call site
+    /// already joins: a value that flows from an argument to the result
+    /// through memory, which the lattice does not track, is still caught by
+    /// the join.
+    pub returns_divergent: Vec<bool>,
+    /// Per function, indexed like the input slice: the widest scope the
+    /// return value is constant over whatever the arguments are, so a
+    /// `fn block_of() -> u32 { blockIdx_x() }` result is block-scoped at
+    /// the call site, as the read inlined would be.
+    pub return_scope: Vec<LaunchScope>,
 }
 
 impl Summaries {
@@ -51,7 +67,10 @@ impl Summaries {
                             CallKind::WarpCollective { .. } => (false, true),
                             _ => callee
                                 .local_fn
-                                .map_or((false, false), |c| (barrier[c], warp[c])),
+                                .iter()
+                                .chain(&callee.may_call)
+                                .filter(|&&c| c < n)
+                                .fold((false, false), |(b, w), &c| (b || barrier[c], w || warp[c])),
                         };
                         if b && !barrier[i] {
                             barrier[i] = true;
@@ -65,9 +84,65 @@ impl Summaries {
                 }
             }
         }
-        Summaries {
+        let mut summaries = Summaries {
             may_contain_barrier: barrier,
             may_contain_warp_op: warp,
+            returns_divergent: vec![false; n],
+            return_scope: vec![LaunchScope::Grid; n],
+        };
+        // Return values, to a fixpoint: a helper's return depends on what
+        // its own callees return. Optimistic start, and both facts only
+        // move one way (more divergent, narrower), so this terminates.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (i, f) in fns.iter().enumerate() {
+                if f.local_count == 0 {
+                    continue;
+                }
+                let a = analyze(f, &summaries);
+                if a.locals[0] == Uniformity::Divergent && !summaries.returns_divergent[i] {
+                    summaries.returns_divergent[i] = true;
+                    changed = true;
+                }
+                if a.local_scopes[0] < summaries.return_scope[i] {
+                    summaries.return_scope[i] = a.local_scopes[0];
+                    changed = true;
+                }
+            }
+        }
+        summaries
+    }
+
+    /// The local functions a call may run: its direct local callee and
+    /// anything it may run indirectly, restricted to models that exist.
+    fn callees<'a>(&self, callee: &'a crate::model::Callee) -> impl Iterator<Item = FnId> + 'a {
+        let n = self.may_contain_barrier.len();
+        callee
+            .local_fn
+            .into_iter()
+            .chain(callee.may_call.iter().copied())
+            .filter(move |&c| c < n)
+    }
+}
+
+/// What a function's parameter holds on entry, joined over every call that
+/// reaches it (#188). A kernel's parameters are the launch's arguments and
+/// take the default: uniform, and constant across the grid.
+#[derive(Debug, Clone)]
+pub struct ParamSeed {
+    /// Why the parameter is divergent, when some call passes it a divergent
+    /// argument.
+    pub divergent: Option<Reason>,
+    /// The widest scope every argument passed for it is constant over.
+    pub scope: LaunchScope,
+}
+
+impl Default for ParamSeed {
+    fn default() -> Self {
+        ParamSeed {
+            divergent: None,
+            scope: LaunchScope::Grid,
         }
     }
 }
@@ -96,6 +171,16 @@ pub enum ReasonKind {
     ControlDependent {
         /// The branch whose condition diverges.
         branch: BlockId,
+    },
+    /// A parameter that some call passes a divergent argument (#188). The
+    /// chain continues in the caller, which this function's own analysis
+    /// cannot see; [`crate::interproc::provenance`] follows it there.
+    Parameter,
+    /// The divergent return value of a local function (#188). The chain
+    /// continues at that function's return slot.
+    Returned {
+        /// The function whose return value diverges.
+        callee: FnId,
     },
 }
 
@@ -198,9 +283,18 @@ pub struct Analysis {
     pub warp_ops: Vec<WarpOpSite>,
 }
 
-/// Run the uniformity dataflow over one function.
+/// Run the uniformity dataflow over one function, its parameters uniform —
+/// a kernel, or a helper on its own.
 #[must_use]
 pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
+    analyze_with(f, summaries, &[])
+}
+
+/// Run the uniformity dataflow over one function whose parameters hold
+/// what `params` says, indexed by parameter (local `1 + i`). Missing
+/// entries take the default — uniform and grid-constant.
+#[must_use]
+pub fn analyze_with(f: &FnModel, summaries: &Summaries, params: &[ParamSeed]) -> Analysis {
     let n = f.blocks.len();
     let cfg = Cfg::build(f);
     let reachable = graph::reachable(&cfg, 0);
@@ -217,6 +311,17 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
     let mut block_warp_divergent = vec![false; n];
     let mut block_warp_cause: Vec<Option<BranchCause>> = vec![None; n];
     let mut block_guard_scope: Vec<Option<(LaunchScope, BranchCause)>> = vec![None; n];
+    for (i, seed) in params.iter().enumerate().take(f.arg_count) {
+        let local = 1 + i;
+        if local >= f.local_count {
+            break;
+        }
+        local_scopes[local] = seed.scope;
+        if let Some(reason) = &seed.divergent {
+            locals[local] = Uniformity::Divergent;
+            reasons[local] = Some(reason.clone());
+        }
+    }
     // Per block: the narrowest scope of any *divergent* branch condition
     // governing it. A value written there is constant over no more than
     // that — the lanes that did not take the branch kept another value —
@@ -357,6 +462,16 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 } => {
                     {
                         let dest = *dest;
+                        // A local callee's own return value (#188): what it
+                        // returns whatever it is passed. The arguments are
+                        // still joined below, so this only ever adds.
+                        let returned_scope =
+                            summaries.callees(callee).fold(LaunchScope::Grid, |acc, c| {
+                                acc.meet(summaries.return_scope[c])
+                            });
+                        let returned_divergent = summaries
+                            .callees(callee)
+                            .find(|&c| summaries.returns_divergent[c]);
                         let own_scope = match callee.kind {
                             CallKind::ThreadIndexX { divisor }
                                 if warps_lie_along_x(f.declared_block, divisor) =>
@@ -369,6 +484,7 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                             .iter()
                             .fold(LaunchScope::Grid, |acc, &a| acc.meet(local_scopes[a]))
                             .meet(own_scope)
+                            .meet(returned_scope)
                             .meet(block_ctrl_scope[b]);
                         if call_scope < local_scopes[dest] {
                             local_scopes[dest] = call_scope;
@@ -383,6 +499,7 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                         // written under divergent control: lanes outside
                         // the region keep their old value.
                         let outcome = if base == Some(Uniformity::Divergent)
+                            || returned_divergent.is_some()
                             || divergent_arg.is_some()
                             || under_divergent_control
                         {
@@ -391,12 +508,21 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                             Uniformity::Uniform
                         };
                         if outcome == Uniformity::Divergent {
-                            let reason = match base {
-                                Some(Uniformity::Divergent) => Reason {
+                            let reason = match (base, returned_divergent) {
+                                (Some(Uniformity::Divergent), _) => Reason {
                                     kind: ReasonKind::Source,
                                     span: f.blocks[b].term.span,
                                     detail: source_detail(callee.kind, &callee.display),
                                     source_call: Some(callee.kind),
+                                },
+                                (_, Some(c)) => Reason {
+                                    kind: ReasonKind::Returned { callee: c },
+                                    span: f.blocks[b].term.span,
+                                    detail: format!(
+                                        "divergent return value of `{}()`",
+                                        callee.display
+                                    ),
+                                    source_call: None,
                                 },
                                 _ => {
                                     if let Some(a) = divergent_arg {
@@ -445,7 +571,11 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                         Reason {
                             kind: ReasonKind::Source,
                             span: f.blocks[b].term.span,
-                            detail: "result of opaque code (inline asm)".into(),
+                            // Inline asm writes its outputs as statements;
+                            // an opaque terminator with a destination is a
+                            // call the driver could not resolve (#189).
+                            detail: "result of opaque code (a call the analysis cannot see into)"
+                                .into(),
                             source_call: None,
                         },
                     );
@@ -560,10 +690,10 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
 
         let barrier = match callee.kind {
             CallKind::Barrier => Some(false),
-            _ => callee
-                .local_fn
-                .filter(|&c| summaries.may_contain_barrier[c])
-                .map(|_| true),
+            _ => summaries
+                .callees(callee)
+                .any(|c| summaries.may_contain_barrier[c])
+                .then_some(true),
         };
         if let Some(interprocedural) = barrier {
             // An interprocedural site is a call to a local function that
@@ -596,10 +726,10 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
 
         let warp = match callee.kind {
             CallKind::WarpCollective { .. } => Some(false),
-            _ => callee
-                .local_fn
-                .filter(|&c| summaries.may_contain_warp_op[c])
-                .map(|_| true),
+            _ => summaries
+                .callees(callee)
+                .any(|c| summaries.may_contain_warp_op[c])
+                .then_some(true),
         };
         if let Some(interprocedural) = warp {
             // A collective's participants are one warp, so only control
@@ -793,7 +923,9 @@ pub fn provenance_chain(f: &FnModel, analysis: &Analysis, start: Local) -> Vec<P
             span: reason.span,
         });
         match &reason.kind {
-            ReasonKind::Source => break,
+            // Each of these ends the chain *in this function*; the last two
+            // continue in another one (`interproc::provenance`).
+            ReasonKind::Source | ReasonKind::Parameter | ReasonKind::Returned { .. } => break,
             ReasonKind::DerivedFrom(uses) => {
                 let Some(&next) = uses.first() else { break };
                 current = next;

@@ -1,9 +1,10 @@
 //! Stable MIR → engine-model adapter.
 //!
-//! Builds `reconverge_core::model::FnModel`s for every local function with
-//! a body, classifying call targets through the dialect
-//! (`SimtDialect::classify_call`). Spans become indices into a side table
-//! the driver owns, so the engine stays free of compiler types.
+//! Builds `reconverge_core::model::FnModel`s for every kernel and every
+//! local function a kernel reaches, classifying call targets through the
+//! dialect (`SimtDialect::classify_call`) and resolving the rest to the body
+//! they run. Spans become indices into a side table the driver owns, so the
+//! engine stays free of compiler types.
 //!
 //! Modeling notes:
 //! - Only normal control edges are followed; unwind/cleanup edges are
@@ -14,6 +15,8 @@
 //! - Inline asm is opaque: each output place becomes an opaque statement
 //!   (a conservative divergence source), and the terminator itself counts
 //!   toward the opaque-coverage tally.
+//! - So is a call whose target cannot be seen into (#189): the terminator
+//!   is opaque, with the call's destination as its divergent result.
 
 use std::collections::HashMap;
 
@@ -23,55 +26,128 @@ use reconverge_core::dialect::{CallKind, SimtDialect};
 use reconverge_core::model::{
     self, Block, Callee, Eval, FnId, FnModel, IntType, Local, SpanRef, Stmt, Term, TermKind,
 };
-use reconverge_dialect_oxide::kernel_base_name;
+use reconverge_dialect_oxide::{kernel_base_name, user_facing_name};
+use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{
     Body, Operand, Place, ProjectionElem, Statement, StatementKind, TerminatorKind,
     VarDebugInfoContents,
 };
-use rustc_public::ty::{IntTy, RigidTy, Span, Ty, TyKind, UintTy};
+use rustc_public::ty::{
+    ClosureKind, GenericArgKind, GenericArgs, IntTy, RigidTy, Span, Ty, TyKind, UintTy,
+};
 use rustc_public::{CrateDef, CrateItem, ItemKind};
 
 use crate::emit;
 
-/// Models for every local function, plus the span table and the subset of
-/// functions that are kernels.
+/// Models for every kernel and every local function a kernel reaches, plus
+/// the span table and the subset of functions that are kernels.
 pub struct CrateModels {
     pub fns: Vec<FnModel>,
     /// Indices into `fns` for detected kernels, sorted by kernel name.
     pub kernels: Vec<FnId>,
     /// The span table `SpanRef` indexes into.
     pub spans: Vec<SourceSpan>,
+    /// Per model, the item whose MIR it was built from — two instances of
+    /// one generic helper share it. RC004 reads shared statics from these.
+    pub items: Vec<CrateItem>,
+}
+
+/// What a model is a model *of*.
+///
+/// A helper is modeled per instance where its caller is monomorphic, so a
+/// trait method or a closure resolves to the body it actually runs:
+/// `generic_stage::<Tile>` calls `<Tile as Stage>::run`, which a model of
+/// `generic_stage<S>` cannot name (#189). Inside a generic kernel there is
+/// no instance to resolve against, and the item is modeled as written.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Key {
+    Instance(Instance),
+    Item(CrateItem),
+}
+
+impl Key {
+    fn item(self) -> Option<CrateItem> {
+        match self {
+            Key::Instance(instance) => CrateItem::try_from(instance).ok(),
+            Key::Item(item) => Some(item),
+        }
+    }
+}
+
+/// A ceiling on the models one crate builds. Every instance is a model, and
+/// a polymorphically recursive helper would otherwise mint new ones without
+/// end; past this, a call is counted as opaque rather than followed.
+const MAX_MODELS: usize = 4096;
+
+/// The models built so far, and the ones still to build.
+struct Worklist {
+    keys: Vec<Key>,
+    ids: HashMap<Key, FnId>,
+}
+
+impl Worklist {
+    /// The model id for `key`, queueing it when it is new. `None` past
+    /// [`MAX_MODELS`], or when the key has no body to model.
+    fn intern(&mut self, key: Key) -> Option<FnId> {
+        if let Some(&id) = self.ids.get(&key) {
+            return Some(id);
+        }
+        if self.keys.len() >= MAX_MODELS || !key.item().is_some_and(|item| item.has_body()) {
+            return None;
+        }
+        let id = self.keys.len();
+        self.keys.push(key);
+        self.ids.insert(key, id);
+        Some(id)
+    }
 }
 
 pub fn build(dialect: &dyn SimtDialect) -> CrateModels {
-    let mut items: Vec<CrateItem> = rustc_public::all_local_items()
+    let mut kernel_items: Vec<CrateItem> = rustc_public::all_local_items()
         .into_iter()
-        .filter(|item| item.kind() == ItemKind::Fn && item.has_body())
+        .filter(|item| {
+            item.kind() == ItemKind::Fn
+                && item.has_body()
+                && kernel_base_name(&item.name()).is_some()
+        })
         .collect();
-    items.sort_by_key(|a| a.name());
+    kernel_items.sort_by_key(|a| a.name());
 
-    let path_to_id: HashMap<String, FnId> = items
-        .iter()
-        .enumerate()
-        .map(|(i, item)| (item.name(), i))
+    let mut work = Worklist {
+        keys: Vec::new(),
+        ids: HashMap::new(),
+    };
+    let kernel_ids: Vec<FnId> = kernel_items
+        .into_iter()
+        .filter_map(|item| {
+            // A generic kernel has no instance until the host launches it.
+            let key = Instance::try_from(item).map_or(Key::Item(item), Key::Instance);
+            work.intern(key)
+        })
         .collect();
 
     let mut spans = Vec::new();
     let mut fns = Vec::new();
-    for item in &items {
-        let body = item.body().expect("filtered on has_body");
-        fns.push(adapt_fn(item, &body, dialect, &path_to_id, &mut spans));
+    let mut items = Vec::new();
+    let mut next = 0;
+    while next < work.keys.len() {
+        let key = work.keys[next];
+        next += 1;
+        let item = key.item().expect("interned keys have an item");
+        let body = item.body().expect("interned keys have a body");
+        fns.push(adapt_fn(key, item, &body, dialect, &mut work, &mut spans));
+        items.push(item);
     }
 
-    let mut kernels: Vec<FnId> = (0..fns.len())
-        .filter(|&i| kernel_base_name(&fns[i].item_path).is_some())
-        .collect();
+    let mut kernels = kernel_ids;
     kernels.sort_by(|&a, &b| fns[a].name.cmp(&fns[b].name));
+    kernels.dedup();
 
     CrateModels {
         fns,
         kernels,
         spans,
+        items,
     }
 }
 
@@ -81,16 +157,40 @@ fn intern(spans: &mut Vec<SourceSpan>, span: Span) -> SpanRef {
 }
 
 fn adapt_fn(
-    item: &CrateItem,
+    key: Key,
+    item: CrateItem,
     body: &Body,
     dialect: &dyn SimtDialect,
-    path_to_id: &HashMap<String, FnId>,
+    work: &mut Worklist,
     spans: &mut Vec<SourceSpan>,
 ) -> FnModel {
     let path = item.name();
     let name = kernel_base_name(&path)
         .map(str::to_string)
-        .unwrap_or_else(|| item.trimmed_name());
+        .unwrap_or_else(|| {
+            user_facing_name(&match key {
+                // `generic_stage::<Tile>`: two instances of one helper are
+                // two models, and a finding should say which.
+                Key::Instance(instance) if !instance.args().0.is_empty() && !is_closure(item) => {
+                    instance.trimmed_name()
+                }
+                _ => item.trimmed_name(),
+            })
+        });
+
+    // Calls are resolved against the instance's own body when it has
+    // generic arguments: the same blocks, with `S` replaced by `Tile`. The
+    // model itself is built from the item's body, whose constants are left
+    // as written — the instance body evaluates every named const, and a
+    // named-const mask is deliberately left unevaluable (see `const_scalar`).
+    let instance_body = match key {
+        Key::Instance(instance) if !instance.args().0.is_empty() => instance
+            .body()
+            .filter(|b| b.blocks.len() == body.blocks.len()),
+        _ => None,
+    };
+    let resolving = instance_body.as_ref().unwrap_or(body);
+    let mono = matches!(key, Key::Instance(_));
 
     let local_count = body.locals().len();
     let mut local_names: Vec<Option<String>> = vec![None; local_count];
@@ -126,17 +226,23 @@ fn adapt_fn(
     let blocks = body
         .blocks
         .iter()
-        .map(|bb| {
+        .zip(&resolving.blocks)
+        .map(|(bb, resolved)| {
             let mut stmts: Vec<Stmt> = bb
                 .statements
                 .iter()
                 .filter_map(|s| adapt_stmt(s, body, &overflow_tuples, spans))
                 .collect();
+            let target = match &resolved.terminator.kind {
+                TerminatorKind::Call { func, .. } => {
+                    Some(resolve_call(func, resolving, mono, dialect, work))
+                }
+                _ => None,
+            };
             let term = adapt_term(
                 &bb.terminator.kind,
                 bb.terminator.source_info.span,
-                dialect,
-                path_to_id,
+                target,
                 spans,
                 &mut stmts,
             );
@@ -352,8 +458,7 @@ fn rvalue_locals(rvalue: &rustc_public::mir::Rvalue) -> Vec<Local> {
 fn adapt_term(
     kind: &TerminatorKind,
     span: Span,
-    dialect: &dyn SimtDialect,
-    path_to_id: &HashMap<String, FnId>,
+    target_of_call: Option<CallTarget>,
     spans: &mut Vec<SourceSpan>,
     stmts: &mut Vec<Stmt>,
 ) -> Term {
@@ -391,35 +496,35 @@ fn adapt_term(
             target,
             ..
         } => {
-            let (path, display, receiver) = callee_path(func);
-            let kind = dialect.classify_method_call(&path, receiver.as_deref());
-            // Only a barrier has a participant set to ask about; anything
-            // else keeps the narrow default and the engine never reads it.
-            let scope = if kind == CallKind::Barrier {
-                dialect.barrier_scope(&path, receiver.as_deref())
-            } else {
-                LaunchScope::Block
-            };
             let (dest, mut arg_locals) = write_target(destination);
             arg_locals.extend(args.iter().flat_map(operand_locals));
             arg_locals.extend(operand_locals(func));
-            let const_args = args
-                .iter()
-                .map(|arg| const_scalar(arg).and_then(|v| u64::try_from(v).ok()))
-                .collect();
-            let arg_operands = args.iter().map(model_operand).collect();
-            TermKind::Call {
-                callee: Callee {
-                    kind,
-                    scope,
-                    display,
-                    local_fn: path_to_id.get(&path).copied(),
+            match target_of_call {
+                Some(CallTarget::Known(callee)) => {
+                    let const_args = args
+                        .iter()
+                        .map(|arg| const_scalar(arg).and_then(|v| u64::try_from(v).ok()))
+                        .collect();
+                    let arg_operands = args.iter().map(model_operand).collect();
+                    TermKind::Call {
+                        callee,
+                        args: arg_locals,
+                        arg_uses: args.iter().map(operand_locals).collect(),
+                        const_args,
+                        arg_operands,
+                        dest,
+                        target: *target,
+                    }
+                }
+                // Counted and declined, the way inline asm is: a body this
+                // analysis cannot see may hold a barrier or read a thread
+                // index, and a call to it is not a call to a pure function
+                // of its arguments.
+                Some(CallTarget::Opaque) | None => TermKind::Opaque {
+                    uses: arg_locals,
+                    dest,
+                    target: *target,
                 },
-                args: arg_locals,
-                const_args,
-                arg_operands,
-                dest,
-                target: *target,
             }
         }
         TerminatorKind::Assert { target, .. } | TerminatorKind::Drop { target, .. } => {
@@ -694,27 +799,191 @@ fn model_unop(op: &rustc_public::mir::UnOp) -> Option<model::UnOp> {
     })
 }
 
-/// The definition path, display name and receiver of a call target;
-/// indirect calls (function pointers) come back as `Other`-classified
-/// placeholders.
+/// What a call resolves to.
+enum CallTarget {
+    /// A callee the model can describe: classified by the dialect, a local
+    /// function with a body, or library code.
+    Known(Callee),
+    /// A target the analysis cannot see into (#189): a function pointer, a
+    /// `dyn` method, a trait method it cannot resolve, a function in a crate
+    /// that is neither this one, the standard library nor the dialect's.
+    Opaque,
+}
+
+/// Crates whose functions are ordinary plumbing: a call into one that the
+/// dialect does not classify joins its arguments, as it always has.
+fn is_library_crate(name: &str) -> bool {
+    matches!(name, "core" | "alloc" | "std")
+        || reconverge_dialect_oxide::paths::is_device_crate(name)
+}
+
+fn is_closure(item: CrateItem) -> bool {
+    matches!(item.ty().kind(), TyKind::RigidTy(RigidTy::Closure(..)))
+}
+
+/// Classify and resolve one call.
 ///
-/// The receiver is the first generic argument when it is a type — for a
-/// trait method that is `Self`, which the definition path does not carry:
-/// `cooperative_groups::ThreadGroup::sync` reads the same whether the group
-/// is a `ThreadBlock` or a `WarpTile<16>`, and only one of those is a
-/// block-wide barrier. Rendered with the compiler's own `Display`, so the
-/// dialect sees `cuda_device::cooperative_groups::ThreadBlock`.
-fn callee_path(func: &Operand) -> (String, String, Option<String>) {
-    if let Operand::Constant(constant) = func
-        && let TyKind::RigidTy(RigidTy::FnDef(def, args)) = constant.const_.ty().kind()
-    {
-        let path = def.name();
-        let display = def.trimmed_name();
-        let receiver = match args.0.first() {
-            Some(rustc_public::ty::GenericArgKind::Type(ty)) => Some(ty.to_string()),
+/// The dialect answers first, by definition path and receiver, exactly as
+/// before. Everything it calls `Other` is then resolved to the body it
+/// runs: an inherent method or free function by its definition, a trait
+/// method or a closure through `Instance::resolve` (#189).
+fn resolve_call(
+    func: &Operand,
+    body: &Body,
+    mono: bool,
+    dialect: &dyn SimtDialect,
+    work: &mut Worklist,
+) -> CallTarget {
+    // A local holding a function item is still a direct call; anything
+    // else is a pointer, and the analysis does not guess where it points.
+    let Ok(fn_ty) = func.ty(body.locals()) else {
+        return CallTarget::Opaque;
+    };
+    let TyKind::RigidTy(RigidTy::FnDef(def, args)) = fn_ty.kind() else {
+        return CallTarget::Opaque;
+    };
+    let path = def.name();
+    let display = user_facing_name(&def.trimmed_name());
+    // The receiver is the first generic argument when it is a type — for a
+    // trait method that is `Self`, which the definition path does not carry:
+    // `cooperative_groups::ThreadGroup::sync` reads the same whether the
+    // group is a `ThreadBlock` or a `WarpTile<16>`, and only one of those is
+    // a block-wide barrier. Rendered with the compiler's own `Display`, so
+    // the dialect sees `cuda_device::cooperative_groups::ThreadBlock`.
+    let receiver = match args.0.first() {
+        Some(GenericArgKind::Type(ty)) => Some(ty.to_string()),
+        _ => None,
+    };
+    let kind = dialect.classify_method_call(&path, receiver.as_deref());
+    // Only a barrier has a participant set to ask about; anything else keeps
+    // the narrow default and the engine never reads it.
+    let scope = if kind == CallKind::Barrier {
+        dialect.barrier_scope(&path, receiver.as_deref())
+    } else {
+        LaunchScope::Block
+    };
+    let known = |local_fn, may_call| {
+        CallTarget::Known(Callee {
+            kind,
+            scope,
+            display: display.clone(),
+            local_fn,
+            may_call,
+        })
+    };
+    if kind != CallKind::Other {
+        return known(None, Vec::new());
+    }
+
+    // In a monomorphic body a resolved local target is modeled as that
+    // instance; in a generic one, as its item.
+    let local_key = |instance: Instance| {
+        if mono {
+            Some(Key::Instance(instance))
+        } else {
+            CrateItem::try_from(instance).ok().map(Key::Item)
+        }
+    };
+    match Instance::resolve(def, &args) {
+        Ok(instance) if instance.kind == InstanceKind::Item && instance.def.krate().is_local => {
+            match local_key(instance).and_then(|key| work.intern(key)) {
+                // `f()` on a closure is `Fn::call` by definition path; the
+                // closure is the name a reader can find.
+                Some(id) if CrateItem::try_from(instance).is_ok_and(is_closure) => {
+                    CallTarget::Known(Callee {
+                        kind,
+                        scope,
+                        display: user_facing_name(&instance.def.trimmed_name()),
+                        local_fn: Some(id),
+                        may_call: Vec::new(),
+                    })
+                }
+                Some(id) => known(Some(id), Vec::new()),
+                // No body (an `extern` declaration), or past the model cap.
+                None => CallTarget::Opaque,
+            }
+        }
+        Ok(instance) if matches!(instance.kind, InstanceKind::Virtual { .. }) => CallTarget::Opaque,
+        Ok(instance) if is_library_crate(&instance.def.krate().name) => {
+            known(None, indirect_targets(&args, mono, work))
+        }
+        Ok(_) => CallTarget::Opaque,
+        // Unresolvable: a trait method on a type parameter of a generic
+        // kernel. A library trait (`Add::add` on `T`) dispatches to library
+        // code for every type a kernel is realistically instantiated at; a
+        // local one is exactly the `Stage::run` this exists to catch, and
+        // which impl runs is not knowable here.
+        Err(_) if def.krate().is_local => CallTarget::Opaque,
+        Err(_) if is_library_crate(&def.krate().name) => known(None, Vec::new()),
+        Err(_) => CallTarget::Opaque,
+    }
+}
+
+/// Local closures and function items a library call is handed, which it
+/// may run: `for_each`'s closure, `map`'s function (#189). Found in the
+/// call's generic arguments, which is where the compiler records them —
+/// through references, tuples and adapter types like `Map<I, F>`.
+fn indirect_targets(args: &GenericArgs, mono: bool, work: &mut Worklist) -> Vec<FnId> {
+    let mut out = Vec::new();
+    let mut stack: Vec<Ty> = args
+        .0
+        .iter()
+        .filter_map(|arg| match arg {
+            GenericArgKind::Type(ty) => Some(*ty),
+            _ => None,
+        })
+        .collect();
+    let mut steps = 0;
+    while let Some(ty) = stack.pop() {
+        steps += 1;
+        if steps > 256 {
+            break;
+        }
+        let TyKind::RigidTy(rigid) = ty.kind() else {
+            continue;
+        };
+        let instance = match rigid {
+            RigidTy::Closure(def, cargs) if def.krate().is_local => {
+                // `FnMut` names the closure's own body for every closure
+                // kind; only `FnOnce` asks for the adapter shim.
+                Instance::resolve_closure(def, &cargs, ClosureKind::FnMut).ok()
+            }
+            RigidTy::FnDef(def, fargs) if def.krate().is_local => {
+                Instance::resolve(def, &fargs).ok()
+            }
+            RigidTy::Ref(_, inner, _) | RigidTy::RawPtr(inner, _) | RigidTy::Slice(inner) => {
+                stack.push(inner);
+                None
+            }
+            RigidTy::Array(inner, _) => {
+                stack.push(inner);
+                None
+            }
+            RigidTy::Tuple(items) => {
+                stack.extend(items);
+                None
+            }
+            RigidTy::Adt(_, adt_args) => {
+                stack.extend(adt_args.0.iter().filter_map(|arg| match arg {
+                    GenericArgKind::Type(ty) => Some(*ty),
+                    _ => None,
+                }));
+                None
+            }
             _ => None,
         };
-        return (path, display, receiver);
+        let key = instance.and_then(|instance| {
+            if mono {
+                Some(Key::Instance(instance))
+            } else {
+                CrateItem::try_from(instance).ok().map(Key::Item)
+            }
+        });
+        if let Some(id) = key.and_then(|key| work.intern(key))
+            && !out.contains(&id)
+        {
+            out.push(id);
+        }
     }
-    (String::new(), "<indirect call>".to_string(), None)
+    out
 }

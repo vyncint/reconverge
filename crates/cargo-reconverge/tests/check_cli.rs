@@ -284,6 +284,20 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         // Each appears here with its RC005 and no RC001.
         ("RC005", "rc001_ok_cluster_sync_under_cluster_idx"),
         ("RC005", "rc001_ok_grid_sync_under_launch_values"),
+        // 0.8.0 (#188, #189, #193): the same bugs, one call away. Every one
+        // of these came back clean before, `--strict` included. All carry a
+        // launch contract, so none adds an RC005; the true negatives beside
+        // them (`rc001_ok_via_*`, `rc004_ok_helper_static_counted_once`, and
+        // the opaque function-pointer call) appear nowhere.
+        ("RC001", "rc001_via_helper_body"),
+        ("RC001", "rc001_via_helper_param"),
+        ("RC001", "rc001_via_helper_return"),
+        ("RC001", "rc001_via_helper_block_scope"),
+        ("RC001", "rc001_via_trait_method"),
+        ("RC001", "rc001_via_generic_stage"),
+        ("RC001", "rc001_via_closure_adapter"),
+        ("RC002", "rc002_via_helper_param"),
+        ("RC004", "rc004_via_helper"),
     ]
     .into_iter()
     .map(|(code, kernel)| ((code.to_string(), kernel.to_string()), 1))
@@ -341,6 +355,73 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         "confirmed"
     );
 
+    // Inside a helper (#188), a site is replayed by splicing the helper into
+    // the kernel that reaches it, with the arguments that kernel passes.
+    for (code, kernel) in [
+        ("RC001", "rc001_via_helper_body"),
+        ("RC001", "rc001_via_helper_param"),
+        ("RC001", "rc001_via_helper_return"),
+        ("RC001", "rc001_via_trait_method"),
+        ("RC001", "rc001_via_generic_stage"),
+        ("RC002", "rc002_via_helper_param"),
+    ] {
+        assert_eq!(
+            by(code, kernel)["confidence"],
+            "confirmed",
+            "{code} {kernel}"
+        );
+    }
+    // A closure behind `for_each`, and a block-scoped guard: found, and not
+    // promotable — nothing says how often the closure runs, and the replay
+    // cannot run a second block.
+    for kernel in ["rc001_via_closure_adapter", "rc001_via_helper_block_scope"] {
+        assert_eq!(by("RC001", kernel)["confidence"], "warning", "{kernel}");
+    }
+    let in_helper = by("RC001", "rc001_via_helper_body");
+    assert!(
+        in_helper["message"]
+            .as_str()
+            .unwrap()
+            .ends_with("inside `leader_sync`"),
+        "a site in a `#[device]` helper names the helper as written: {in_helper}"
+    );
+    // The chain crosses the parameter back into the kernel and ends at the
+    // thread index it passed — what the conformance ratchet requires.
+    let through_param = by("RC001", "rc001_via_helper_param");
+    let chain = through_param["provenance"].as_array().unwrap();
+    assert!(
+        chain
+            .iter()
+            .any(|s| s["what"].as_str().unwrap().contains("parameter receives")),
+        "{through_param}"
+    );
+    assert!(
+        chain.last().unwrap()["what"]
+            .as_str()
+            .unwrap()
+            .contains("thread-index witness `threadIdx_x()`"),
+        "{through_param}"
+    );
+    assert!(
+        by("RC004", "rc004_via_helper")["message"]
+            .as_str()
+            .unwrap()
+            .contains("declares 65536 bytes"),
+        "a shared static in a helper counts toward the kernel"
+    );
+    // The function-pointer call is not a finding, and not silence either:
+    // it is counted, next to the `asm!` barrier (#189).
+    let coverage: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .map(|artifact| artifact["coverage"].clone())
+        .collect();
+    assert_eq!(coverage.len(), 1, "one document: {coverage:?}");
+    assert_eq!(
+        coverage[0]["opaque_functions"], 2,
+        "the asm kernel and the function-pointer kernel: {coverage:?}"
+    );
+
     // The witness artifacts themselves parse as witness.v1 with concrete
     // undefined-behavior verdicts.
     let witness_dir = project.join("target/reconverge");
@@ -387,13 +468,13 @@ fn lint_samples_report_all_codes_and_gate_the_exit() {
         }
         witness_count += 1;
     }
-    // Ten: the two direct sites, the two interprocedural ones that
+    // Sixteen: the two direct sites, the two interprocedural ones that
     // inlining turned into concrete paths, the unmasked wrapper, the two
     // multi-warp barriers, the cooperative-groups block sync and the
-    // divergent cluster_sync (both since 0.6.0), and — since 0.6.1 — the
-    // divergent cluster *wait*, each replayed as a concrete hang exactly
-    // like `sync_threads`.
-    assert_eq!(witness_count, 10, "one witness per confirmed finding");
+    // divergent cluster_sync (both since 0.6.0), the divergent cluster
+    // *wait* (0.6.1), each replayed as a concrete hang exactly like
+    // `sync_threads` — and since 0.8.0 the six sites one call away.
+    assert_eq!(witness_count, 16, "one witness per confirmed finding");
     // Three since 0.6.1: the two declared-block barriers, plus the split
     // cluster wait, whose `block = (64, 1, 1)` contract makes its replay
     // two warps wide.
@@ -835,6 +916,73 @@ fn summary_of(stdout: &str) -> String {
         .find(|l| l.starts_with("reconverge: "))
         .unwrap_or("<no summary>")
         .to_string()
+}
+
+/// A barrier in a sibling workspace crate is a body this run never reads,
+/// and the run says so (#189).
+///
+/// Each member is compiled — and analyzed — on its own, so `kern` sees
+/// `helpers::block_barrier` as a name with no body. 0.7.0 joined the call's
+/// arguments, found nothing, and reported `0 deny, 0 confirmed, 0 warning
+/// findings` with no coverage clause: indistinguishable from a kernel that
+/// had been read in full and was clean. The call is now opaque, which is a
+/// count on the summary line rather than a guess either way.
+#[test]
+fn a_call_into_a_sibling_crate_is_counted_rather_than_assumed_clean() {
+    const DEP: &str = "cuda-device = { git = \"https://github.com/NVlabs/cuda-oxide\", \
+                       rev = \"b0f961df3af0ff140b3b006fa2b6750b71f43f62\" }";
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("m8-sibling-crate");
+    let _ = fs::remove_dir_all(dir.join("crates"));
+    fs::create_dir_all(dir.join("crates/helpers/src")).unwrap();
+    fs::create_dir_all(dir.join("crates/kern/src")).unwrap();
+    fs::write(
+        dir.join("Cargo.toml"),
+        "[workspace]\nresolver = \"3\"\nmembers = [\"crates/helpers\", \"crates/kern\"]\n",
+    )
+    .unwrap();
+    for (member, extra) in [
+        ("helpers", ""),
+        ("kern", "helpers = { path = \"../helpers\" }\n"),
+    ] {
+        fs::write(
+            dir.join(format!("crates/{member}/Cargo.toml")),
+            format!(
+                "[package]\nname = \"{member}\"\nversion = \"0.0.0\"\n\
+                 edition = \"2024\"\npublish = false\n\n[dependencies]\n{DEP}\n{extra}"
+            ),
+        )
+        .unwrap();
+    }
+    fs::write(
+        dir.join("crates/helpers/src/lib.rs"),
+        "use cuda_device::thread;\npub fn block_barrier() { thread::sync_threads(); }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("crates/kern/src/lib.rs"),
+        "use cuda_device::{DisjointSlice, kernel, launch_contract, thread};\n\
+         #[kernel]\n\
+         #[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]\n\
+         pub fn cross_crate_barrier(mut out: DisjointSlice<u32>) {\n\
+         \x20   let i = thread::index_1d();\n\
+         \x20   if i.get() % 2 == 0 { helpers::block_barrier(); }\n\
+         \x20   if let Some(e) = out.get_mut(i) { *e = 1; }\n}\n",
+    )
+    .unwrap();
+
+    let output = check(&dir, &["--strict"]);
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "an unread call is not a finding\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    let summary = summary_of(&stdout);
+    assert!(
+        summary.ends_with("opaque in 1 function"),
+        "the summary must say what it could not read: {summary}"
+    );
 }
 
 /// A package with a lib and a bin writes one document per target, and the

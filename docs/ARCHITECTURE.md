@@ -110,11 +110,22 @@ model IR the driver builds from Stable MIR.
   reconstructed afterwards: every divergent value keeps the def→use chain
   back to its source. That chain is what the diagnostics print and what the
   Inspector walks.
-- **Interprocedural (v1).** Per-function summary bits
-  `may_contain_barrier` / `may_contain_warp_op`; a call carrying a bit under
-  divergent control is a finding at the call site, at `warning`, promoted
-  only when the callee inlines into a concrete path. The replay never steps
-  over a call whose bit is set: a lane that meets one ends the replay.
+- **Interprocedural.** Two halves (`analysis::Summaries`,
+  `interproc`). Per-function summaries say what a call does on its own:
+  `may_contain_barrier` / `may_contain_warp_op`, and whether the return
+  value is divergent and how widely it is constant. A call carrying a bit
+  under divergent control is a finding at the call site; a divergent
+  return is added to the call's argument join, never substituted for it.
+  Then, per kernel, every function it reaches is analyzed with its
+  parameters joined over the calls to it from that kernel — so sites inside
+  helpers are checked against what the kernel actually passes, and a chain
+  crossing a parameter or a return value is followed back across it. The
+  driver models helpers per instance, which is what resolves a trait method
+  or a closure to the body it runs; a call it cannot resolve is an opaque
+  terminator. All of it is `warning` until the bounded inliner splices the
+  path into the kernel and the witness replays it. The replay never steps
+  over a call that may synchronize and was not spliced: a lane that meets
+  one, or can still reach one, ends the replay.
 - **Scopes below the block.** Each value also carries the widest scope it is
   constant over — thread, warp, block, cluster, grid. A barrier asks whether
   its guard is constant over the barrier's participants; a warp collective
@@ -155,8 +166,11 @@ finding stays at `warning` with a `replay:` note.
   `gid.in_bounds(n) && …` sit in front of a replay without blocking it.
 - **Honesty rails.** Anything else unknown — a branch on a parameter, a loop
   past the step budget, an unmodeled operation — aborts the replay: *no
-  witness, the static result stands*. Interprocedural sites and collectives
-  whose mask cannot be evaluated are never promoted, and a constant mask that
+  witness, the static result stands*. An interprocedural site is promoted
+  only through the bounded inliner, which makes it an ordinary path; a lane
+  that would cross a call that may synchronize without entering it declines
+  instead. Collectives whose mask cannot be evaluated are never promoted,
+  and a constant mask that
   exactly matches the arriving lanes (the guarded partial-warp idiom) is
   correctly not a finding.
 - **Calibrated verdicts.** Hardware behavior is described as "usually" a
