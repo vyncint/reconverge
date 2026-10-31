@@ -1,0 +1,11 @@
+size: 40x10  cursor: hidden
+┌ reconverge witness ──────────────────┐
+│terminal too small — the lane strip   │
+│needs at least 47x10                  │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+└ h/l step  g/G ends  d split  v verdi…┘

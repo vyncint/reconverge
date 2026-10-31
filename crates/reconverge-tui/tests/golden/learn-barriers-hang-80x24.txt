@@ -12,7 +12,7 @@ size: 80x24  cursor: hidden
 │    let i = thread::index_1d();                                               │
 │    if i.get() % 2 == 0 {                                                     │
 │        thread::sync_threads(); // <- RC001                                   │
-│                                                                              │
+│    }                                                                         │
 │replay — step 3/3  [==>]                                                      │
 │          0        8        16       24                                       │
 │lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                 │

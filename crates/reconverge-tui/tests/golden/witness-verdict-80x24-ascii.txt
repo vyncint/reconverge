@@ -1,6 +1,7 @@
 size: 80x24  cursor: hidden
 + reconverge witness ----------------------------------------------------------+
-|witness 1/2 -- kernel `rc001_divergent_barrier` -- RC001 -- grid (1,1,1) bl...|
+|witness 1/2 -- kernel `rc001_divergent_barrier` -- RC001 -- grid (1,1,1) block|
+|(32,1,1) warp 0                                                               |
 |                                                                              |
 |          0        8        16       24                                       |
 |lanes     W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.                                 |
@@ -9,12 +10,11 @@ size: 80x24  cursor: hidden
 |          o active   W waiting   . exited                                     |
 |                                                                              |
 |step 3/3  [==>]                                                               |
-|the other 16 lanes exit or move past reconvergence without ever reaching th...|
+|the other 16 lanes exit or move past reconvergence without ever reaching the  |
+|barrier                                                                       |
 |at lib.rs:183                                                                 |
 |                                                                              |
 |                                                                              |
-|   0  launch                                                                  |
-|   1  lanes evaluate the guarding branch -- 16 continue toward `sync_thread...|
 |   2  sync_threads() -- 16 of 32 lanes arrive and wait             16 waiting |
 |>  3  the other 16 lanes exit or move past reconvergence without ever reach...|
 |                                                                              |

@@ -313,3 +313,95 @@ fn matrix_80x24() {
 fn matrix_120x40() {
     matrix_leg((120, 40));
 }
+
+fn spawn_one(size: (u16, u16), file: &str) -> Terminal {
+    Terminal::builder()
+        .size(size.0, size.1)
+        .env_clear()
+        .timeout(TIMEOUT)
+        .current_dir(fixtures_dir())
+        .arg("witness")
+        .arg(file)
+        .spawn(env!("CARGO_BIN_EXE_reconverge-tui"))
+        .expect("failed to spawn the witness debugger in a PTY")
+}
+
+/// At 40x10 the strip cannot fit — it is 45 columns before the border — and
+/// the fixed layout used to hand the rows to the verdict, leaving only the
+/// ruler `0  8  16 …` over blank rows. Now the view says what it needs, and
+/// draws the strip as soon as the terminal grows to hold it.
+#[test]
+fn a_terminal_too_small_for_the_strip_says_so() {
+    let mut t = spawn_one((40, 10), "rc001-divergent-barrier.json");
+    let frame = t
+        .wait_frame(|s| s.contains("terminal too small") && s.contains("47x10"))
+        .expect("the too-small notice");
+    assert_golden(
+        "witness-too-small-40x10.txt",
+        &frame.to_string(),
+        "too small",
+    );
+    assert!(
+        frame.find("lanes").is_none(),
+        "no strip half-drawn under the notice:\n{frame}"
+    );
+
+    t.resize(47, 10).expect("resize to the stated minimum");
+    let frame = t
+        .wait_frame(|s| s.contains("lanes     oooooooo oooooooo oooooooo oooooooo"))
+        .expect("the stated minimum holds the whole strip");
+    assert!(
+        frame.contains("step 0/3"),
+        "and the step under it:\n{frame}"
+    );
+    quit(t, "too small");
+}
+
+/// A short terminal keeps the lanes and the step and gives up the timeline
+/// first: every row the strip needs is drawn, on a 64-lane launch two warps
+/// tall, while the verdict and the timeline take what is left.
+#[test]
+fn a_short_terminal_keeps_the_lanes_over_the_verdict() {
+    let mut t = spawn_one((80, 14), "rc001-multiwarp-barrier.json");
+    t.wait_until(|s| s.contains("step 0/3")).expect("initial");
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
+    let frame = t
+        .wait_frame(|s| s.contains("step 3/3"))
+        .expect("verdict step");
+    assert_golden(
+        "witness-multiwarp-verdict-80x14.txt",
+        &frame.to_string(),
+        "short terminal",
+    );
+    for warp in ["w0", "w1"] {
+        assert!(
+            frame.find(warp).is_some(),
+            "warp row {warp} must survive a short terminal:\n{frame}"
+        );
+    }
+    quit(t, "short terminal");
+}
+
+/// At 80x24 a 64-lane header ended `block (…` — the one number that says
+/// why there are two strips — and the event line ended "…without ever
+/// reaching the …". Both wrap now.
+#[test]
+fn a_multiwarp_header_and_event_wrap_rather_than_truncate() {
+    let mut t = spawn_one((80, 24), "rc001-multiwarp-barrier.json");
+    t.wait_until(|s| s.contains("step 0/3")).expect("initial");
+    t.send(Key::Char('v')).expect("send Key::Char('v')");
+    let frame = t
+        .wait_frame(|s| {
+            s.contains("(64,1,1)")
+                && s.contains("without ever reaching the")
+                && s.contains("barrier")
+                && s.contains("permanent hang")
+        })
+        .expect("header, event and verdict, each whole");
+    assert_golden(
+        "witness-multiwarp-verdict-80x24.txt",
+        &frame.to_string(),
+        "multiwarp",
+    );
+    quit(t, "multiwarp");
+}

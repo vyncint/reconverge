@@ -1,6 +1,7 @@
 size: 80x24  cursor: hidden
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 2/2 — kernel `rc002_divergent_collective` — RC002 — grid (1,1,1) bloc…│
+│witness 2/2 — kernel `rc002_divergent_collective` — RC002 — grid (1,1,1) block│
+│(32,1,1) warp 0                                                               │
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     o.o.o.o. o.o.o.o. o.o.o.o. o.o.o.o.                                 │
@@ -13,13 +14,12 @@ size: 80x24  cursor: hidden
 │at lib.rs:371                                                                 │
 │ballot_sync — named in the mask but not active: 0xaaaaaaaa                    │
 │                                                                              │
+│                                                                              │
 │   0  launch                                                                  │
 │   1  lanes evaluate the guarding branch — 16 continue toward `ballot_sync`, …│
 │▸  2  ballot_sync() — active lanes 0x55555555, mask 0xffffffff     16 exited  │
 │   3  16 lanes named by the mask never reach the call                         │
 │                                                                              │
 │verdict: undefined behavior (at step 3)                                       │
-│                                                                              │
-│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘

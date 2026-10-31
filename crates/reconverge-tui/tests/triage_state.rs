@@ -190,3 +190,40 @@ fn empty_data_never_transitions() {
         assert!(!state.update(action.clone(), &data), "{action:?}");
     }
 }
+
+/// What Ctrl-C reports as discarded: the difference from the file, not the
+/// keystrokes — an acceptance withdrawn again before `w` lost nothing.
+#[test]
+fn unsaved_edits_count_the_difference_from_disk() {
+    let (data, mut state) = fresh();
+    let accept = |state: &mut TriageState, reason: &str| {
+        state.update(KeyAction::BeginSuppress, &data);
+        for c in reason.chars() {
+            state.update(KeyAction::ReasonChar(c), &data);
+        }
+        state.update(KeyAction::ReasonCommit, &data);
+    };
+    assert_eq!(state.unsaved_edits(), 0);
+
+    accept(&mut state, "reviewed");
+    assert_eq!(state.unsaved_edits(), 1);
+    state.update(KeyAction::Next, &data);
+    accept(&mut state, "also reviewed");
+    assert_eq!(state.unsaved_edits(), 2);
+
+    // A write makes the file the new reference point; a failed one does not.
+    state.record_write(Err("disk full".to_string()));
+    assert_eq!(state.unsaved_edits(), 2);
+    state.record_write(Ok(()));
+    assert_eq!(state.unsaved_edits(), 0);
+
+    // Withdrawn is an edit; withdrawn and re-accepted with the same reason
+    // is not; re-accepted with another reason is one, not two.
+    state.update(KeyAction::Unsuppress, &data);
+    assert_eq!(state.unsaved_edits(), 1);
+    accept(&mut state, "also reviewed");
+    assert_eq!(state.unsaved_edits(), 0);
+    state.update(KeyAction::Unsuppress, &data);
+    accept(&mut state, "a different reason");
+    assert_eq!(state.unsaved_edits(), 1);
+}
