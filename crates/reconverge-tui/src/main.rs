@@ -24,6 +24,7 @@ use std::process::ExitCode;
 use ratatui::Frame;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -112,6 +113,64 @@ fn main() -> ExitCode {
     }
 }
 
+/// Put the terminal back the way the shell had it: cooked mode, the main
+/// screen, a visible cursor, and no synchronized update left open — the
+/// last because a signal can land mid-repaint. Shared by the panic hook and
+/// the signal thread, which have no caller to report an error to.
+fn restore_terminal(out: &mut impl io::Write) {
+    let _ = disable_raw_mode();
+    let _ = execute!(out, EndSynchronizedUpdate, LeaveAlternateScreen, Show);
+}
+
+/// Restore the terminal on SIGTERM, SIGHUP and SIGQUIT, then die of the same
+/// signal.
+///
+/// Without this, `timeout`, `tmux kill-pane` or a parent shutting down left
+/// the user at a shell in raw mode, on the alternate screen, with no cursor
+/// and no echo — `q`, Ctrl-C and a panic all restored, and the signals that
+/// end a process from outside did not. SIGINT is not here: raw mode turns
+/// Ctrl-C into a key, which every view already handles.
+///
+/// A thread rather than a flag polled by the event loop: polling would need
+/// a read timeout, and the views are event-driven by construction — no
+/// timers, so termlens' frame detection stays exact. The thread takes the
+/// stdout lock and never releases it, so the event loop cannot paint over
+/// the restored screen in the moment before the process ends. The signal is
+/// then re-raised with its default disposition, so whoever sent it sees a
+/// death by that signal (shell status 128+N), not a clean exit.
+#[cfg(unix)]
+fn restore_on_signal() -> io::Result<()> {
+    use signal_hook::consts::{SIGHUP, SIGQUIT, SIGTERM};
+    use signal_hook::low_level::emulate_default_handler;
+    let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGHUP, SIGQUIT])?;
+    std::thread::spawn(move || {
+        let mut pending = signals.forever();
+        let Some(signal) = pending.next() else {
+            return;
+        };
+        // The restore waits for the stdout lock, and a repaint blocked on a
+        // terminal that stopped reading holds it for as long as that lasts.
+        // So the restore gets a thread of its own, and a second signal still
+        // ends the process at once — as the first did before this handler.
+        std::thread::spawn(move || {
+            // Raw mode first: it needs no lock, so the shell gets its echo
+            // back even if the screen never does.
+            let _ = disable_raw_mode();
+            let mut out = io::stdout().lock();
+            restore_terminal(&mut out);
+            let _ = emulate_default_handler(signal);
+            // Not reached for these three signals, whose default is to end
+            // the process; an exit status is still better than carrying on.
+            std::process::exit(128 + signal);
+        });
+        if let Some(signal) = pending.next() {
+            let _ = emulate_default_handler(signal);
+            std::process::exit(128 + signal);
+        }
+    });
+    Ok(())
+}
+
 /// Terminal setup/teardown shared by every view, with a panic hook that
 /// restores the screen first so panics stay readable.
 fn with_terminal(body: impl FnOnce(&mut Term) -> io::Result<()>) -> io::Result<()> {
@@ -126,12 +185,15 @@ fn with_terminal(body: impl FnOnce(&mut Term) -> io::Result<()>) -> io::Result<(
              --message-format json` or `--sarif`",
         ));
     }
+    // Before raw mode, so there is no instant in which a signal could leave
+    // the terminal raw.
+    #[cfg(unix)]
+    restore_on_signal()?;
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen)?;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        restore_terminal(&mut io::stdout());
         default_hook(info);
     }));
 

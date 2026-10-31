@@ -1136,6 +1136,7 @@ dependencies = [
  "ratatui",
  "reconverge-artifacts",
  "serde_json",
+ "signal-hook",
  "termlens",
  "unicode-normalization",
  "unicode-segmentation",

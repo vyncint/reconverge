@@ -45,6 +45,15 @@ the corpus; found-in-the-wild is the true north.
   upstream rewrote it at this pin to take `*mut u32` through
   `DeviceAtomicU32::from_ptr`.
 
+### Fixed
+
+- **Killing a TUI view with SIGTERM, SIGHUP or SIGQUIT left the terminal
+  raw**, on the alternate screen, with the cursor hidden: `q`, Ctrl-C and a
+  panic restored it, and the signals a `timeout`, `tmux kill-pane` or a
+  parent shutting down send did not. A signal thread now runs the same
+  restore and re-raises the signal with its default action, so the shell
+  still reports a death by that signal (#205).
+
 ## [0.7.0] — 2026-09-22
 
 The production-readiness release. It ships the correctness fix `main` had
