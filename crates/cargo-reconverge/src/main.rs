@@ -96,7 +96,8 @@ code, and their count is always reported.
 
 Environment:
   RECONVERGE_DRIVER           the reconverge-driver binary to run (default:
-                              the one installed beside cargo-reconverge)
+                              the one beside cargo-reconverge, else the
+                              first on PATH)
   RECONVERGE_TUI              the reconverge-tui binary that inspect,
                               witness, learn and triage open (same default)
   RECONVERGE_TOOLCHAIN        the toolchain `check` builds under (default:

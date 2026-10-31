@@ -246,6 +246,11 @@ jobs:
             echo "::error::CHANGELOG.md has no '## [$version]' section; write it before releasing"
             exit 1
           fi
+          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          if [ -z "$channel" ]; then
+            echo "::error::no channel in rust-toolchain.toml"
+            exit 1
+          fi
           {
             echo
             echo '## Install'
@@ -256,9 +261,16 @@ jobs:
             echo '```'
             echo
             echo 'Or take a prebuilt archive below and put the three binaries'
-            echo 'on your PATH **in the same directory** -- `cargo-reconverge`'
-            echo 'finds the driver and the views as siblings of its own'
-            echo 'executable. Verify it first:'
+            echo 'on your PATH -- `cargo-reconverge` looks for the driver and'
+            echo 'the views beside its own executable, then on PATH. The driver'
+            echo "loads the pinned nightly's compiler library, so that"
+            echo 'toolchain is the one thing to install:'
+            echo
+            echo '```sh'
+            echo "rustup toolchain install ${channel} --profile minimal --no-self-update"
+            echo '```'
+            echo
+            echo 'Verify the archive first:'
             echo
             echo '```sh'
             echo 'shasum -a 256 -c reconverge-'"$TAG"'-<triple>.tar.gz.sha256'
@@ -407,3 +419,34 @@ jobs:
             echo "::warning::simt-diff will pick ${TAG#v} up on its own schedule instead"
             exit 1
           fi
+
+  # Verify what was published, the way a user installs it: install.yml, for
+  # this version. It used to listen for `release: published` instead, but
+  # `github-release` above creates the release with `github.token`, and
+  # events that token causes start no workflow -- so it never fired, and
+  # 0.7.0 shipped with no install run of any kind. A dispatch is the one
+  # event the token may cause.
+  #
+  # Not best-effort, unlike the job above: it needs no secret, so a failure
+  # here is a broken workflow and should read as one. install.yml waits for
+  # the index itself.
+  verify-install:
+    needs: publish
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # dispatches install.yml
+    steps:
+      - name: Dispatch install.yml for this version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # The default branch's install.yml, the newest verifier, rather
+          # than the copy at the tag.
+          BRANCH: ${{ github.event.repository.default_branch }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run install.yml --repo "$REPO" --ref "$BRANCH" -f "version=${TAG#v}"
+          echo "dispatched install.yml on $BRANCH for ${TAG#v}"

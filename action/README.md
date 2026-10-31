@@ -80,7 +80,17 @@ Notes:
   branch; `@v0.7.0` pins one release exactly, and a 40-hex SHA pins one
   commit. **Do not use `@main`**: it re-decides the analyzer version on every
   run of your CI, from whatever merged here since.
+- rustup is asked not to update itself (`--no-self-update`): replacing the
+  runner's rustup is not this action's business, and it can fail on its
+  own terms.
 
-Verified end to end on a separate repository
-(`vyncint/reconverge-action-smoke`): a clean kernel crate passes, and an
-injected RC003 fails the job, exactly as the exit-code contract promises.
+How it is checked: the `action` job in this repository's CI runs it from
+the working tree on every pull request — against the lint samples, where
+it must fail the job with an RC001 in its SARIF report, and against a clean
+kernel crate, where it must pass. It installs the published release that
+the tree's version names, so it checks this file against a real release.
+While a release pull request names a version crates.io does not have yet,
+the job says so and runs nothing; the pull request that moves the semver
+baseline after the publish runs it again. (`vyncint/reconverge-action-smoke`
+exercised it on a separate repository until 2026-08-17, before `v0`
+existed, and has not run since.)

@@ -77,11 +77,21 @@ runs:
       run: |
         reconverge_root="$(cd "${GITHUB_ACTION_PATH}/.." && pwd)"
         echo "root=${reconverge_root}" >> "$GITHUB_OUTPUT"
-        # `rustup toolchain install` inside the repo reads
-        # rust-toolchain.toml: the exact nightly plus rustc-dev/llvm-tools,
-        # which the driver needs.
-        (cd "${reconverge_root}" && rustup toolchain install)
         toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "${reconverge_root}/rust-toolchain.toml")"
+        if [ -z "${toolchain}" ]; then
+          echo "no channel in ${reconverge_root}/rust-toolchain.toml" >&2
+          exit 1
+        fi
+        # The exact nightly with what the driver needs and nothing else —
+        # the same set `cargo reconverge setup` installs. A bare `rustup
+        # toolchain install` inside the repo would read rust-toolchain.toml
+        # and add the contributor components (rust-src, rustfmt, clippy) on
+        # every consumer's run. `--no-self-update`: by default it also
+        # replaces rustup itself, which is not this action's business and
+        # can fail on its own (`failed to set permissions for
+        # '…/rustup-init'` was seen doing exactly that).
+        rustup toolchain install "${toolchain}" --profile minimal \
+          --component rustc-dev --component llvm-tools --no-self-update
         echo "channel=${toolchain}" >> "$GITHUB_OUTPUT"
 
     - name: Install the analyzer
@@ -101,8 +111,8 @@ runs:
         echo "installing reconverge ${version} from crates.io"
         # --locked: both crates publish a Cargo.lock, so the dependency
         # graph is the one that release was tested against. Both binaries
-        # land in the same directory, which is how `cargo-reconverge`
-        # finds the driver — it looks for a sibling of its own executable.
+        # land in the same directory, which is where `cargo-reconverge`
+        # looks for the driver first (then on PATH).
         cargo install --locked \
           "cargo-reconverge@${version}" \
           "reconverge-driver@${version}"

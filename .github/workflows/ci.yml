@@ -340,6 +340,94 @@ jobs:
           --test inspector_state --test learn_state
           --test triage_state --test witness_state
 
+  # The Action, run the way a consumer runs it: `uses:` on action/ from this
+  # tree. Until 0.8.0 nothing in this repository used it, and the only
+  # repository that did pinned `@main` and had not run since before `v0`
+  # existed — so action/README.md's "verified end to end" described a
+  # version of the action nobody was checking.
+  #
+  # Two runs, because the exit code is the contract: the lint samples must
+  # fail the job, and must fail it *because* `check` found something (the
+  # SARIF report must hold an RC001 — a failed install fails the step too,
+  # and would otherwise look the same), and a clean kernel crate must pass.
+  #
+  # The action installs the release the tree's version names, from
+  # crates.io. A release pull request bumps that version before it exists,
+  # so for that one window the job says so and runs nothing rather than
+  # holding the release hostage to itself; the semver-baseline pull request
+  # that docs/RELEASING.md requires right after the publish runs it for
+  # real. Any other answer from crates.io than "found" or "not found" fails.
+  action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Is this version on crates.io?
+        id: published
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "User-Agent: reconverge-ci (github actions)" \
+            "https://crates.io/api/v1/crates/cargo-reconverge/${version}")"
+          case "$code" in
+            200) echo "published=true" >> "$GITHUB_OUTPUT" ;;
+            404)
+              echo "::notice::cargo-reconverge ${version} is not on crates.io yet (a release pull request); the action installs the published release, so it is not run"
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *) echo "::error::crates.io answered ${code} for cargo-reconverge ${version}"; exit 1 ;;
+          esac
+      # The driver's own sample crate with its divergent kernel removed:
+      # same lockfile, same upstream pin, nothing for the gate to find.
+      - name: Prepare a clean kernel crate
+        if: steps.published.outputs.published == 'true'
+        run: |
+          set -euo pipefail
+          clean="$RUNNER_TEMP/clean-kernels"
+          cp -r crates/reconverge-driver/tests/sample-kernels "$clean"
+          cat > "$clean/src/lib.rs" <<'RUST'
+          use cuda_device::{DisjointSlice, kernel, thread};
+
+          #[kernel]
+          pub fn scale(mut out: DisjointSlice<f32>, factor: f32) {
+              let i = thread::index_1d();
+              if let Some(e) = out.get_mut(i) {
+                  *e *= factor;
+              }
+          }
+          RUST
+      - name: The action on the lint samples (must fail)
+        id: dirty
+        if: steps.published.outputs.published == 'true'
+        continue-on-error: true
+        uses: ./action
+        with:
+          working-directory: crates/cargo-reconverge/tests/lint-samples
+          sarif: ${{ runner.temp }}/lint-samples.sarif
+      - name: It failed, and on a finding
+        if: steps.published.outputs.published == 'true'
+        env:
+          OUTCOME: ${{ steps.dirty.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "::error::the action passed on the lint samples (outcome: $OUTCOME)"
+            exit 1
+          fi
+          sarif="$RUNNER_TEMP/lint-samples.sarif"
+          if ! jq -e '[.runs[].results[] | select(.ruleId == "RC001")] | length > 0' "$sarif"; then
+            echo "::error::the action failed, but not on an RC001: no such result in $sarif"
+            exit 1
+          fi
+      - name: The action on a clean crate (must pass)
+        if: steps.published.outputs.published == 'true'
+        uses: ./action
+        with:
+          working-directory: ${{ runner.temp }}/clean-kernels
+
   # The vendored termlens skill is refreshed by hand and AGENTS.md makes it
   # normative for every PTY test here, so a stale copy silently instructs the
   # next contributor to write code that no longer compiles. Nothing can diff
@@ -493,6 +581,7 @@ jobs:
         msrv,
         zizmor,
         commit-policy,
+        action,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5

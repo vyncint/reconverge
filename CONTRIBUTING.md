@@ -139,7 +139,8 @@ allowlist is a list on purpose, so that widening it is a visible decision.
   since it becomes the commit subject on `main`. Branches are deleted on merge.
 - Required check: `required-green`, which is green only when every gate in
   `ci.yml` is — fmt, clippy, test, docs, deny, isolation, conformance,
-  schemas, macos, windows, skill-version, semver, msrv, zizmor, and
+  schemas, macos, windows, skill-version, semver, msrv, zizmor, action
+  (the Action run as a consumer runs it), and
   `commit-policy` (DCO + attribution), which `ci.yml` calls so that it gates
   rather than reports. All must pass before merge; direct pushes to `main`
   are blocked by a ruleset.

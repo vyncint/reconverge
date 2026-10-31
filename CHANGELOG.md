@@ -14,6 +14,20 @@ the corpus; found-in-the-wild is the true north.
 
 ### Added
 
+- **An install is verified again, through the first run, and the Action is
+  run by CI.** `install.yml` had not run since 0.6.1: the release is
+  created with `GITHUB_TOKEN`, whose events start no workflow, so its
+  `release: published` trigger never fired, and its weekly schedule was
+  commented out. `release.yml` now dispatches it after the publish, the
+  schedule is back, and it goes past `--help`: `setup` into the CLI's own
+  install root, then `cargo reconverge check` *through cargo* in a kernel
+  crate with no toolchain file, which must exit 1 on its RC001. Nothing in
+  this repository used `./action` either; a new `action` job in
+  `required-green` runs it on the lint samples (must fail, on an RC001 in
+  its SARIF) and on a clean crate (must pass). action/README.md no longer
+  says "verified end to end" on the strength of a smoke repository that
+  last ran before `v0` existed. (#208)
+
 - **`check --package <name>` and `--exclude <name>`**, both repeatable, and
   an `args` input on the Action to pass them. Upstream's single-source
   layout links the CUDA host API, whose `cuda-bindings` build script needs
@@ -51,6 +65,13 @@ the corpus; found-in-the-wild is the true north.
   a file called `--version`. `--help` now lists every view (#206).
 
 ### Changed
+
+- **`check`, `inspect` and `learn` look for the driver and the TUI on
+  `PATH`** when they are not beside the CLI, after `RECONVERGE_DRIVER` /
+  `RECONVERGE_TUI` and the sibling, which still win. Absolute `PATH`
+  entries only: a relative one resolves against the project being analyzed,
+  and a `reconverge-driver` committed there must not become the compiler
+  wrapper. (#203)
 
 - **A full-mask collective under a warp-uniform guard is no longer RC002.**
   `warp_id() == 0`, `threadIdx_x() / 32 == k` and `threadIdx_x() >> 5` read
@@ -204,6 +225,41 @@ the corpus; found-in-the-wild is the true north.
   all of the call's arguments.
 
 ### Fixed
+
+- **`setup` installed the companions where `check` never looked.** It ran
+  `cargo install` into cargo's default root, and `check` looks beside its
+  own binary — so a CLI installed with `--root ~/.local`, under
+  `CARGO_INSTALL_ROOT`, or from a release archive got a `setup` that
+  succeeded and a `check` that said to run `setup`, forever. `setup` now
+  passes `--root` for the root whose `bin` holds the CLI (the default root,
+  for `~/.cargo/bin`), and prints it in the manual steps too. A `bin` you
+  cannot write — `/usr/local/bin`, a distro's `/usr/bin` — keeps cargo's
+  default root rather than an install that needs sudo, and `setup` says
+  so. (#203)
+
+- **`setup` let rustup update itself, and failed when that did.** `rustup
+  toolchain install` replaces rustup by default; with the toolchain already
+  present, `failed to set permissions for '…/rustup-init'` ended `setup`
+  with exit 2. `setup`, both READMEs' manual steps and the Action pass
+  `--no-self-update`. (#203)
+
+- **A missing toolchain sent release-archive users to a rebuild.** `check`
+  only gets as far as resolving the sysroot with a driver in hand, so its
+  advice is now the one command that is missing — `rustup toolchain install
+  nightly-2026-08-28 --profile minimal --no-self-update` — instead of
+  `setup`, which recompiles the driver and the TUI from source. (#203)
+
+- **`reconverge-driver` built on the wrong toolchain, or failed to name the
+  right one.** Its build script checked for `rustc-dev` and nothing else:
+  `cargo +stable install reconverge-driver` got that component's message
+  with a `<toolchain>` placeholder, and another nightly *built* a driver
+  that then failed under `check` with `librustc_driver-….so: cannot open
+  shared object file`. The script now compares `rustc -vV`'s `commit-hash`
+  with the pinned nightly's and stops with one line to paste, ending in
+  `rustup run nightly-2026-08-28 cargo install --locked
+  reconverge-driver@VERSION`; a test holds the embedded pin to
+  `rust-toolchain.toml` and to the rustc it selects. The README's "four
+  `E0463`s", which no toolchain produced any more, are gone with it. (#204)
 
 - **The witness replayed `(32, 1, 1)` whatever block the contract
   declared, and confirmed hangs no allowed launch has.** `threadIdx_x()` ran

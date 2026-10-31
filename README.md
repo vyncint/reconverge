@@ -257,23 +257,28 @@ $ cargo reconverge setup
 
 `setup` installs the pinned nightly toolchain — a rustc-driver tool must be
 built by the exact rustc it wraps — and `reconverge-driver` +
-`reconverge-tui` at the CLI's own version, printing every command before it
-runs. Prefer to do it yourself? The equivalent is (the `@VERSION` pins
-matter — all three binaries must be the same version, so pin both to the
-version of `cargo-reconverge` you installed):
+`reconverge-tui` at the CLI's own version, into the install root that holds
+the CLI (a `cargo install --root ~/.local cargo-reconverge` keeps all three in
+`~/.local/bin`), printing every command before it runs. The CLI looks for
+its two companions beside itself first, then on `PATH`. Prefer to do it
+yourself? The equivalent is (the `@VERSION` pins matter — all three
+binaries must be the same version, so pin both to the version of
+`cargo-reconverge` you installed):
 
 ```console
-$ rustup toolchain install nightly-2026-08-28 --profile minimal --component rustc-dev --component llvm-tools
+$ rustup toolchain install nightly-2026-08-28 --profile minimal --component rustc-dev --component llvm-tools --no-self-update
 $ rustup run nightly-2026-08-28 cargo install --locked reconverge-driver@VERSION reconverge-tui@VERSION
 ```
 
-`rustc-dev` is the component that matters: the driver links rustc's own
-crates, and without it the build fails with four `E0463`s naming
-`rustc_driver`, `rustc_interface`, `rustc_middle` and `rustc_public`
-rather than the one missing argument. A git checkout inherits the
-components from this repository's `rust-toolchain.toml`; a crates.io
-install carries no toolchain file, so it has to be asked for. The
-driver's build script checks for it and says so directly.
+The driver links rustc's own crates, so it must be built by exactly the
+pinned nightly, with `rustc-dev`, the component that ships them. A git
+checkout inherits both from this repository's `rust-toolchain.toml`; a
+crates.io install carries no toolchain file, so they have to be asked for.
+The driver's build script checks both — the compiler's commit against the
+pin, then the component — and stops with the command to paste rather than
+a build that fails later: on stable or on any other nightly it says
+`reconverge-driver must be built by nightly-2026-08-28` and ends with
+`rustup run nightly-2026-08-28 cargo install --locked reconverge-driver@VERSION`.
 
 ### Prebuilt binaries
 
@@ -298,7 +303,9 @@ Two things make or break it:
   toolchain's `librustc_driver` dynamically and does not ship it;
   `cargo-reconverge` puts the toolchain's library directory on the
   driver's search path when it runs it. `rustc-dev` is needed to *build*
-  the driver, not to run it, so the minimal profile is enough here.
+  the driver, not to run it, so the minimal profile is enough here. If it
+  is missing, `check` says so and names that one command — not `setup`,
+  which would rebuild what the archive already holds.
 
 ## Using it
 
