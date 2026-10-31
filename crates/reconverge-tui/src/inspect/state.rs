@@ -73,6 +73,15 @@ impl InspectorState {
             KeyAction::NextFunction => {
                 self.function = (self.function + 1) % data.functions.len();
                 self.reset_selection(data);
+                // A finding about another kernel is no longer the one on
+                // screen; leaving it selected kept its bar naming that kernel
+                // over this one's source.
+                if let Some(index) = self.finding
+                    && let Some(kernel) = &data.findings[index].kernel
+                    && *kernel != data.functions[self.function].function.name
+                {
+                    self.finding = None;
+                }
             }
         }
         *self != before

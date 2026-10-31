@@ -53,8 +53,9 @@ impl TriageView<'_> {
     }
 }
 
-/// Severity word for a finding's confidence tier (ASCII in both modes).
-fn tier(confidence: Confidence) -> &'static str {
+/// Severity word for a finding's confidence tier (ASCII in both modes);
+/// the Inspector's finding bar uses the same words.
+pub(crate) fn tier(confidence: Confidence) -> &'static str {
     match confidence {
         Confidence::Deny => "deny",
         Confidence::Confirmed => "confirmed",

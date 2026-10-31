@@ -4,14 +4,28 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Also a job of ci.yml, which is what makes it gate: the ruleset's one
+  # required context is `required-green`, and as a workflow of its own this
+  # never fed it — PR #84 merged with commit-policy red (#209). The triggers
+  # above stay so the check keeps its own line on a pull request and its PR
+  # comment; the copy inside CI is the one a merge waits for.
+  workflow_call:
+    inputs:
+      from-ci:
+        description: Set by ci.yml. Only the standalone run posts the PR comment, so a failure is explained once.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   pull-requests: write
 
-# A superseded run of this gate has nothing left to report.
+# A superseded run of this gate has nothing left to report. The two copies
+# get separate groups: sharing one, a standalone run and the copy inside CI
+# on the same ref would cancel each other, and a cancelled job inside CI
+# fails `required-green`.
 concurrency:
-  group: commit-policy-${{ github.ref }}
+  group: commit-policy-${{ inputs.from-ci && 'ci' || 'own' }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,6 +49,14 @@ jobs:
         run: |
           if [ "$EVENT" = "pull_request" ]; then
             range="$BASE..$HEAD"
+          elif [ "$EVENT" != "push" ]; then
+            # Inside ci.yml this also runs on workflow_dispatch, which names
+            # no commits: `before` and `after` are empty, the range came out
+            # as `..`, and both checks printed "inspected 0 commit(s) ... OK"
+            # over a git error. Nothing reaches main that way, so say so.
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "a $EVENT run names no new commits; nothing to inspect"
+            exit 0
           elif printf '%s' "$BEFORE" | grep -qE '^0+$'; then
             # initial push: inspect the entire history
             range="$AFTER"
@@ -45,6 +67,7 @@ jobs:
           echo "inspecting commits in: $range"
 
       - name: DCO sign-off on every commit
+        if: steps.range.outputs.skip != 'true'
         env:
           RANGE: ${{ steps.range.outputs.range }}
           # On a push to main, the tip is the commit GitHub composed by
@@ -58,7 +81,7 @@ jobs:
 
       - name: No AI attribution on any commit
         # run even when the DCO step failed, so both reports land at once
-        if: success() || failure()
+        if: (success() || failure()) && steps.range.outputs.skip != 'true'
         # Through `env:` rather than expanded into the script line: a `${{ }}`
         # inside a `run:` block is substituted before bash ever sees it, so a
         # ref name is interpolated as shell rather than passed as an argument.
@@ -88,7 +111,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post the policy comment on the PR (once)
-        if: failure() && github.event_name == 'pull_request'
+        if: failure() && github.event_name == 'pull_request' && !inputs.from-ci
         # A fork PR cannot be commented on with this token; the summary
         # above already carries the guidance, so never fail the job here.
         continue-on-error: true

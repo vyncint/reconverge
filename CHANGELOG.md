@@ -28,6 +28,39 @@ the corpus; found-in-the-wild is the true north.
   says "verified end to end" on the strength of a smoke repository that
   last ran before `v0` existed. (#208)
 
+- **`check --package <name>` and `--exclude <name>`**, both repeatable, and
+  an `args` input on the Action to pass them. Upstream's single-source
+  layout links the CUDA host API, whose `cuda-bindings` build script needs
+  the CUDA toolkit; a workspace can now check the crate that holds the
+  kernels and leave the host crate out. Both READMEs say so, and a name
+  that is not a workspace member is refused before anything is built.
+  (#197)
+- **`check --require-kernels`** exits 2 when no `#[kernel]` was analyzed,
+  for a CI gate that must not pass on an empty run. (#196)
+
+- **`--cc` takes the arch spellings cuda-oxide itself uses.** `sm_90a`,
+  `sm_100f`, `sm_120a`, `compute_86` and `9.0a` were all refused, while
+  cargo-oxide's `--arch` is spelled that way throughout and the README said
+  "the CUDA spellings work". An `a`/`f` suffix selects an instruction set on
+  the same device, so it means the base capability's limits; it is still
+  checked, so `sm_86a` — which names no architecture — is an error rather
+  than a quiet 8.6. The table gains 10.3, 11.0 and 12.1, all in the CUDA 13
+  guide's memory table (12.1 as the second member of `12.x`). (#200)
+- **SARIF rules carry what code scanning shows beside an alert**: a
+  `fullDescription` (the explain page's opening paragraph) and the page
+  itself as `help.markdown`/`help.text`. A rule had only an id, a one-line
+  summary and a link. (#198)
+- **`cargo reconverge help`, and `--version`/`-V` after a subcommand**
+  (`check -V`) are answered instead of being reported as unrecognized
+  arguments with the usage text. The usage text now lists `--version`, the
+  `explain` alias, `RECONVERGE_DRIVER`/`RECONVERGE_TUI`, and that `watch`
+  exits with its last run's code. (#199)
+
+- **`reconverge-tui --version` (and `-V`).** `cargo reconverge setup`
+  installs three binaries that must be one release, and the TUI was the one
+  that could not say which it was: `--version` opened the artifact shell on
+  a file called `--version`. `--help` now lists every view (#206).
+
 ### Changed
 
 - **`check`, `inspect` and `learn` look for the driver and the TUI on
@@ -36,6 +69,90 @@ the corpus; found-in-the-wild is the true north.
   entries only: a relative one resolves against the project being analyzed,
   and a `reconverge-driver` committed there must not become the compiler
   wrapper. (#203)
+
+- **A run that analyzed no `#[kernel]` says so**:
+  `reconverge: no #[kernel] functions found in 1 crate — nothing was
+  analyzed`, still exit 0, and the Action raises a `::warning::` for it. A
+  wrong `working-directory`, a crate without the cuda-oxide dependency, or
+  kernels behind a disabled cfg used to print the exact summary of a clean
+  pass. (#196)
+- **`check` names the layer that failed.** A build script that failed (the
+  CUDA toolkit missing, typically), a driver that cannot start under the
+  toolchain, and ordinary compile errors used to share one message that
+  blamed the toolchain and recommended `setup`. cargo's own diagnostics now
+  pass through `check` rather than straight to the terminal, coloured when
+  stderr is one; cargo's progress bar is not shown. (#197)
+- **`witness` after a check that confirmed nothing exits 0**, saying there
+  is nothing to replay, instead of exit 2 and "run `cargo reconverge check`
+  first" right after one had run. A project where `check` has never run is
+  still exit 2. (#201)
+
+- **SARIF locations are relative to the repository root, and say so.** Each
+  `uri` was relative to the Cargo workspace root with no base, and GitHub
+  reads a relative URI from the repository root, so a workspace in a
+  subdirectory — the Action's `working-directory: kernels` — put every alert
+  on `src/lib.rs` instead of `kernels/src/lib.rs`. The report now finds the
+  repository around the workspace (a `.git` directory or file), spells each
+  path from there with `uriBaseId: "%SRCROOT%"`, and declares that directory
+  in `originalUriBaseIds`; a file outside the repository gets an absolute
+  `file://` URI. RC001's short description is now "an all-threads barrier
+  under thread-divergent control", not `sync_threads()` alone. (#198)
+- **A value-taking flag refuses an empty value and a following token that
+  begins with `-`.** `check --sarif=` ran the whole analysis and then failed
+  with `cannot write SARIF to : …`; `--baseline -h` read a baseline named
+  `-h`, and `--sarif -x` wrote a report named `-x`. A path that begins with
+  `-` is still accepted inline: `--sarif=-x`. (#199)
+
+- **`required-green` now waits for the macOS job and for `commit-policy`**
+  (#209). It is the ruleset's only required context, and neither fed it: a
+  red macOS PTY run did not block a merge while the README called the views
+  gated on macOS, and PR #84 merged with the DCO/attribution gate red.
+  `ci.yml` calls `commit-policy.yml` as a reusable workflow, which keeps its
+  own triggers and is the one that posts the PR comment.
+
+- **`reconverge-tui` refuses an unknown option** with exit 2 and the usage,
+  instead of opening it as an artifact path — a misspelt `--asci` surfaced
+  inside the view as `No such file or directory`. `--` ends the options, for
+  a file whose name starts with a dash (#206).
+- **Ctrl-C in triage says what it threw away.** It is still the exit that
+  always works, mid-reason or not, but with unsaved baseline edits it now
+  prints `discarded N unsaved baseline edits` on stderr after the terminal
+  is restored and exits **130**, where it used to exit 0 having dropped a
+  review pass without a word. `cargo reconverge triage` passes the code on.
+  With nothing unsaved it is a plain quit, as before (#206).
+- **The Inspector's finding bar names the tier**, spelt as `check` prints
+  it: `finding 4/39 warning[RC005] …`. A lint-samples run loads 39 findings
+  there of which 25 are warnings `check` hides by default, and without the
+  word a hidden warning read exactly like a gating deny (#206).
+- **The witness view ranks its rows on a small terminal.** The lane strip
+  and the current step come first, then the verdict, and the timeline gives
+  way before any of them; below the strip's own size the view says
+  `terminal too small — the lane strip needs at least 47x10` instead of
+  drawing the ruler over blank rows, which is what 40x10 showed. The header
+  and the current step's statement wrap rather than ending in `block (…` and
+  "…without ever reaching the …" at 80 columns, so the 80x24 goldens move by
+  a row (#206).
+- **Lesson prose reflows** when an authored line does not fit, instead of
+  losing the end of every line at 46 columns ("the mask promis…"), and a
+  page that still runs out of rows ends in `… more below: enlarge the
+  terminal`. Where the authored breaks fit they are kept (#206).
+
+### Breaking
+
+- **The wrapped build always uses the pin; to run a driver built against
+  another toolchain, set `RECONVERGE_TOOLCHAIN`.** `RUSTUP_TOOLCHAIN` is no
+  longer consulted. rustup's `cargo` proxy exports it to every subcommand,
+  set to the toolchain it resolved for the project, so honouring it as "an
+  explicit choice" made a bare `cargo reconverge check` — the command the
+  README shows — load the driver against `stable` and exit 2 in any project
+  without the pin, with advice to run a `setup` that could not help. The
+  wrapped build now runs the pinned toolchain's own `cargo` as well. (#186)
+
+- **Action: a relative `sarif` path is written under the repository root**
+  (`$GITHUB_WORKSPACE`), not under `working-directory`, so the
+  `upload-sarif` step in action/README.md finds the file it names. A
+  workflow that worked around this by uploading
+  `<working-directory>/reconverge.sarif` must drop the prefix. (#198)
 
 ### Fixed
 
@@ -74,6 +191,86 @@ the corpus; found-in-the-wild is the true north.
   `rust-toolchain.toml` and to the rustc it selects. The README's "four
   `E0463`s", which no toolchain produced any more, are gone with it. (#204)
 
+- **Findings are keyed by target, not by package.** The driver names an
+  artifact after the target's crate name, and `check`, `inspect`, `witness`
+  and `triage` all filtered on the package's: a confirmed RC001 in a
+  `[[bin]]` (upstream's `atomic_f16` and `hashmap_v2` layout) was left out of
+  the report and exited 0; a renamed `[lib]` or a bin-only package exited 2
+  on every run as "not analyzed", having been analyzed twice; and a renamed
+  library with its old artifact present was reported from the old, clean
+  document. The set `check` gates on now comes from cargo's own build
+  messages — exactly the targets this run compiled — and the readers match
+  file names exactly against the workspace's lib and bin targets. (#187)
+- **A deleted or renamed target's artifacts are pruned.** Nothing ever
+  removed them, so a confirmed RC001 in a deleted `src/main.rs` went on
+  failing every run, pointing at a file that no longer existed, until
+  `target/reconverge` was deleted by hand. (#187)
+- **A truncated findings artifact heals instead of failing every run.** A
+  killed driver or a full disk left half a document; the build was fresh,
+  so nothing rewrote it, and every later run exited 2 with a serde error and
+  no hint. An unreadable artifact now gets one forced re-lint, like a
+  missing one, and if it is still unreadable the error names the directory
+  to delete. (#195)
+- **A newer schema is reported as one.** `deserialize_checked` parsed the
+  typed document before comparing `schema`, so a `findings.v2` from a newer
+  driver read as ``missing field `confidence` at line 1 column 1742`` — damage,
+  not a version. The tag is read first now, and `check` adds the `setup`
+  hint. (#195)
+- **Changing `--cc` re-lints the workspace members only.** Every unit's
+  fingerprint was dropped, so `--cc 8.6` followed by `--cc 9.0` recompiled
+  `syn`, `quote` and the rest of the dependency tree to re-lint one crate.
+  (#202)
+- **Outside a project, `check` says `error:` once.** cargo's own message was
+  nested under ours — `error: cargo metadata failed:`, then
+  ``error: could not find `Cargo.toml` …`` — and a trailing blank line.
+  (#199)
+
+- **`--explain`, `--help` and `--version` no longer panic into a closed
+  pipe.** `cargo reconverge --explain RC001 | head -3` exited 101 with
+  `failed printing to stdout: Broken pipe`; these now go through the same
+  classified stdout as `check`'s report and exit 0. (#199)
+- **The summary's noun agrees with the count beside it**:
+  `0 deny, 2 confirmed, 1 warning finding`, not `… 1 warning findings`,
+  which pluralized on the total. (#199)
+- **The stale-baseline note quotes its entry once**: ``baseline entry
+  sample_kernels RC001 in `gone` no longer matches``, where the whole label
+  used to be wrapped in a second pair of backticks. (#199)
+
+- **`pins.yml` sees upstream's monorepo** (#207). Upstream moved its device
+  crate to `cuda-oxide/crates/cuda-device` and its device toolchain beside
+  it; the watcher compared the root `rust-toolchain.toml` (the host
+  workspace's stable `1.98.0`) and `check-surface.sh` exited 2 on the old
+  path, which the workflow read as an empty list of unknown functions.
+  `scripts/upstream-layout.sh` now finds the crate in either layout and the
+  toolchain file rustup would apply to it; any exit of the surface gate
+  other than 0 or 1 fails the run with its output; and the open drift issue
+  is kept current — its body rewritten when the drift changes, a comment
+  added when the *kind* of drift does — instead of muting every later
+  report behind the first one's title. Against upstream `2d47e43` it now
+  reports `1.99.1` and ten undecided surface functions.
+- **`release.yml` holds the tag to the manifest, moves `v0` only forward,
+  and names a failed notification** (#210). A new first job fails unless
+  every published crate at the tag declares the tag's version, so a tag on
+  the wrong commit stops at the dry run instead of shipping archives and a
+  GitHub Release under the wrong name. `float-major-tag` leaves `v0` alone
+  when the dispatched tag is older than the release it points at. And the
+  `simt-diff` dispatch no longer exits on a failing `gh` before its warning
+  is printed — `bash -e` ended the step at the assignment.
+
+- **Killing a TUI view with SIGTERM, SIGHUP or SIGQUIT left the terminal
+  raw**, on the alternate screen, with the cursor hidden: `q`, Ctrl-C and a
+  panic restored it, and the signals a `timeout`, `tmux kill-pane` or a
+  parent shutting down send did not. A signal thread now runs the same
+  restore and re-raises the signal with its default action, so the shell
+  still reports a death by that signal (#205).
+- **After `f`, the Inspector's bottom line kept naming the previous
+  function's finding** over the new function's source. Switching function
+  now drops a finding that is about another kernel (#206).
+- **At 80x24 the `barriers` and `reconvergence` lessons cut the last line of
+  their kernel excerpt**, one row short of room — in `reconvergence`, the
+  `sync_threads()` the page is about. The replay's separating blank gives
+  way first now (#206).
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G
@@ -106,6 +303,27 @@ the corpus; found-in-the-wild is the true north.
   `barrier`, and `atomics` is no longer probeable for the old finding because
   upstream rewrote it at this pin to take `*mut u32` through
   `DeviceAtomicU32::from_ptr`.
+
+- **The README's `check` sample is a real run again** (#211). It said
+  `src/lib.rs:129:9` and `ThreadIndex::get`; 0.7.0 prints `184:9`,
+  `ThreadIndex::<'kernel, IndexSpace>::get` and a witness note the sample
+  lacked. It is now copied from `cargo reconverge check` over the sample
+  crate, and says where it came from.
+  Also: a **Prebuilt binaries** section (the two targets the release
+  archives cover, the checksum, one directory for all three binaries, and
+  the pinned nightly the driver links at run time), `--ascii` for the
+  views, the pin claim in the README and `action/README.md` (the pin is
+  upstream's toolchain at `conformance/PIN`, not upstream's today),
+  `upload-sarif@v4`, the publish order and a portable `sed` in
+  `docs/RELEASING.md`, an `[Unreleased]` link definition, and the
+  `MUTATION.md` paragraph that still called the unmasked warp wrappers
+  outside the surface — they are analyzed, and the generator says so now.
+- **The witness-debugger recording shows the current fixtures** (#211). It
+  had been recorded over the hand-written fixtures of the first commit
+  ("step 0/5", `lib.rs:20`), and `scripts/record-witness-demo.sh` still
+  pressed `l` four times "to the barrier" of a three-step replay. The key
+  schedule is now computed from the fixture, and the script refuses to
+  write a cast whose step counter disagrees with it.
 
 ## [0.7.0] — 2026-09-22
 
@@ -1435,6 +1653,7 @@ calibration against hardware.
   its guard depends on values the interpreter cannot know, so hardware
   evidence comes first.
 
+[Unreleased]: https://github.com/vyncint/reconverge/compare/v0.7.0...HEAD
 [0.7.0]: https://github.com/vyncint/reconverge/releases/tag/v0.7.0
 [0.6.1]: https://github.com/vyncint/reconverge/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vyncint/reconverge/releases/tag/v0.6.0

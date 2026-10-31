@@ -12,7 +12,7 @@ size: 80x24  cursor: hidden
 │        // per-lane work, no barrier in here                                  │
 │    }                                                                         │
 │    // the paths rejoin at the branch's post-dominator                        │
-│                                                                              │
+│    thread::sync_threads(); // every lane arrives                             │
 │replay — step 5/5  [====>]                                                    │
 │          0        8        16       24                                       │
 │lanes     ........ ........ ........ ........                                 │

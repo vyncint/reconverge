@@ -12,9 +12,10 @@ decisions rather than one, and the workflow offers a dry run between them.
 
 - **crates.io Trusted Publishing**, linked to this repository and
   `release.yml`. No token is stored anywhere.
-- Seven crates publish **in dependency order** — core → artifacts → dialect →
-  witness → driver → tui → cargo-reconverge — and `cargo publish` waits for
-  each to appear on the index before the next.
+- Seven crates publish **in dependency order** — artifacts → core → dialect →
+  witness → driver → tui → cargo-reconverge, the order of the loop in
+  `release.yml` — and `cargo publish` waits for each to appear on the index
+  before the next.
 
 ## Cutting vX.Y.Z
 
@@ -41,8 +42,9 @@ cargo check --workspace         # refreshes Cargo.lock
 (cd conformance/extractor && cargo update --workspace)
 
 # 3. Move the CHANGELOG section: [Unreleased] -> [X.Y.Z] — YYYY-MM-DD,
-#    leaving an empty [Unreleased] above it, and add its link definition
-#    at the foot of the file.
+#    leaving an empty [Unreleased] above it. At the foot of the file, add
+#    the [X.Y.Z] link definition and move the [Unreleased] compare link's
+#    base to vX.Y.Z.
 
 # 3b. Every witness fixture is stamped with the tool version that wrote it,
 #     and a test holds the stamp to the workspace version. Re-record the
@@ -50,7 +52,10 @@ cargo check --workspace         # refreshes Cargo.lock
 #     lessons' byte-identical copies — or the `test` and `schemas` gates
 #     fail on the release PR (they did, at 0.6.0).
 ./scripts/record-fixtures.sh
-sed -i 's/"version": "OLD"/"version": "X.Y.Z"/' fixtures/witness/reconverged-clean.json
+#     `-i.bak`, not `-i`: BSD sed on macOS takes the next argument as the
+#     backup suffix, so the GNU spelling fails there.
+sed -i.bak 's/"version": "OLD"/"version": "X.Y.Z"/' fixtures/witness/reconverged-clean.json
+rm fixtures/witness/reconverged-clean.json.bak
 cp fixtures/witness/{rc001-divergent-barrier,rc002-partial-mask,reconverged-clean}.json crates/reconverge-tui/lessons/
 
 # 4. Land it.
@@ -58,7 +63,9 @@ git switch -c release/vX.Y.Z
 git commit -sam "release: X.Y.Z"
 gh pr create --fill
 
-# 5. Tag the squash-merged commit, then publish deliberately.
+# 5. Tag the squash-merged commit, then publish deliberately. The first job
+#    fails unless the tag is v<the version every crate's manifest declares>,
+#    dry run included, so a tag on the wrong commit stops there.
 git switch main && git pull
 git tag vX.Y.Z && git push origin vX.Y.Z
 gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=true    # validate
@@ -85,7 +92,8 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
 - **`v0` moves itself too.** `float-major-tag` repoints it at the release
   commit through the API, after the publish, so the tag documented in
   `README.md` and `action/README.md` can never name a release that did not
-  reach crates.io.
+  reach crates.io. It only moves forward: a patch on an older line (0.6.2
+  after 0.7.0) leaves `v0` where it is and says so in the job log.
 - **Read the finished release run's job list, and explain every job that is
   not green.** A `skipped` job is something to account for, not something to
   scroll past: `notify-testing-repo` carried a guard on an event this

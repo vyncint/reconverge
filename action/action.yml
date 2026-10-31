@@ -14,7 +14,8 @@
 # The analyzed project is compiled with reconverge's pinned nightly
 # (exported as RUSTUP_TOOLCHAIN, overriding any toolchain file in the
 # target repo): a rustc-driver tool and the rustc it wraps must be the
-# same build. cuda-oxide projects already require this exact pin.
+# same build. It is the toolchain upstream cuda-oxide used at the commit in
+# conformance/PIN, which upstream has since moved past (#207).
 name: reconverge
 description: >-
   Static reconvergence analysis for Rust GPU kernels — catches divergent
@@ -32,8 +33,9 @@ inputs:
   cc:
     description: >-
       Target compute capability (X.Y, e.g. 8.6) for shared-memory capacity
-      context (RC004). The CUDA spellings are accepted too: `sm_86` and `86`
-      both mean 8.6.
+      context (RC004). The CUDA spellings are accepted too: `sm_86`,
+      `compute_86` and `86` all mean 8.6, and an `a`/`f` suffix (`sm_90a`,
+      `sm_100f`) means the base capability.
     required: false
     default: ""
   strict:
@@ -45,7 +47,18 @@ inputs:
   sarif:
     description: >-
       Path to also write a SARIF 2.1.0 report to (upload it with
-      github/codeql-action/upload-sarif in a follow-up step).
+      github/codeql-action/upload-sarif in a follow-up step). A relative
+      path is resolved against the repository root ($GITHUB_WORKSPACE), not
+      against working-directory, so the upload step finds it at the same
+      path.
+    required: false
+    default: ""
+  args:
+    description: >-
+      Further `cargo reconverge check` arguments, split on whitespace —
+      for example `--package my-kernels` to check only the crate that holds
+      the kernels, `--exclude host`, or `--require-kernels` to fail the job
+      when no #[kernel] was analyzed.
     required: false
     default: ""
 
@@ -115,9 +128,38 @@ runs:
         INPUT_CC: ${{ inputs.cc }}
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_ARGS: ${{ inputs.args }}
       run: |
         args=()
         if [ -n "${INPUT_CC}" ]; then args+=(--cc "${INPUT_CC}"); fi
         if [ "${INPUT_STRICT}" = "true" ]; then args+=(--strict); fi
-        if [ -n "${INPUT_SARIF}" ]; then args+=(--sarif "${INPUT_SARIF}"); fi
-        cargo-reconverge reconverge check "${args[@]}"
+        if [ -n "${INPUT_SARIF}" ]; then
+          # This step runs in working-directory, but upload-sarif reads
+          # `sarif_file` from the repository root, so a relative path written
+          # here was a file the next step could not find.
+          case "${INPUT_SARIF}" in
+            /* | [A-Za-z]:[/\\]*) sarif="${INPUT_SARIF}" ;;
+            *) sarif="${GITHUB_WORKSPACE}/${INPUT_SARIF}" ;;
+          esac
+          # Inline, so a path that begins with `-` is still a path.
+          args+=("--sarif=${sarif}")
+        fi
+        # Word-split on purpose, and only that: `read -a` does no globbing
+        # and no expansion, so the input stays data rather than shell.
+        if [ -n "${INPUT_ARGS}" ]; then
+          read -r -a extra <<< "${INPUT_ARGS}"
+          args+=("${extra[@]}")
+        fi
+        report="${RUNNER_TEMP}/reconverge-check.txt"
+        set +e
+        cargo-reconverge reconverge check "${args[@]}" | tee "${report}"
+        status="${PIPESTATUS[0]}"
+        set -e
+        # A run with no kernel passes, and a green check reads like a clean
+        # one: a wrong working-directory, a crate without the cuda-oxide
+        # dependency or kernels behind a disabled cfg all looked the same.
+        # Say so on the run's summary page; `--require-kernels` fails it.
+        if grep -q '^reconverge: no #\[kernel\] functions found' "${report}"; then
+          echo "::warning title=reconverge analyzed nothing::no #[kernel] functions were found, so nothing was analyzed. Check working-directory, or pass args: --require-kernels to fail the job instead."
+        fi
+        exit "${status}"

@@ -191,6 +191,28 @@ impl Review {
         }
         total
     }
+
+    /// Whether this run analyzed no `#[kernel]` at all.
+    ///
+    /// The engine counts every reachable terminator of every kernel it
+    /// models, so a kernel — even an empty one — never totals zero
+    /// statements, and a document with a finding has a kernel by
+    /// definition. An artifact without coverage (written before 0.6.0)
+    /// cannot say, and is taken to have analyzed something.
+    ///
+    /// A wrong `working-directory`, a crate without the cuda-oxide
+    /// dependency, kernels behind a disabled cfg: each printed
+    /// `0 deny, 0 confirmed, 0 warning findings`, word for word the summary
+    /// of a real clean pass, and turned the CI gate green.
+    #[must_use]
+    pub fn found_no_kernels(&self) -> bool {
+        self.artifacts.iter().all(|artifact| {
+            artifact.findings.is_empty()
+                && artifact
+                    .coverage
+                    .is_some_and(|c| c.analyzed_statements + c.opaque_statements == 0)
+        })
+    }
 }
 
 impl Counts {
@@ -215,13 +237,15 @@ impl Counts {
         coverage: Option<RunCoverage>,
     ) -> String {
         use std::fmt::Write as _;
-        let total = self.deny + self.confirmed + self.warning;
+        // The noun agrees with the number beside it, not with the sum of
+        // three: `2 confirmed, 1 warning findings` and `1 confirmed, 0
+        // warning finding` were both what the total produced.
         let mut line = format!(
             "reconverge: {} deny, {} confirmed, {} warning {}",
             self.deny,
             self.confirmed,
             self.warning,
-            plural(total, "finding", "findings")
+            plural(self.warning, "finding", "findings")
         );
         if self.warning > 0 && !strict {
             let _ = write!(
@@ -329,6 +353,30 @@ mod tests {
                 warning: 1,
                 suppressed: 2
             }
+        );
+    }
+
+    #[test]
+    fn the_noun_agrees_with_the_count_beside_it() {
+        let line = |confirmed, warning| {
+            Counts {
+                confirmed,
+                warning,
+                ..Counts::default()
+            }
+            .summary_line(true, false, None)
+        };
+        assert_eq!(
+            line(2, 1),
+            "reconverge: 0 deny, 2 confirmed, 1 warning finding"
+        );
+        assert_eq!(
+            line(1, 0),
+            "reconverge: 0 deny, 1 confirmed, 0 warning findings"
+        );
+        assert_eq!(
+            line(0, 2),
+            "reconverge: 0 deny, 0 confirmed, 2 warning findings"
         );
     }
 
@@ -441,5 +489,27 @@ mod tests {
         let err = Review::load(Vec::new(), path, true).unwrap_err();
         assert!(err.contains("must say why"), "{err}");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_run_with_no_kernel_is_told_apart_from_a_clean_one() {
+        let coverage = |analyzed| RunCoverage {
+            analyzed_statements: analyzed,
+            opaque_statements: 0,
+            opaque_functions: 0,
+        };
+        let with = |analyzed, findings| {
+            let mut review = review(findings, Vec::new());
+            review.artifacts[0].coverage = Some(coverage(analyzed));
+            review
+        };
+        assert!(with(0, Vec::new()).found_no_kernels());
+        // A clean kernel: statements were read, nothing was found.
+        assert!(!with(12, Vec::new()).found_no_kernels());
+        let finding = finding("RC003", Some("a"), Confidence::Deny);
+        assert!(!with(0, vec![finding]).found_no_kernels());
+        // Written before coverage existed: it cannot say, so it is not
+        // taken as an empty run.
+        assert!(!review(Vec::new(), Vec::new()).found_no_kernels());
     }
 }

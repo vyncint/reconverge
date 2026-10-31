@@ -115,9 +115,20 @@ fn inspector_flow_journey() {
         t.send(Key::Char('n')).expect("send Key::Char('n')");
     }
     let frame = t
-        .wait_frame(|s| s.contains("finding 3/3 [RC001]"))
+        .wait_frame(|s| s.contains("finding 3/3 warning[RC001]"))
         .expect("RC001 finding selected");
     assert_golden("inspect-rc001-80x24.txt", &frame.to_string(), "rc001 jump");
+
+    // f: another function. The bar used to keep naming `divergent_barrier`'s
+    // finding over `scale`'s source.
+    t.send(Key::Char('f')).expect("send Key::Char('f')");
+    let frame = t
+        .wait_frame(|s| s.contains("kernel scale (2/2 functions)"))
+        .expect("switched function");
+    assert!(
+        frame.contains("3 findings loaded") && !frame.contains("divergent_barrier` may"),
+        "the bar must not name the previous function's finding:\n{frame}"
+    );
 
     quit(t, "journey");
 }

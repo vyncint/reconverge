@@ -10,6 +10,8 @@
 //! - `w`: write the baseline
 //! - `q`: quit (one confirmation when there are unsaved edits; `Q`
 //!   discards them)
+//! - Ctrl-C: quit at once, even mid-reason; with unsaved edits it says how
+//!   many it discarded, on stderr, and exits 130
 //! - while editing: type the reason, `Enter` saves, `Esc` cancels
 //!
 //! This is the one view that *writes*. It is still not an analysis: it

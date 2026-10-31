@@ -29,6 +29,7 @@ impl SetupOptions {
         match args.first().map(String::as_str) {
             None => Ok(SetupOptions {}),
             Some(flag) if ArgError::help(flag) => Err(ArgError::Help),
+            Some(flag) if ArgError::version(flag) => Err(ArgError::Version),
             Some(other) => Err(ArgError::unknown(other)),
         }
     }

@@ -137,8 +137,13 @@ allowlist is a list on purpose, so that widening it is a visible decision.
 - Branch from `main`; name branches `feat/…`, `fix/…`, `docs/…`, `ci/…`.
 - PRs are **squash-merged** — keep the PR title in Conventional Commit form,
   since it becomes the commit subject on `main`. Branches are deleted on merge.
-- Required checks: `required-green` (fmt, clippy, test, docs, deny, isolation, conformance, schemas, skill-version, semver, msrv, zizmor, windows, action), plus `commit-policy` (DCO + attribution). All
-  must pass before merge; direct pushes to `main` are blocked by a ruleset.
+- Required check: `required-green`, which is green only when every gate in
+  `ci.yml` is — fmt, clippy, test, docs, deny, isolation, conformance,
+  schemas, macos, windows, skill-version, semver, msrv, zizmor, action
+  (the Action run as a consumer runs it), and
+  `commit-policy` (DCO + attribution), which `ci.yml` calls so that it gates
+  rather than reports. All must pass before merge; direct pushes to `main`
+  are blocked by a ruleset.
 - **A new crate that declares its own `[workspace]` must be added to the
   `fmt` and `clippy` jobs by manifest path, and to `just ci`.** Every gate
   here is workspace-scoped, so a standalone manifest is invisible to all of
