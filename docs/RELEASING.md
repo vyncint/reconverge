@@ -94,12 +94,22 @@ gh workflow run release.yml -f tag=vX.Y.Z -f dry_run=false   # publish
   ```sh
   gh run view --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
   ```
-- **Verify what was published, not what was built:**
+- **Verify what was published, not what was built.** `release.yml`'s
+  `verify-install` job dispatches `install.yml` for the new version; read
+  that run. It installs from crates.io on stable, checks that `cargo
+  reconverge` resolves through PATH — the shape that matters for a cargo
+  subcommand — and then runs the first run a new user would: `setup` into
+  the CLI's own install root, and `check` through cargo on a kernel crate
+  with no toolchain file, which must exit 1 on its RC001. To repeat it by
+  hand:
   ```sh
-  gh workflow run install.yml
+  gh workflow run install.yml -f version=X.Y.Z
   ```
-  It installs from crates.io on stable and checks that `cargo reconverge`
-  resolves through PATH — the shape that matters for a cargo subcommand.
+- **The Action is checked by the next pull request.** CI's `action` job
+  runs `./action` against the published release the tree names, so it
+  reports "not on crates.io yet" on the release PR itself. The
+  semver-baseline PR above is the first to run it against X.Y.Z; read that
+  job, not just the green tick.
 
 ## What a version number means here
 

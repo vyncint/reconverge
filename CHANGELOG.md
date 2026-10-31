@@ -12,6 +12,22 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Added
+
+- **An install is verified again, through the first run, and the Action is
+  run by CI.** `install.yml` had not run since 0.6.1: the release is
+  created with `GITHUB_TOKEN`, whose events start no workflow, so its
+  `release: published` trigger never fired, and its weekly schedule was
+  commented out. `release.yml` now dispatches it after the publish, the
+  schedule is back, and it goes past `--help`: `setup` into the CLI's own
+  install root, then `cargo reconverge check` *through cargo* in a kernel
+  crate with no toolchain file, which must exit 1 on its RC001. Nothing in
+  this repository used `./action` either; a new `action` job in
+  `required-green` runs it on the lint samples (must fail, on an RC001 in
+  its SARIF) and on a clean crate (must pass). action/README.md no longer
+  says "verified end to end" on the strength of a smoke repository that
+  last ran before `v0` existed. (#208)
+
 ### Changed
 
 - **`check`, `inspect` and `learn` look for the driver and the TUI on
