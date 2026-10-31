@@ -106,7 +106,10 @@ pub fn classify_call(def_path: &str) -> CallKind {
         {
             CallKind::ThreadIndexWitness
         }
-        "threadIdx_x" | "threadIdx_y" | "threadIdx_z" | "lane_id" => CallKind::ThreadIndexWitness,
+        // The x axis is named apart: a quotient of it by a whole number of
+        // warps is warp-uniform under some launches (#194).
+        "threadIdx_x" => CallKind::ThreadIndexX { divisor: 1 },
+        "threadIdx_y" | "threadIdx_z" | "lane_id" => CallKind::ThreadIndexWitness,
 
         // Uniform within a block and different in the next one: which
         // block this is. Enough to decide `sync_threads`, not enough to
@@ -282,16 +285,17 @@ pub fn classify_call(def_path: &str) -> CallKind {
             mask: MaskSource::FirstArgument,
         },
 
+        // `warp_id()` is `threadIdx_x() / 32` at the pin, so it is that
+        // quotient: divergent for the block, and warp-uniform exactly when
+        // the declared block lays its warps along x.
+        "warp_id" => CallKind::ThreadIndexX { divisor: 32 },
         // Per-lane and per-warp environment reads: divergent by definition
-        // (the lanemask registers differ on every lane; `warp_id` and
-        // `live_lanes_1d` are warp-uniform, and the lattice does not
-        // distinguish warp- from block-uniformity — same rule as collective
-        // results), but none is a collective: no mask, no synchronization,
-        // legal under divergence. Not replay-evaluable yet: giving the
-        // interpreter their values needs width-typed evaluation (integer
-        // `!`, truncating casts), so guards on them stay warning-tier.
+        // (the lanemask registers differ on every lane; `live_lanes_1d` is
+        // warp-uniform under the same conditions as `warp_id`, which the
+        // lattice is not told), but none is a collective: no mask, no
+        // synchronization, legal under divergence.
         "active_mask" | "lanemask_lt" | "lanemask_le" | "lanemask_eq" | "lanemask_ge"
-        | "lanemask_gt" | "warp_id" | "live_lanes_1d" => CallKind::DivergentEnvRead,
+        | "lanemask_gt" | "live_lanes_1d" => CallKind::DivergentEnvRead,
         // `%warpid`, the hardware warp slot: warp-uniform and, like
         // `warp_id`, not something the lattice separates from thread-level
         // divergence. Not the logical warp index (`warp_id` is), and never
@@ -365,7 +369,13 @@ mod tests {
         );
         assert_eq!(
             classify_call("cuda_device::thread::threadIdx_x"),
-            CallKind::ThreadIndexWitness
+            CallKind::ThreadIndexX { divisor: 1 }
+        );
+        // cuda-device defines `warp_id()` as `threadIdx_x() / 32`; whether
+        // that is warp-uniform is the engine's question, from the block.
+        assert_eq!(
+            classify_call("cuda_device::warp::warp_id"),
+            CallKind::ThreadIndexX { divisor: 32 }
         );
         // The public unreachable!-stub is NOT the rewritten intrinsic; the
         // macro rewrites calls, so treating the stub as Other is safe and
@@ -595,17 +605,16 @@ mod tests {
 
     #[test]
     fn lane_environment_reads_are_divergent_sources() {
-        // The lanemask registers differ on every lane; warp_id and
-        // live_lanes_1d are warp-uniform, which the lattice must treat as
-        // divergent (it does not distinguish warp- from block-uniformity).
-        // None is a collective and none is replay-evaluable yet.
+        // The lanemask registers differ on every lane; live_lanes_1d is
+        // warp-uniform only under some launches, which the lattice must
+        // treat as divergent. None is a collective. (`warp_id` is
+        // `ThreadIndexX`; see `classifies_index_witnesses`.)
         for name in [
             "lanemask_lt",
             "lanemask_le",
             "lanemask_eq",
             "lanemask_ge",
             "lanemask_gt",
-            "warp_id",
             "live_lanes_1d",
         ] {
             assert_eq!(

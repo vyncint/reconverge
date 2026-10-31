@@ -18,7 +18,7 @@
 
 use crate::dialect::CallKind;
 use crate::graph::{self, Cfg};
-use crate::model::{BlockId, FnModel, Local, SpanRef, TermKind};
+use crate::model::{BinOp, BlockId, Eval, FnModel, Local, Operand, SpanRef, TermKind};
 use crate::{LaunchScope, Uniformity};
 
 /// Interprocedural summary bits (docs/ARCHITECTURE.md): whether each function may
@@ -169,6 +169,15 @@ pub struct Analysis {
     pub block_divergent: Vec<bool>,
     /// Per block: the branch that made it divergent-control, when one did.
     pub block_cause: Vec<Option<BranchCause>>,
+    /// Per block: executes under control that may differ between the lanes
+    /// of one warp — the question a warp collective asks, where
+    /// [`block_divergent`](Self::block_divergent) is the one a block barrier
+    /// asks. A block governed only by warp-uniform guards (`warp_id() == 0`
+    /// under a launch that lays warps along x) is divergent for the block
+    /// and convergent for each warp (#194).
+    pub block_warp_divergent: Vec<bool>,
+    /// Per block: the branch that made it warp-divergent, when one did.
+    pub block_warp_cause: Vec<Option<BranchCause>>,
     /// Per block: the narrowest scope any lane-*uniform* branch condition
     /// governing it is constant over, with the branch that supplied it.
     ///
@@ -205,12 +214,22 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
     let mut reasons: Vec<Option<Reason>> = vec![None; f.local_count];
     let mut block_divergent = vec![false; n];
     let mut block_cause: Vec<Option<BranchCause>> = vec![None; n];
+    let mut block_warp_divergent = vec![false; n];
+    let mut block_warp_cause: Vec<Option<BranchCause>> = vec![None; n];
     let mut block_guard_scope: Vec<Option<(LaunchScope, BranchCause)>> = vec![None; n];
+    // Per block: the narrowest scope of any *divergent* branch condition
+    // governing it. A value written there is constant over no more than
+    // that — the lanes that did not take the branch kept another value —
+    // which is the scope half of the lane lattice's control-dependence
+    // rule. Without it, `if lane < 16 { w = 5 }` would leave a `warp_id()`
+    // in `w` looking warp-uniform.
+    let mut block_ctrl_scope = vec![LaunchScope::Grid; n];
+    let x_quotients = x_quotients(f);
 
     let irreducible = !graph::is_reducible(&cfg, 0, &idom);
     if irreducible {
         // §5: degrade to all-divergent in this function and say so.
-        local_scopes.fill(LaunchScope::Block);
+        local_scopes.fill(LaunchScope::Thread);
         for (local, slot) in locals.iter_mut().enumerate() {
             *slot = Uniformity::Divergent;
             reasons[local] = Some(Reason {
@@ -221,6 +240,7 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
             });
         }
         block_divergent.copy_from_slice(&reachable);
+        block_warp_divergent.copy_from_slice(&reachable);
     }
 
     // Only genuine returns anchor reconvergence; aborting dead-ends
@@ -258,7 +278,12 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
             for stmt in &f.blocks[b].stmts {
                 let Some(dest) = stmt.dest else { continue };
                 if stmt.opaque {
-                    // Opaque code (inline asm outputs): conservative source.
+                    // Opaque code (inline asm outputs): conservative source,
+                    // on both axes.
+                    if local_scopes[dest] > LaunchScope::Thread {
+                        local_scopes[dest] = LaunchScope::Thread;
+                        changed = true;
+                    }
                     changed |= raise(
                         &mut locals,
                         &mut reasons,
@@ -275,11 +300,19 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 }
                 // Scope travels with the value: a result is constant only
                 // where every input is. Runs for every statement, including
-                // the ones the lane lattice leaves alone.
-                let stmt_scope = stmt
-                    .uses
-                    .iter()
-                    .fold(LaunchScope::Grid, |acc, &u| acc.meet(local_scopes[u]));
+                // the ones the lane lattice leaves alone. The one exception
+                // widens rather than narrows: `threadIdx.x / 32k` is
+                // constant across each warp although `threadIdx.x` is not.
+                let operand_scope = match stmt.eval.and_then(|e| x_quotient_of(e, &x_quotients)) {
+                    Some(divisor) if warps_lie_along_x(f.declared_block, divisor) => {
+                        LaunchScope::Warp
+                    }
+                    _ => stmt
+                        .uses
+                        .iter()
+                        .fold(LaunchScope::Grid, |acc, &u| acc.meet(local_scopes[u])),
+                };
+                let stmt_scope = operand_scope.meet(block_ctrl_scope[b]);
                 if stmt_scope < local_scopes[dest] {
                     local_scopes[dest] = stmt_scope;
                     changed = true;
@@ -324,10 +357,19 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 } => {
                     {
                         let dest = *dest;
+                        let own_scope = match callee.kind {
+                            CallKind::ThreadIndexX { divisor }
+                                if warps_lie_along_x(f.declared_block, divisor) =>
+                            {
+                                LaunchScope::Warp
+                            }
+                            kind => kind.result_scope().unwrap_or(LaunchScope::Grid),
+                        };
                         let call_scope = args
                             .iter()
                             .fold(LaunchScope::Grid, |acc, &a| acc.meet(local_scopes[a]))
-                            .meet(callee.kind.result_scope().unwrap_or(LaunchScope::Grid));
+                            .meet(own_scope)
+                            .meet(block_ctrl_scope[b]);
                         if call_scope < local_scopes[dest] {
                             local_scopes[dest] = call_scope;
                             changed = true;
@@ -391,8 +433,8 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 TermKind::Opaque {
                     dest: Some(dest), ..
                 } => {
-                    if local_scopes[*dest] > LaunchScope::Block {
-                        local_scopes[*dest] = LaunchScope::Block;
+                    if local_scopes[*dest] > LaunchScope::Thread {
+                        local_scopes[*dest] = LaunchScope::Thread;
                         changed = true;
                     }
                     changed |= raise(
@@ -447,13 +489,31 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                         cond: *cond,
                         span: f.blocks[b].term.span,
                     };
+                    let scope = local_scopes[*cond];
+                    // Every way a value turns lane-divergent also narrows
+                    // its scope to at most `Warp`, before the raise. If that
+                    // ever stops holding, a lane-divergent guard would read
+                    // as warp-uniform and quiet an RC002.
+                    debug_assert!(scope <= LaunchScope::Warp, "divergent _{cond} at {scope:?}");
                     for (r, in_region) in graph::divergence_region(&cfg, b, ipdom[b])
                         .into_iter()
                         .enumerate()
                     {
-                        if in_region && !block_divergent[r] {
+                        if !in_region {
+                            continue;
+                        }
+                        if !block_divergent[r] {
                             block_divergent[r] = true;
                             block_cause[r] = Some(cause);
+                            changed = true;
+                        }
+                        if scope < block_ctrl_scope[r] {
+                            block_ctrl_scope[r] = scope;
+                            changed = true;
+                        }
+                        if scope < LaunchScope::Warp && !block_warp_divergent[r] {
+                            block_warp_divergent[r] = true;
+                            block_warp_cause[r] = Some(cause);
                             changed = true;
                         }
                     }
@@ -542,6 +602,13 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
                 .map(|_| true),
         };
         if let Some(interprocedural) = warp {
+            // A collective's participants are one warp, so only control
+            // that can split a warp makes it non-convergent.
+            let divergent_cause = if block_warp_divergent[b] {
+                block_warp_cause[b]
+            } else {
+                None
+            };
             warp_ops.push(WarpOpSite {
                 block: b,
                 span: f.blocks[b].term.span,
@@ -573,6 +640,8 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
         reasons,
         block_divergent,
         block_cause,
+        block_warp_divergent,
+        block_warp_cause,
         block_guard_scope,
         irreducible,
         analyzed_statements: analyzed,
@@ -582,9 +651,109 @@ pub fn analyze(f: &FnModel, summaries: &Summaries) -> Analysis {
     }
 }
 
+/// Does `threadIdx.x / divisor` read the same on every lane of a warp under
+/// the declared block?
+///
+/// Warps are formed from the linear thread index, x fastest. In a 1-D block
+/// that index *is* `x`, so a quotient by a whole number of warps is a warp
+/// number. In a row that is a whole number of warps wide, every warp sits in
+/// one row on an aligned run of `x`. In a row no wider than the divisor the
+/// quotient is 0 everywhere. Anything else — `(48, 2, 1)` puts `x` 32..47
+/// and 0..15 in one warp — is not, and neither is an undeclared block,
+/// which could be any of these.
+fn warps_lie_along_x(block: Option<[u32; 3]>, divisor: u32) -> bool {
+    let Some([x, y, z]) = block else {
+        return false;
+    };
+    divisor != 0
+        && divisor.is_multiple_of(32)
+        && ((y == 1 && z == 1) || x.is_multiple_of(32) || x <= divisor)
+}
+
+/// Per local: `Some(d)` when it holds exactly `threadIdx.x / d`.
+///
+/// Must-information, so only locals with a single definition qualify — a
+/// `let mut w = warp_id()` reassigned on one path holds something else on
+/// that path. Arguments are defined by the caller and never qualify.
+fn x_quotients(f: &FnModel) -> Vec<Option<u32>> {
+    let mut defs = vec![0usize; f.local_count];
+    for d in defs.iter_mut().skip(1).take(f.arg_count) {
+        *d += 1;
+    }
+    for block in &f.blocks {
+        for dest in block.stmts.iter().filter_map(|s| s.dest) {
+            defs[dest] += 1;
+        }
+        if let TermKind::Call { dest: Some(d), .. } | TermKind::Opaque { dest: Some(d), .. } =
+            &block.term.kind
+        {
+            defs[*d] += 1;
+        }
+    }
+    let mut quotients = vec![None; f.local_count];
+    // Chains are short and acyclic in practice; one pass per local bounds it.
+    for _ in 0..f.local_count.max(1) {
+        let mut changed = false;
+        for block in &f.blocks {
+            for stmt in &block.stmts {
+                let (Some(dest), Some(eval)) = (stmt.dest, stmt.eval) else {
+                    continue;
+                };
+                if defs[dest] == 1
+                    && quotients[dest].is_none()
+                    && let Some(d) = x_quotient_of(eval, &quotients)
+                {
+                    quotients[dest] = Some(d);
+                    changed = true;
+                }
+            }
+            if let TermKind::Call {
+                callee,
+                dest: Some(dest),
+                ..
+            } = &block.term.kind
+                && let CallKind::ThreadIndexX { divisor } = callee.kind
+                && defs[*dest] == 1
+                && quotients[*dest].is_none()
+            {
+                quotients[*dest] = Some(divisor);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    quotients
+}
+
+/// The divisor `d` such that `eval` computes `threadIdx.x / d`, given which
+/// locals already hold such a quotient: a copy, a cast that cannot truncate
+/// it, or an unsigned division or right shift by a constant.
+fn x_quotient_of(eval: Eval, quotients: &[Option<u32>]) -> Option<u32> {
+    let of = |operand: Operand| match operand {
+        Operand::Local(l) => quotients[l],
+        Operand::Const(_) => None,
+    };
+    match eval {
+        Eval::Use(a) => of(a),
+        // `threadIdx.x` is below 1024, so 32 bits hold any quotient of it.
+        Eval::Cast(a, bits) if bits >= 32 => of(a),
+        Eval::Binary(BinOp::Div, a, Operand::Const(c), ty) if !ty.signed && c > 0 => {
+            of(a)?.checked_mul(u32::try_from(c).ok()?)
+        }
+        Eval::Binary(BinOp::Shr, a, Operand::Const(k), ty) if !ty.signed && k < 32 => {
+            of(a)?.checked_mul(1u32.checked_shl(u32::try_from(k).ok()?)?)
+        }
+        _ => None,
+    }
+}
+
 fn source_detail(kind: CallKind, display: &str) -> String {
     match kind {
-        CallKind::ThreadIndexWitness => format!("thread-index witness `{display}()`"),
+        CallKind::ThreadIndexWitness | CallKind::ThreadIndexX { .. } => {
+            format!("thread-index witness `{display}()`")
+        }
         CallKind::AtomicRmw => format!("atomic return value of `{display}()`"),
         CallKind::WarpCollective { .. } => {
             format!("warp-collective result of `{display}()`")

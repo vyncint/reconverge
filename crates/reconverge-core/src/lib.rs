@@ -50,8 +50,22 @@ pub enum Uniformity {
 /// Ordered narrow to wide. A guard admits a barrier when the guard's scope
 /// is at least the barrier's: a `Grid`-scoped value is constant everywhere
 /// and guards anything, a `Block`-scoped one guards only a block barrier.
+///
+/// The two narrowest levels answer the same question one level down, for a
+/// warp collective: its participants are the lanes of one warp, so a guard
+/// that is constant across each warp — `warp_id() == 0` — lets every lane of
+/// a warp take the same side, and a full-mask collective under it is fine
+/// (#194). The lane lattice still calls such a value divergent, which is
+/// right for `sync_threads`: whole warps skipping a block barrier is the
+/// hang.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LaunchScope {
+    /// May differ between the lanes of one warp: a thread index, a lane
+    /// mask, an atomic's return value, opaque code.
+    Thread,
+    /// Constant across the lanes of each warp; may differ between the
+    /// warps of a block.
+    Warp,
     /// Constant within one block; may differ between blocks.
     Block,
     /// Constant within one cluster; may differ between clusters.
@@ -76,10 +90,13 @@ impl LaunchScope {
         self >= barrier
     }
 
-    /// The word to use in a diagnostic: "block", "cluster", "grid".
+    /// The word to use in a diagnostic: "thread", "warp", "block",
+    /// "cluster", "grid".
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Thread => "thread",
+            Self::Warp => "warp",
             Self::Block => "block",
             Self::Cluster => "cluster",
             Self::Grid => "grid",

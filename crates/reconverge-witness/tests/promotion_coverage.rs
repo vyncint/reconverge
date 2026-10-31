@@ -13,7 +13,7 @@
 //! never reach the later site, so a witness there would be fabricated.
 use reconverge_core::dialect::CallKind;
 use reconverge_core::model::{
-    BinOp, Block, Callee, Eval, FnModel, Local, Operand, Stmt, Term, TermKind,
+    BinOp, Block, Callee, Eval, FnModel, IntType, Local, Operand, Stmt, Term, TermKind,
 };
 use reconverge_witness::{SiteKind, replay_hang};
 
@@ -92,7 +92,12 @@ fn two_sites(first_lane_env: bool, second_lane_env: bool) -> (FnModel, usize, us
                 stmts: vec![stmt_eval(
                     c,
                     &[v],
-                    Eval::Binary(BinOp::BitAnd, Operand::Local(v), Operand::Const(1)),
+                    Eval::Binary(
+                        BinOp::BitAnd,
+                        Operand::Local(v),
+                        Operand::Const(1),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: c,
@@ -115,7 +120,12 @@ fn two_sites(first_lane_env: bool, second_lane_env: bool) -> (FnModel, usize, us
                 stmts: vec![stmt_eval(
                     c,
                     &[v],
-                    Eval::Binary(BinOp::Rem, Operand::Local(v), Operand::Const(2)),
+                    Eval::Binary(
+                        BinOp::Rem,
+                        Operand::Local(v),
+                        Operand::Const(2),
+                        IntType::unsigned(32),
+                    ),
                 )],
                 term: term(TermKind::Branch {
                     cond: c,
@@ -180,7 +190,12 @@ fn unevaluable_then_provable(barrier_inside: bool) -> (FnModel, usize) {
             stmts: vec![stmt_eval(
                 3,
                 &[2],
-                Eval::Binary(BinOp::BitAnd, Operand::Local(2), Operand::Const(1)),
+                Eval::Binary(
+                    BinOp::BitAnd,
+                    Operand::Local(2),
+                    Operand::Const(1),
+                    IntType::unsigned(32),
+                ),
             )],
             term: term(TermKind::Branch {
                 cond: 3,
@@ -214,7 +229,12 @@ fn unevaluable_then_provable(barrier_inside: bool) -> (FnModel, usize) {
         stmts: vec![stmt_eval(
             5,
             &[4],
-            Eval::Binary(BinOp::Rem, Operand::Local(4), Operand::Const(2)),
+            Eval::Binary(
+                BinOp::Rem,
+                Operand::Local(4),
+                Operand::Const(2),
+                IntType::unsigned(32),
+            ),
         )],
         term: term(TermKind::Branch {
             cond: 5,
@@ -304,7 +324,12 @@ fn earlier_barriers_that_deadlock_the_block_stop_a_later_site() {
             stmts: vec![stmt_eval(
                 c,
                 &[v],
-                Eval::Binary(BinOp::Rem, Operand::Local(v), Operand::Const(2)),
+                Eval::Binary(
+                    BinOp::Rem,
+                    Operand::Local(v),
+                    Operand::Const(2),
+                    IntType::unsigned(32),
+                ),
             )],
             term: term(TermKind::Branch {
                 cond: c,
