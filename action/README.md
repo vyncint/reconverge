@@ -4,7 +4,8 @@ Runs `cargo reconverge check` on a repository: exit 0 when clean, and the
 job fails when any deny/confirmed finding exists — divergent barriers
 (RC001), non-convergent warp collectives (RC002), `&mut [T]` kernel
 parameters (RC003), shared-memory over-budget (RC004). No GPU and no vendor
-SDK anywhere in the run.
+SDK anywhere in the analysis — though a crate that links the CUDA host API
+needs the toolkit to build at all (see the notes below).
 
 ```yaml
 jobs:
@@ -18,8 +19,10 @@ jobs:
 ```
 
 Inputs: `working-directory` (default `.`), `cc`, `strict`
-(`"true"` shows warning-tier findings; they never gate), and `sarif` — a
-path to also write a SARIF 2.1.0 report, for upload with
+(`"true"` shows warning-tier findings; they never gate), `args` — any
+further `check` arguments, split on whitespace, such as
+`--package my-kernels` or `--require-kernels` — and `sarif`, a path to also
+write a SARIF 2.1.0 report, for upload with
 `github/codeql-action/upload-sarif`:
 
 ```yaml
@@ -42,6 +45,22 @@ land on the file that has the finding.
 
 Notes:
 
+- A run that finds no `#[kernel]` at all passes, with a `::warning::` on
+  the run's summary page saying nothing was analyzed — the usual causes are
+  a wrong `working-directory`, a crate without the cuda-oxide dependency,
+  or kernels behind a disabled cfg. `args: --require-kernels` fails the job
+  instead.
+- `check` builds what it analyzes, build scripts included. A single-source
+  crate that links the CUDA host API (`cuda-host`, `cuda-core`) runs
+  `cuda-bindings`' build script, which needs the CUDA toolkit — no GPU, but
+  the toolkit's headers — and fails without it. Install the toolkit in an
+  earlier step, or check only the device crate:
+
+  ```yaml
+      - uses: vyncint/reconverge/action@v0
+        with:
+          args: --package my-kernels
+  ```
 - The project is compiled with reconverge's pinned nightly (the action
   exports `RUSTUP_TOOLCHAIN`, overriding any toolchain file in your repo) —
   a rustc-driver tool must match the rustc it wraps. That pin is the

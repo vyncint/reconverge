@@ -14,6 +14,16 @@ the corpus; found-in-the-wild is the true north.
 
 ### Added
 
+- **`check --package <name>` and `--exclude <name>`**, both repeatable, and
+  an `args` input on the Action to pass them. Upstream's single-source
+  layout links the CUDA host API, whose `cuda-bindings` build script needs
+  the CUDA toolkit; a workspace can now check the crate that holds the
+  kernels and leave the host crate out. Both READMEs say so, and a name
+  that is not a workspace member is refused before anything is built.
+  (#197)
+- **`check --require-kernels`** exits 2 when no `#[kernel]` was analyzed,
+  for a CI gate that must not pass on an empty run. (#196)
+
 - **`--cc` takes the arch spellings cuda-oxide itself uses.** `sm_90a`,
   `sm_100f`, `sm_120a`, `compute_86` and `9.0a` were all refused, while
   cargo-oxide's `--arch` is spelled that way throughout and the README said
@@ -39,6 +49,23 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
+- **A run that analyzed no `#[kernel]` says so**:
+  `reconverge: no #[kernel] functions found in 1 crate — nothing was
+  analyzed`, still exit 0, and the Action raises a `::warning::` for it. A
+  wrong `working-directory`, a crate without the cuda-oxide dependency, or
+  kernels behind a disabled cfg used to print the exact summary of a clean
+  pass. (#196)
+- **`check` names the layer that failed.** A build script that failed (the
+  CUDA toolkit missing, typically), a driver that cannot start under the
+  toolchain, and ordinary compile errors used to share one message that
+  blamed the toolchain and recommended `setup`. cargo's own diagnostics now
+  pass through `check` rather than straight to the terminal, coloured when
+  stderr is one; cargo's progress bar is not shown. (#197)
+- **`witness` after a check that confirmed nothing exits 0**, saying there
+  is nothing to replay, instead of exit 2 and "run `cargo reconverge check`
+  first" right after one had run. A project where `check` has never run is
+  still exit 2. (#201)
+
 - **SARIF locations are relative to the repository root, and say so.** Each
   `uri` was relative to the Cargo workspace root with no base, and GitHub
   reads a relative URI from the repository root, so a workspace in a
@@ -54,6 +81,13 @@ the corpus; found-in-the-wild is the true north.
   with `cannot write SARIF to : …`; `--baseline -h` read a baseline named
   `-h`, and `--sarif -x` wrote a report named `-x`. A path that begins with
   `-` is still accepted inline: `--sarif=-x`. (#199)
+
+- **`required-green` now waits for the macOS job and for `commit-policy`**
+  (#209). It is the ruleset's only required context, and neither fed it: a
+  red macOS PTY run did not block a merge while the README called the views
+  gated on macOS, and PR #84 merged with the DCO/attribution gate red.
+  `ci.yml` calls `commit-policy.yml` as a reusable workflow, which keeps its
+  own triggers and is the one that posts the PR comment.
 
 - **`reconverge-tui` refuses an unknown option** with exit 2 and the usage,
   instead of opening it as an artifact path — a misspelt `--asci` surfaced
@@ -82,14 +116,16 @@ the corpus; found-in-the-wild is the true north.
   page that still runs out of rows ends in `… more below: enlarge the
   terminal`. Where the authored breaks fit they are kept (#206).
 
-- **`required-green` now waits for the macOS job and for `commit-policy`**
-  (#209). It is the ruleset's only required context, and neither fed it: a
-  red macOS PTY run did not block a merge while the README called the views
-  gated on macOS, and PR #84 merged with the DCO/attribution gate red.
-  `ci.yml` calls `commit-policy.yml` as a reusable workflow, which keeps its
-  own triggers and is the one that posts the PR comment.
-
 ### Breaking
+
+- **The wrapped build always uses the pin; to run a driver built against
+  another toolchain, set `RECONVERGE_TOOLCHAIN`.** `RUSTUP_TOOLCHAIN` is no
+  longer consulted. rustup's `cargo` proxy exports it to every subcommand,
+  set to the toolchain it resolved for the project, so honouring it as "an
+  explicit choice" made a bare `cargo reconverge check` — the command the
+  README shows — load the driver against `stable` and exit 2 in any project
+  without the pin, with advice to run a `setup` that could not help. The
+  wrapped build now runs the pinned toolchain's own `cargo` as well. (#186)
 
 - **Action: a relative `sarif` path is written under the repository root**
   (`$GITHUB_WORKSPACE`), not under `working-directory`, so the
@@ -98,6 +134,40 @@ the corpus; found-in-the-wild is the true north.
   `<working-directory>/reconverge.sarif` must drop the prefix. (#198)
 
 ### Fixed
+
+- **Findings are keyed by target, not by package.** The driver names an
+  artifact after the target's crate name, and `check`, `inspect`, `witness`
+  and `triage` all filtered on the package's: a confirmed RC001 in a
+  `[[bin]]` (upstream's `atomic_f16` and `hashmap_v2` layout) was left out of
+  the report and exited 0; a renamed `[lib]` or a bin-only package exited 2
+  on every run as "not analyzed", having been analyzed twice; and a renamed
+  library with its old artifact present was reported from the old, clean
+  document. The set `check` gates on now comes from cargo's own build
+  messages — exactly the targets this run compiled — and the readers match
+  file names exactly against the workspace's lib and bin targets. (#187)
+- **A deleted or renamed target's artifacts are pruned.** Nothing ever
+  removed them, so a confirmed RC001 in a deleted `src/main.rs` went on
+  failing every run, pointing at a file that no longer existed, until
+  `target/reconverge` was deleted by hand. (#187)
+- **A truncated findings artifact heals instead of failing every run.** A
+  killed driver or a full disk left half a document; the build was fresh,
+  so nothing rewrote it, and every later run exited 2 with a serde error and
+  no hint. An unreadable artifact now gets one forced re-lint, like a
+  missing one, and if it is still unreadable the error names the directory
+  to delete. (#195)
+- **A newer schema is reported as one.** `deserialize_checked` parsed the
+  typed document before comparing `schema`, so a `findings.v2` from a newer
+  driver read as ``missing field `confidence` at line 1 column 1742`` — damage,
+  not a version. The tag is read first now, and `check` adds the `setup`
+  hint. (#195)
+- **Changing `--cc` re-lints the workspace members only.** Every unit's
+  fingerprint was dropped, so `--cc 8.6` followed by `--cc 9.0` recompiled
+  `syn`, `quote` and the rest of the dependency tree to re-lint one crate.
+  (#202)
+- **Outside a project, `check` says `error:` once.** cargo's own message was
+  nested under ours — `error: cargo metadata failed:`, then
+  ``error: could not find `Cargo.toml` …`` — and a trailing blank line.
+  (#199)
 
 - **`--explain`, `--help` and `--version` no longer panic into a closed
   pipe.** `cargo reconverge --explain RC001 | head -3` exited 101 with
@@ -109,20 +179,6 @@ the corpus; found-in-the-wild is the true north.
 - **The stale-baseline note quotes its entry once**: ``baseline entry
   sample_kernels RC001 in `gone` no longer matches``, where the whole label
   used to be wrapped in a second pair of backticks. (#199)
-
-- **Killing a TUI view with SIGTERM, SIGHUP or SIGQUIT left the terminal
-  raw**, on the alternate screen, with the cursor hidden: `q`, Ctrl-C and a
-  panic restored it, and the signals a `timeout`, `tmux kill-pane` or a
-  parent shutting down send did not. A signal thread now runs the same
-  restore and re-raises the signal with its default action, so the shell
-  still reports a death by that signal (#205).
-- **After `f`, the Inspector's bottom line kept naming the previous
-  function's finding** over the new function's source. Switching function
-  now drops a finding that is about another kernel (#206).
-- **At 80x24 the `barriers` and `reconvergence` lessons cut the last line of
-  their kernel excerpt**, one row short of room — in `reconvergence`, the
-  `sync_threads()` the page is about. The replay's separating blank gives
-  way first now (#206).
 
 - **`pins.yml` sees upstream's monorepo** (#207). Upstream moved its device
   crate to `cuda-oxide/crates/cuda-device` and its device toolchain beside
@@ -144,6 +200,20 @@ the corpus; found-in-the-wild is the true north.
   when the dispatched tag is older than the release it points at. And the
   `simt-diff` dispatch no longer exits on a failing `gh` before its warning
   is printed — `bash -e` ended the step at the assignment.
+
+- **Killing a TUI view with SIGTERM, SIGHUP or SIGQUIT left the terminal
+  raw**, on the alternate screen, with the cursor hidden: `q`, Ctrl-C and a
+  panic restored it, and the signals a `timeout`, `tmux kill-pane` or a
+  parent shutting down send did not. A signal thread now runs the same
+  restore and re-raises the signal with its default action, so the shell
+  still reports a death by that signal (#205).
+- **After `f`, the Inspector's bottom line kept naming the previous
+  function's finding** over the new function's source. Switching function
+  now drops a finding that is about another kernel (#206).
+- **At 80x24 the `barriers` and `reconvergence` lessons cut the last line of
+  their kernel excerpt**, one row short of room — in `reconvergence`, the
+  `sync_threads()` the page is about. The replay's separating blank gives
+  way first now (#206).
 
 ### Documentation
 

@@ -81,6 +81,12 @@ check options:
                               path that begins with `-`
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
+  -p, --package <NAME>        check only this workspace member
+                              (repeatable)
+  --exclude <NAME>            check every member but this one
+                              (repeatable; not with --package)
+  --require-kernels           exit 2 when no #[kernel] was analyzed,
+                              instead of passing with a note
   Note: --strict and --show-suppressed affect text output only;
         JSON is always the unfiltered record
 
@@ -93,6 +99,10 @@ Environment:
                               the one installed beside cargo-reconverge)
   RECONVERGE_TUI              the reconverge-tui binary that inspect,
                               witness, learn and triage open (same default)
+  RECONVERGE_TOOLCHAIN        the toolchain `check` builds under (default:
+                              the pinned nightly, whatever rustup chose
+                              for the project); only for a driver built
+                              by another toolchain
 ";
 
 fn main() -> ExitCode {

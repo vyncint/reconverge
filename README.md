@@ -143,7 +143,9 @@ flowchart TB
 Nothing on that path touches a GPU vendor SDK. The analysis reads *your* Rust
 through the compiler's own intermediate form, and the warp rules it checks
 against come from public documentation. That is why it runs anywhere: in CI,
-on a laptop, in a container, with no driver installed.
+on a laptop, in a container, with no driver installed. (Your crate still has
+to build: one that links the CUDA host API needs the toolkit's headers for
+that — see [Using it](#using-it).)
 
 ## What it catches
 
@@ -307,12 +309,32 @@ $ cargo reconverge check --cc 8.6              # target capacity context for RC0
 $ cargo reconverge check --cc sm_90a           # the CUDA spellings work: sm_86, compute_86, 86, sm_90a
 $ cargo reconverge check --sarif out.sarif     # SARIF 2.1.0 for code scanning
 $ cargo reconverge check --message-format json # one findings.v1 document per target
+$ cargo reconverge check --package my-kernels  # only this member (repeatable); --exclude for the rest
+$ cargo reconverge check --require-kernels     # exit 2 when no #[kernel] was analyzed
 $ cargo reconverge watch                       # re-run on every save
 $ cargo reconverge --explain RC002             # why it is a bug, and the idiomatic fix
 ```
 
 Exit codes: `0` clean, `1` findings at deny/confirmed confidence, `2` tool
-error. In CI, the [GitHub Action](action/README.md) is three lines:
+error. Every lib and bin target of the workspace is analyzed and gated, under
+the target's own crate name, so kernels in `src/bin/*.rs` count too. A run
+that found no `#[kernel]` at all still exits `0`, but says so —
+`no #[kernel] functions found in 1 crate — nothing was analyzed` — rather
+than reading like a clean pass; `--require-kernels` makes it a failure.
+
+The build always runs under the pinned nightly, whatever toolchain rustup
+picked for your project; set `RECONVERGE_TOOLCHAIN` only for a driver you
+built with another one (`RECONVERGE_DRIVER`).
+
+**No GPU is needed, but the build has to succeed.** `check` builds the crates
+it analyzes the way `cargo check` does, build scripts included. A
+single-source crate that links the CUDA host API (`cuda-host`, `cuda-core`)
+runs `cuda-bindings`' build script, which needs the CUDA toolkit's headers —
+not a GPU, not a driver, but the toolkit. Either install the toolkit where
+`check` runs, or keep the kernels in a device-only crate and check that one:
+`cargo reconverge check --package my-kernels`.
+
+In CI, the [GitHub Action](action/README.md) is three lines:
 
 ```yaml
 - uses: actions/checkout@v7
@@ -516,7 +538,9 @@ one that does less.
   with what moved — the commit, the toolchain governing upstream's device
   crate, or a device-surface function this dialect has not decided.
 - **Platforms: Linux, macOS and Windows, all gated in CI.** Nothing here
-  needs a GPU or a vendor SDK on any of them, and the analysis, `check`, the
+  needs a GPU or a vendor SDK on any of them (a crate that links the CUDA
+  host API needs the toolkit to build at all; see
+  [Using it](#using-it)), and the analysis, `check`, the
   artifact round-trip, the schemas and the CLI contract are tested on all
   three. **The four terminal views are gated on Linux and macOS only.** They
   are believed to work on Windows and are not held to it: under ConPTY the
