@@ -12,6 +12,79 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Breaking
+
+- `reconverge-core`: the model and the summaries gain what crossing a
+  function boundary needs (#188, #189). `TermKind::Call` gains `arg_uses`
+  (the locals each argument reads, by position) and `Callee` gains
+  `may_call` (local closures and functions a library call is handed);
+  `Summaries` gains `returns_divergent` and `return_scope`; `ReasonKind`
+  gains `Parameter` and `Returned`; `inline::Inlined` gains `origins`. New
+  API beside them: `analysis::analyze_with` and `ParamSeed`, the
+  `interproc` module, and `inline::inline_all`. A hand-built model that
+  leaves `arg_uses` empty still analyzes, with every parameter joined over
+  all of the call's arguments.
+
+### Fixed
+
+- **A divergent barrier or collective inside a helper is reported** (#188).
+  Divergence used to stop at every function boundary: only kernels were
+  analyzed, a helper's parameters started uniform, and a call's result was
+  uniform whenever its arguments were. `if threadIdx_x() == 0 {
+  sync_threads() }` one call away, a barrier guarded by a parameter the
+  kernel passes a thread index, a vote under `lane < 16` in a helper given
+  `lane_id()`, a branch on upstream's own `get_global_thread_id()`, and
+  `grid::sync()` under a helper returning `blockIdx` — each printed `0 deny,
+  0 confirmed, 0 warning findings`, `--strict` included, while the same
+  kernel with the read inlined was `confirmed`.
+
+  Every local function a kernel reaches is now analyzed, with its
+  parameters joined over the calls to it *from that kernel*, and a
+  function's return value is summarized and added to the call's result. A
+  site inside a helper is reported against each kernel that reaches it
+  ("…, inside `leader_sync`"), with a provenance chain that crosses the
+  parameter or the return value back to the source. Such a finding is
+  `warning` until the witness replays it, and the replay splices the helper
+  into the kernel and runs the actual calls — four of the five shapes above
+  are `confirmed` that way; the block-scoped one is a cross-block finding,
+  which never promotes.
+- **Trait methods, generic functions and closures resolve to the body they
+  run** (#189). A call was looked up by its definition path, which for a
+  trait method names the trait (`Stage::run`), for a closure names
+  `Fn::call`, and for a function pointer names nothing — none resolved, and
+  each was treated as barrier-free. Helpers are now modeled per instance and
+  calls resolved through `Instance::resolve`, so `t.run()` and
+  `generic_stage(&t)` under a divergent guard are `confirmed`, and
+  `(0..2).for_each(|_| sync_threads())` is a `warning` (nothing says how
+  often `for_each` runs the closure).
+- **RC004 counts shared statics declared in helpers** (#193). It read the
+  kernel's own body only, so 64 KiB of `SharedArray` in a function the
+  kernel called came back clean and failed later in ptxas. It now walks the
+  kernel's call graph, counting each static once however many helpers
+  reach it.
+
+### Changed
+
+- **A call the analysis cannot follow is opaque, not barrier-free** (#189).
+  A function pointer, a `dyn` method, a trait method on a generic kernel's
+  type parameter, an `extern` device function, and a function in another
+  crate of the workspace — each crate is compiled, and analyzed, on its
+  own — are counted in `coverage`, so the summary line says `… opaque in N
+  functions` where it used to say nothing, and their results are divergent
+  rather than guessed. Calls into the standard library and `cuda_device`
+  are unchanged.
+- **Coverage includes the helpers a kernel reaches.** The per-finding
+  `coverage:` note sums the kernel and every function it calls, and the
+  run-level tally counts each reached function once.
+- **A replay declines rather than step over a call that may synchronize.**
+  The witness interpreter used to step over any call it was not inside,
+  including a helper holding a barrier, and count the lanes that took it as
+  never arriving or as passing freely. A lane that reaches such a call now
+  declines the replay unless the bounded inliner spliced the helper in, and
+  a recursive call that can reach the site's own barrier again counts as
+  reaching it. Nothing in the conformance corpus or the mutation table
+  moved.
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G

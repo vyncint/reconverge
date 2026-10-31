@@ -8,8 +8,10 @@ at the same program point, and *divergent* otherwise. The engine computes
 that per value (lattice `Uniform ⊑ Divergent`, optimistic fixpoint),
 marks the region between a divergent branch and its post-dominator as
 divergent control, records a provenance chain from every divergent value
-back to its source, and carries per-function summary bits for
-interprocedural barrier and collective reporting. Degrades declare
+back to its source, and carries divergence across function boundaries:
+per-function summaries (may it synchronize, is its return value divergent)
+and, per kernel, every helper analyzed with the arguments that kernel
+passes it. Degrades declare
 themselves: irreducible control flow becomes all-divergent *and says so*,
 and opaque statements are counted as coverage.
 
