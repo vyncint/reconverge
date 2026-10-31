@@ -358,10 +358,15 @@ fn render_finding_bar(frame: &mut Frame<'_>, view: &InspectorView<'_>, area: Rec
     let text = match view.state.finding {
         Some(index) => {
             let finding = &view.data.findings[index];
+            // The tier, spelt as `check` prints it: of the 39 findings a
+            // lint-samples run loads here, 25 are warnings that `check`
+            // hides by default, and without the word a hidden warning read
+            // exactly like a gating deny.
             format!(
-                "finding {}/{} [{}] {}",
+                "finding {}/{} {}[{}] {}",
                 index + 1,
                 view.data.findings.len(),
+                crate::triage::view::tier(finding.confidence),
                 finding.code,
                 finding.message
             )

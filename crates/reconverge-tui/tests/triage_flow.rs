@@ -231,6 +231,55 @@ fn force_quit_discards_without_writing() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// Ctrl-C is the exit that always works, so it cannot ask first the way `q`
+/// does — and it used to exit 0 having dropped the edits without a word. It
+/// still leaves at once, then says on stderr what it threw away and exits
+/// 130, the shell's code for an interrupted command.
+#[test]
+fn ctrl_c_with_unsaved_edits_says_what_it_discarded() {
+    let dir = scratch("ctrl-c");
+    let baseline = dir.join("reconverge-baseline.json");
+    let mut t = spawn((80, 24), &[], &[], &baseline);
+    t.wait_until(|s| s.contains("reconverge triage"))
+        .expect("initial frame");
+
+    t.send(Key::Char('s')).expect("send Key::Char('s')");
+    t.wait_until(|s| s.contains("why is this acceptable?"))
+        .expect("reason editor");
+    type_text(&mut t, "reviewed");
+    t.send(Key::Enter).expect("send Key::Enter");
+    t.wait_until(|s| s.contains("(unsaved)")).expect("edited");
+
+    t.send(Key::Ctrl('c')).expect("send Key::Ctrl('c')");
+    // After teardown, so it lands on the main screen and stays there.
+    t.wait_until(|s| !s.alternate_screen() && s.contains("discarded 1 unsaved baseline edit"))
+        .expect("the notice, on the restored screen");
+    let status = t.wait_exit().expect("Ctrl-C did not exit");
+    assert_eq!(status.code(), Some(130), "exited with {status:?}");
+    assert!(!baseline.exists(), "Ctrl-C must never write the baseline");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// With nothing unsaved, Ctrl-C is a plain quit: no notice, exit 0.
+#[test]
+fn ctrl_c_with_nothing_unsaved_is_a_plain_quit() {
+    let dir = scratch("ctrl-c-clean");
+    let baseline = dir.join("reconverge-baseline.json");
+    let mut t = spawn((80, 24), &[], &[], &baseline);
+    t.wait_until(|s| s.contains("reconverge triage"))
+        .expect("initial frame");
+    t.send(Key::Ctrl('c')).expect("send Key::Ctrl('c')");
+    let status = t.wait_exit().expect("Ctrl-C did not exit");
+    assert!(status.success(), "exited with {status:?}");
+    let screen = t.screen();
+    assert!(!screen.alternate_screen());
+    assert!(
+        !screen.contains("discarded"),
+        "nothing was discarded:\n{screen}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// `--ascii` renders triage without any non-ASCII glyph.
 #[test]
 fn triage_ascii_mode_is_pure_ascii() {

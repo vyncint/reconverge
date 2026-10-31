@@ -1,6 +1,7 @@
 //! The reconverge TUI binary.
 //!
 //! Usage:
+//!   `reconverge-tui --version | --help`
 //!   `reconverge-tui [--ascii] <artifact.json>...`      — the artifact shell
 //!   `reconverge-tui inspect [--ascii] <artifact.json>...`    — the Inspector
 //!   `reconverge-tui witness [--ascii] <witness.json>...`
@@ -60,13 +61,29 @@ fn sync_draw(terminal: &mut Term, render: impl FnOnce(&mut Frame<'_>)) -> io::Re
     drawn
 }
 
+const USAGE: &str = "\
+usage: reconverge-tui [--ascii] <artifact.json>...
+       reconverge-tui inspect [--ascii] <unimap.json> [findings.json]...
+       reconverge-tui witness [--ascii] <witness.json>...
+       reconverge-tui learn [--ascii]
+       reconverge-tui triage [--ascii] --baseline <path> <findings.json>...
+       reconverge-tui --version | --help
+
+Usually launched by `cargo reconverge`, which picks the artifacts.
+";
+
 fn main() -> ExitCode {
     let mut ascii = false;
     let mut baseline: Option<PathBuf> = None;
     let mut mode: Option<String> = None;
     let mut paths = Vec::new();
+    let mut only_paths = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        if only_paths {
+            paths.push(PathBuf::from(arg));
+            continue;
+        }
         match arg.as_str() {
             "--ascii" => ascii = true,
             "--baseline" => match args.next() {
@@ -77,14 +94,26 @@ fn main() -> ExitCode {
                 }
             },
             "--help" | "-h" => {
-                println!(
-                    "usage: reconverge-tui [inspect|witness|learn|triage] [--ascii] \
-                     [--baseline <path>] <artifact.json>..."
-                );
+                print!("{USAGE}");
                 return ExitCode::SUCCESS;
             }
+            // `cargo reconverge setup` installs this binary beside the CLI
+            // and the driver, and the three must be one release; this is how
+            // a user checks the third.
+            "--version" | "-V" => {
+                println!("reconverge-tui {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
+            "--" => only_paths = true,
             "inspect" | "witness" | "learn" | "triage" if mode.is_none() && paths.is_empty() => {
                 mode = Some(arg);
+            }
+            // Anything else that looks like a flag is a typo, not a file: a
+            // misspelt `--asci` used to be opened as an artifact and reported
+            // inside the view as `No such file or directory`.
+            flag if flag.starts_with('-') && flag != "-" => {
+                eprintln!("reconverge-tui: unknown option `{flag}`\n\n{USAGE}");
+                return ExitCode::from(2);
             }
             _ => paths.push(PathBuf::from(arg)),
         }
@@ -92,9 +121,9 @@ fn main() -> ExitCode {
     let color = std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
 
     let result = match mode.as_deref() {
-        Some("inspect") => run_inspector(&paths, ascii, color),
-        Some("witness") => run_witness(&paths, ascii, color),
-        Some("learn") => run_learn(ascii, color),
+        Some("inspect") => run_inspector(&paths, ascii, color).map(|()| ExitCode::SUCCESS),
+        Some("witness") => run_witness(&paths, ascii, color).map(|()| ExitCode::SUCCESS),
+        Some("learn") => run_learn(ascii, color).map(|()| ExitCode::SUCCESS),
         Some("triage") => {
             let Some(baseline) = baseline else {
                 eprintln!("reconverge-tui: triage requires --baseline <path>");
@@ -102,10 +131,10 @@ fn main() -> ExitCode {
             };
             run_triage(&paths, &baseline, ascii, color)
         }
-        _ => run_shell(&paths, ascii, color),
+        _ => run_shell(&paths, ascii, color).map(|()| ExitCode::SUCCESS),
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("reconverge-tui: {error}");
             ExitCode::from(2)
@@ -294,9 +323,15 @@ fn run_witness(paths: &[PathBuf], ascii: bool, color: bool) -> io::Result<()> {
     })
 }
 
-fn run_triage(paths: &[PathBuf], baseline_path: &Path, ascii: bool, color: bool) -> io::Result<()> {
+fn run_triage(
+    paths: &[PathBuf],
+    baseline_path: &Path,
+    ascii: bool,
+    color: bool,
+) -> io::Result<ExitCode> {
     let (data, baseline) = triage::data::load(paths, baseline_path);
     let mut state = triage::TriageState::new(baseline);
+    let mut interrupted = false;
 
     with_terminal(|terminal| {
         let draw = |state: &triage::TriageState, terminal: &mut Term| -> io::Result<()> {
@@ -317,10 +352,12 @@ fn run_triage(paths: &[PathBuf], baseline_path: &Path, ascii: bool, color: bool)
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     use triage::KeyAction as T;
-                    // Ctrl-C always leaves, even mid-reason.
+                    // Ctrl-C always leaves, even mid-reason — and says so
+                    // below, after teardown, when that threw edits away.
                     if key.code == KeyCode::Char('c')
                         && key.modifiers.contains(KeyModifiers::CONTROL)
                     {
+                        interrupted = true;
                         return Ok(());
                     }
                     let editing = state.editing.is_some();
@@ -385,7 +422,22 @@ fn run_triage(paths: &[PathBuf], baseline_path: &Path, ascii: bool, color: bool)
                 _ => {}
             }
         }
-    })
+    })?;
+
+    // `q` asks before it discards, and Ctrl-C cannot: it is the exit that
+    // always works. It used to exit 0 having dropped a review pass without a
+    // word, so a script — or the person who pressed it — could not tell that
+    // anything was lost. On stderr, after teardown, where it survives the
+    // alternate screen; 130 is the shell's code for an interrupted command.
+    let discarded = state.unsaved_edits();
+    if interrupted && discarded > 0 {
+        eprintln!(
+            "reconverge-tui: discarded {discarded} unsaved baseline {}",
+            reconverge_artifacts::plural(discarded, "edit", "edits")
+        );
+        return Ok(ExitCode::from(130));
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_learn(ascii: bool, color: bool) -> io::Result<()> {

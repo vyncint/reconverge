@@ -202,7 +202,8 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 
 ```
 ┌ reconverge witness ──────────────────────────────────────────────────────────┐
-│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block (…│
+│witness 1/2 — kernel `rc001_divergent_barrier` — RC001 — grid (1,1,1) block   │
+│(32,1,1) warp 0                                                               │
 │                                                                              │
 │          0        8        16       24                                       │
 │lanes     WoWoWoWo WoWoWoWo WoWoWoWo WoWoWoWo                                 │
@@ -212,8 +213,9 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │                                                                              │
 │step 2/3  [=>.]                                                               │
 │sync_threads() — 16 of 32 lanes arrive and wait                               │
-│at lib.rs:180                                                                 │
+│at lib.rs:184                                                                 │
 │barrier: 16 of 32 threads arrived                                             │
+│                                                                              │
 │                                                                              │
 │   0  launch                                                                  │
 │   1  lanes evaluate the guarding branch — 16 continue toward `sync_threads`,…│
@@ -221,8 +223,6 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 │   3  the other 16 lanes exit or move past reconvergence without ever reachin…│
 │                                                                              │
 │verdict: undefined behavior (at step 3)                                       │
-│                                                                              │
-│                                                                              │
 │                                                                              │
 └ h/l step  g/G ends  d split  v verdict  n/N witness  q quit ─────────────────┘
 ```
