@@ -97,30 +97,14 @@ fn discover_artifacts() -> Result<(PathBuf, Vec<PathBuf>), String> {
     Ok((metadata.workspace_root, artifacts))
 }
 
-/// The TUI binary: `$RECONVERGE_TUI`, or the sibling of this executable.
+/// The TUI binary: `$RECONVERGE_TUI`, the sibling of this executable, or
+/// the first one on `PATH`.
 pub(crate) fn locate_tui() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("RECONVERGE_TUI") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(format!("RECONVERGE_TUI={} does not exist", path.display()));
-    }
-    let exe = std::env::current_exe().map_err(|e| format!("cannot locate own binary: {e}"))?;
-    let sibling = exe
-        .parent()
-        .ok_or("cannot locate own directory")?
-        .join(format!("reconverge-tui{}", std::env::consts::EXE_SUFFIX));
-    if sibling.is_file() {
-        return Ok(sibling);
-    }
-    Err(format!(
-        "reconverge-tui not found next to this binary ({}); run \
-         `cargo reconverge setup` to install the matching version — in a \
-         source checkout, `cargo build -p reconverge-tui` — or set \
-         RECONVERGE_TUI",
-        sibling.display()
-    ))
+    crate::setup_cmd::locate_companion(
+        "reconverge-tui",
+        "RECONVERGE_TUI",
+        "cargo build -p reconverge-tui",
+    )
 }
 
 #[cfg(test)]

@@ -256,34 +256,14 @@ fn write_jsonl(review: &Review) -> io::Result<()> {
     out.flush()
 }
 
-/// The reconverge driver binary: `$RECONVERGE_DRIVER`, or the sibling of
-/// this executable.
+/// The reconverge driver binary: `$RECONVERGE_DRIVER`, the sibling of this
+/// executable, or the first one on `PATH`.
 fn locate_driver() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("RECONVERGE_DRIVER") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(format!(
-            "RECONVERGE_DRIVER={} does not exist",
-            path.display()
-        ));
-    }
-    let exe = std::env::current_exe().map_err(|e| format!("cannot locate own binary: {e}"))?;
-    let sibling = exe
-        .parent()
-        .ok_or("cannot locate own directory")?
-        .join(format!("reconverge-driver{}", std::env::consts::EXE_SUFFIX));
-    if sibling.is_file() {
-        return Ok(sibling);
-    }
-    Err(format!(
-        "reconverge-driver not found next to this binary ({}); run \
-         `cargo reconverge setup` to install the matching version — in a \
-         source checkout, `cargo build -p reconverge-driver` — or set \
-         RECONVERGE_DRIVER",
-        sibling.display()
-    ))
+    crate::setup_cmd::locate_companion(
+        "reconverge-driver",
+        "RECONVERGE_DRIVER",
+        "cargo build -p reconverge-driver",
+    )
 }
 
 pub(crate) struct Metadata {
@@ -509,9 +489,9 @@ fn sysroot_lib_dir(toolchain: &str) -> Result<PathBuf, String> {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return Err(format!(
-                "cannot resolve the {toolchain} sysroot: {}\nrun `cargo \
-                 reconverge setup` to install it",
-                String::from_utf8_lossy(&output.stderr).trim()
+                "cannot resolve the {toolchain} sysroot: {}\n{}",
+                String::from_utf8_lossy(&output.stderr).trim(),
+                crate::setup_cmd::missing_toolchain_hint(toolchain)
             ));
         }
         Err(_) => {

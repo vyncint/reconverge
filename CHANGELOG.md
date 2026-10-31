@@ -12,6 +12,40 @@ the corpus; found-in-the-wild is the true north.
 
 ## [Unreleased]
 
+### Changed
+
+- **`check`, `inspect` and `learn` look for the driver and the TUI on
+  `PATH`** when they are not beside the CLI, after `RECONVERGE_DRIVER` /
+  `RECONVERGE_TUI` and the sibling, which still win. Absolute `PATH`
+  entries only: a relative one resolves against the project being analyzed,
+  and a `reconverge-driver` committed there must not become the compiler
+  wrapper. (#203)
+
+### Fixed
+
+- **`setup` installed the companions where `check` never looked.** It ran
+  `cargo install` into cargo's default root, and `check` looks beside its
+  own binary — so a CLI installed with `--root ~/.local`, under
+  `CARGO_INSTALL_ROOT`, or from a release archive got a `setup` that
+  succeeded and a `check` that said to run `setup`, forever. `setup` now
+  passes `--root` for the root whose `bin` holds the CLI (the default root,
+  for `~/.cargo/bin`), and prints it in the manual steps too. A `bin` you
+  cannot write — `/usr/local/bin`, a distro's `/usr/bin` — keeps cargo's
+  default root rather than an install that needs sudo, and `setup` says
+  so. (#203)
+
+- **`setup` let rustup update itself, and failed when that did.** `rustup
+  toolchain install` replaces rustup by default; with the toolchain already
+  present, `failed to set permissions for '…/rustup-init'` ended `setup`
+  with exit 2. `setup`, both READMEs' manual steps and the Action pass
+  `--no-self-update`. (#203)
+
+- **A missing toolchain sent release-archive users to a rebuild.** `check`
+  only gets as far as resolving the sysroot with a driver in hand, so its
+  advice is now the one command that is missing — `rustup toolchain install
+  nightly-2026-08-28 --profile minimal --no-self-update` — instead of
+  `setup`, which recompiles the driver and the TUI from source. (#203)
+
 ### Documentation
 
 - **Hardware session #2 has run** (#153) — 2026-09-22, on a rented A10G
