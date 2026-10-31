@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use reconverge_artifacts::findings::{Confidence, Finding};
+use reconverge_core::interproc;
 use reconverge_dialect_oxide::cc::{
     self, ComputeCapability, STATIC_SHARED_LIMIT_BYTES, SharedMemoryLimits,
 };
@@ -19,6 +20,7 @@ use rustc_public::mir::{ConstOperand, Mutability, Terminator, TerminatorKind};
 use rustc_public::ty::{ConstantKind, GenericArgKind, RigidTy, Ty, TyConst, TyConstKind, TyKind};
 use rustc_public::{CrateDef, CrateItem, ItemKind};
 
+use crate::adapt::CrateModels;
 use crate::emit;
 
 /// A detected cuda-oxide kernel.
@@ -47,12 +49,17 @@ pub fn detect_kernels() -> Vec<Kernel> {
 
 /// Run the syntactic lint passes (RC003/RC004/RC005) over every kernel.
 /// RC001 comes from the uniformity engine (`crate::uniformity`); callers
-/// re-sort after appending it.
-pub fn run_lints(kernels: &[Kernel], target_cc: Option<ComputeCapability>) -> Vec<Finding> {
+/// re-sort after appending it. `models` supplies each kernel's local call
+/// graph, which RC004 walks.
+pub fn run_lints(
+    kernels: &[Kernel],
+    models: &CrateModels,
+    target_cc: Option<ComputeCapability>,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     for kernel in kernels {
         rc003_mut_slice_params(kernel, &mut findings);
-        rc004_shared_memory_budget(kernel, target_cc, &mut findings);
+        rc004_shared_memory_budget(kernel, models, target_cc, &mut findings);
         rc005_launch_contract(kernel, &mut findings);
     }
     sort_findings(&mut findings);
@@ -121,20 +128,25 @@ fn rc003_mut_slice_params(kernel: &Kernel, findings: &mut Vec<Finding>) {
 
 /// RC004 (deny): static shared memory over the architectural limit.
 ///
-/// Sums the sizes of every `SharedArray`/`Barrier` static the kernel body
-/// references. Statically sized shared memory is capped at 48 KiB per kernel
-/// on every supported architecture; `--cc` adds the target's total capacity
-/// (static + dynamic opt-in) to the message.
+/// Sums the sizes of every `SharedArray`/`Barrier` static the kernel
+/// references — in its own body or in any local function it reaches, each
+/// static counted once (#193): the device backend lays out every shared
+/// static a kernel's call graph touches, wherever it is declared.
+/// Statically sized shared memory is capped at 48 KiB per kernel on every
+/// supported architecture; `--cc` adds the target's total capacity (static
+/// + dynamic opt-in) to the message.
 fn rc004_shared_memory_budget(
     kernel: &Kernel,
+    models: &CrateModels,
     target_cc: Option<ComputeCapability>,
     findings: &mut Vec<Finding>,
 ) {
-    let Some(body) = kernel.item.body() else {
-        return;
-    };
     let mut collector = SharedStaticCollector::default();
-    collector.visit_body(&body);
+    for item in kernel_call_graph(kernel, models) {
+        if let Some(body) = item.body() {
+            collector.visit_body(&body);
+        }
+    }
 
     let mut total: u64 = 0;
     let mut notes = Vec::new();
@@ -227,6 +239,23 @@ fn rc004_shared_memory_budget(
         explain: "RC004".to_string(),
         provenance: Vec::new(),
     });
+}
+
+/// The kernel's own item, then every local item its models reach, each once.
+/// Two instances of one generic helper are one item, and one body.
+fn kernel_call_graph(kernel: &Kernel, models: &CrateModels) -> Vec<CrateItem> {
+    let mut items = vec![kernel.item];
+    let root = models
+        .kernels
+        .iter()
+        .copied()
+        .find(|&id| models.items[id] == kernel.item);
+    for id in root.map_or_else(Vec::new, |root| interproc::reachable(&models.fns, root)) {
+        if !items.contains(&models.items[id]) {
+            items.push(models.items[id]);
+        }
+    }
+    items
 }
 
 /// Collects shared-memory statics (`SharedArray`, `Barrier`) referenced by a

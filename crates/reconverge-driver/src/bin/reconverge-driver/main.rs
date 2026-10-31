@@ -195,10 +195,12 @@ fn run_analyses(
     }
 
     if let Some(dir) = artifacts_out {
-        let mut findings = analysis::run_lints(&kernels, target_cc);
+        // Every kernel and every local function it reaches. RC004 walks the
+        // same call graph the uniformity engine does (#193).
+        let models = adapt::build(&reconverge_dialect_oxide::simt::CudaOxide);
+        let mut findings = analysis::run_lints(&kernels, &models, target_cc);
 
         // The uniformity engine: RC001 findings and the unimap artifact.
-        let models = adapt::build(&reconverge_dialect_oxide::simt::CudaOxide);
         let results = uniformity::analyze_kernels(&models);
         let mut witnesses = Vec::new();
         uniformity::rc001_divergent_barriers(&models, &results, &mut findings, &mut witnesses);

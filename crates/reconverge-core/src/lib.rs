@@ -11,7 +11,8 @@
 //! Layout: [`model`] is the input IR, [`graph`] the CFG algorithms
 //! (dominators, post-dominators, reducibility, divergence regions), and
 //! [`analysis`] the fixpoint dataflow (docs/ARCHITECTURE.md) with mandatory
-//! provenance and the interprocedural barrier/warp summary bits.
+//! provenance and the interprocedural summaries, and [`interproc`] carries
+//! divergence into a kernel's helpers through their parameters.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -20,6 +21,7 @@ pub mod analysis;
 pub mod dialect;
 pub mod graph;
 pub mod inline;
+pub mod interproc;
 pub mod model;
 
 /// The uniformity lattice: `Uniform ⊑ Divergent`, per SSA value.

@@ -125,12 +125,15 @@ pub enum CallKind {
     },
     /// Anything else: the result joins the arguments' uniformities.
     ///
-    /// This is deliberately optimistic about *value* flow — a callee could
-    /// in principle manufacture divergence from uniform arguments (e.g. by
-    /// reading shared memory written by other threads). Barrier and
-    /// warp-op *effects* of local callees are covered separately by the
-    /// interprocedural summary bits; exotic value-flow through callees is
-    /// a documented v1 recall gap, never a precision gap.
+    /// For a local callee whose body was modeled, the engine adds what the
+    /// body returns on its own (`Summaries::returns_divergent`, #188), so a
+    /// helper wrapping `index_1d().get()` is divergent at every call site.
+    /// For library code this stays optimistic about *value* flow — a callee
+    /// could in principle manufacture divergence from uniform arguments
+    /// (e.g. by reading shared memory written by other threads), and that
+    /// is a documented recall gap, never a precision gap. A callee the
+    /// driver cannot see into at all is not `Other`: it is an opaque
+    /// terminator, counted and divergent.
     Other,
 }
 

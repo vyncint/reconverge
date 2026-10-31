@@ -8,8 +8,8 @@
 use cuda_device::barrier::{Barrier, mbarrier_arrive, mbarrier_init, mbarrier_wait};
 use cuda_device::cooperative_groups::{self, ThreadGroup};
 use cuda_device::{
-    DisjointSlice, SharedArray, cluster, cluster_launch, grid, kernel, launch_contract, thread,
-    warp,
+    DisjointSlice, SharedArray, cluster, cluster_launch, device, grid, kernel, launch_contract,
+    thread, warp,
 };
 
 // ---------------------------------------------------------------- RC003
@@ -494,5 +494,276 @@ pub fn opaque_asm_barrier(mut out: DisjointSlice<u32>) {
     }
     if let Some(e) = out.get_mut(i) {
         *e = 5;
+    }
+}
+
+// ---------------------------------------- interprocedural (#188, #189, #193)
+//
+// Until 0.8.0 divergence stopped at a function boundary: a helper's body,
+// parameters and return value were never checked, and every kernel below
+// that is a true positive came back clean — `--strict` included. Each one
+// is the same bug as a sample above, moved one call away.
+
+/// `if threadIdx_x() == 0 { sync_threads() }`, one call deep. `#[device]`
+/// renames it; findings say `leader_sync`.
+#[device]
+fn leader_sync() {
+    if thread::threadIdx_x() == 0 {
+        thread::sync_threads();
+    }
+}
+
+/// True positive (confirmed, #188): the divergent barrier is in the helper's
+/// own body, and the kernel calls the helper unconditionally — so no call
+/// site is under divergent control, which is the only thing 0.7.0 checked.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_helper_body(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    leader_sync();
+    if let Some(e) = out.get_mut(i) {
+        *e = 8;
+    }
+}
+
+/// A barrier guarded by its own parameter.
+fn sync_if_even(tid: u32) {
+    if tid % 2 == 0 {
+        thread::sync_threads();
+    }
+}
+
+/// True positive (confirmed, #188): the helper's guard is uniform or not
+/// depending on what it is passed, and this kernel passes a thread index.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_helper_param(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    sync_if_even(thread::threadIdx_x());
+    if let Some(e) = out.get_mut(i) {
+        *e = 9;
+    }
+}
+
+/// True negative: the same helper, passed a block-uniform value. Parameters
+/// are joined per kernel, so the kernel above does not make this one a
+/// finding — the false positive a crate-wide join would produce.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_ok_via_helper_uniform_param(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    sync_if_even(thread::blockIdx_x());
+    if let Some(e) = out.get_mut(i) {
+        *e = 10;
+    }
+}
+
+/// Upstream's `standalone_device_fn` shape: the global index, returned.
+/// `#[device]` is what makes `index_1d()` the real intrinsic here; outside
+/// a `#[kernel]` or `#[device]` function it is upstream's panicking stub.
+#[device]
+fn global_thread_id() -> usize {
+    thread::index_1d().get()
+}
+
+/// True positive (confirmed, #188): the guard is a helper's return value.
+/// 0.7.0 treated a call's result as uniform whenever its arguments were.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_helper_return(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if global_thread_id() % 2 == 0 {
+        thread::sync_threads();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 11;
+    }
+}
+
+fn block_of() -> u32 {
+    thread::blockIdx_x()
+}
+
+/// True positive (warning, #188 with #133): a returned `blockIdx` is as
+/// block-scoped as one read inline, so a grid-wide barrier under it is
+/// entered by some blocks and not others.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_helper_block_scope(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if block_of() == 0 {
+        grid::sync();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 12;
+    }
+}
+
+fn launch_width() -> u32 {
+    thread::blockDim_x()
+}
+
+/// True negative: a returned `blockDim` is constant across the launch, and
+/// a grid-wide barrier under it is fine.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_ok_via_helper_launch_value(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if launch_width() > 64 {
+        grid::sync();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 13;
+    }
+}
+
+trait Stage {
+    fn run(&self);
+}
+
+struct Tile;
+
+impl Stage for Tile {
+    fn run(&self) {
+        thread::sync_threads();
+    }
+}
+
+fn run_stage<S: Stage>(stage: &S) {
+    stage.run();
+}
+
+/// True positive (confirmed, #189): a trait method holding a barrier, under
+/// a divergent guard. Its definition path names the trait, not the impl,
+/// and 0.7.0 looked the impl up by that path and found nothing.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_trait_method(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    let tile = Tile;
+    if i.get() % 2 == 0 {
+        tile.run();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 14;
+    }
+}
+
+/// True positive (confirmed, #189): the same, through a generic function —
+/// `run_stage::<Tile>` is modeled as that instance, where `S::run` resolves.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_generic_stage(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if i.get() % 2 == 0 {
+        run_stage(&Tile);
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 15;
+    }
+}
+
+/// True positive (warning, #189): a closure handed to an iterator adapter.
+/// The closure's body is analyzed and counts toward the call's summary, but
+/// nothing says how often `for_each` runs it, so it is never promoted.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc001_via_closure_adapter(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    if i.get() % 2 == 0 {
+        (0..2).for_each(|_| thread::sync_threads());
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 16;
+    }
+}
+
+fn barrier_behind_a_pointer() {
+    thread::sync_threads();
+}
+
+/// True negative *by omission* (#189): a call through a function pointer
+/// goes wherever the pointer does, and the analysis does not guess. It is
+/// counted as opaque, so the run says it left this unread — 0.7.0 treated
+/// it as barrier-free and said nothing.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn opaque_fn_pointer_barrier(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    let f: fn() = barrier_behind_a_pointer;
+    if i.get() % 2 == 0 {
+        f();
+    }
+    if let Some(e) = out.get_mut(i) {
+        *e = 17;
+    }
+}
+
+/// A full-mask vote, guarded by the helper's own parameter.
+#[device]
+fn vote_low_half(lane: u32) -> u32 {
+    if lane < 16 {
+        warp::ballot_sync(0xffff_ffff, true)
+    } else {
+        0
+    }
+}
+
+/// True positive (confirmed, #188): RC002 inside a helper, divergent through
+/// the lane id the kernel passes.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc002_via_helper_param(mut out: DisjointSlice<u32>) {
+    let i = thread::index_1d();
+    let vote = vote_low_half(warp::lane_id());
+    if let Some(e) = out.get_mut(i) {
+        *e = vote;
+    }
+}
+
+/// 64 KiB of static shared memory, declared where the kernel cannot see it.
+fn stage_through_helper() -> f32 {
+    static mut STAGED: SharedArray<f32, 16384> = SharedArray::UNINIT;
+    unsafe {
+        STAGED[0] = 1.0;
+        STAGED[0]
+    }
+}
+
+/// True positive (deny, #193): RC004 counts the shared statics of every
+/// function the kernel reaches, not only its own body.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc004_via_helper(mut out: DisjointSlice<f32>) {
+    let i = thread::index_1d();
+    let v = stage_through_helper();
+    if let Some(e) = out.get_mut(i) {
+        *e = v;
+    }
+}
+
+/// 32 KiB, shared by two helpers.
+static mut HALF_TILE: SharedArray<f32, 8192> = SharedArray::UNINIT;
+
+fn fill_half_tile() {
+    unsafe {
+        HALF_TILE[0] = 1.0;
+    }
+}
+
+fn read_half_tile() -> f32 {
+    unsafe { HALF_TILE[0] }
+}
+
+/// True negative (#193): one static reached through two helpers is one
+/// allocation. Counted twice it would be 65536 bytes and over the cap.
+#[kernel]
+#[launch_contract(domain = 1, coordinates = u32, block = (32, 1, 1))]
+pub fn rc004_ok_helper_static_counted_once(mut out: DisjointSlice<f32>) {
+    let i = thread::index_1d();
+    fill_half_tile();
+    let v = read_half_tile();
+    if let Some(e) = out.get_mut(i) {
+        *e = v;
     }
 }

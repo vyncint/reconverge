@@ -29,7 +29,9 @@ pub struct FnModel {
     pub span: SpanRef,
     /// Number of locals, including the return place and the arguments.
     pub local_count: usize,
-    /// Locals `1..=arg_count` are parameters (uniform by docs/ARCHITECTURE.md).
+    /// Locals `1..=arg_count` are parameters. A kernel's are uniform (they
+    /// are the launch's arguments); a helper's hold whatever its callers
+    /// pass, joined over every call that reaches it (#188).
     pub arg_count: usize,
     /// Source-level names, where debug info provides them.
     pub local_names: Vec<Option<String>>,
@@ -209,6 +211,13 @@ pub enum TermKind {
         callee: Callee,
         /// Every local the call reads — flattened; see `const_args`.
         args: Vec<Local>,
+        /// Per **original argument position**: the locals that argument
+        /// reads. This is what binds a local callee's parameters to the
+        /// call's arguments (#188); `args` above is their flattened union
+        /// plus whatever else the call reads. A model that leaves this
+        /// empty is still analyzed, with every parameter joined over all
+        /// of `args` — coarser, never optimistic.
+        arg_uses: Vec<Vec<Local>>,
         /// Per **original argument position**: the argument's value when it
         /// is a literal integer constant (e.g. a warp participation mask).
         /// `args` above is the flattened set of locals the call reads and
@@ -223,7 +232,10 @@ pub enum TermKind {
         /// The block control continues in when the call returns.
         target: Option<BlockId>,
     },
-    /// Inline asm or similar: opaque to the analysis.
+    /// Inline asm, or a call whose target the driver cannot see into — a
+    /// function pointer, a `dyn` method, a function in another crate of the
+    /// workspace (#189): opaque to the analysis. Counted as coverage, and
+    /// its result, if any, is divergent rather than guessed at.
     Opaque {
         /// Locals the opaque statement reads.
         uses: Vec<Local>,
@@ -255,6 +267,16 @@ pub struct Callee {
     /// function whose body was modeled (drives the interprocedural
     /// summary bits).
     pub local_fn: Option<FnId>,
+    /// Local functions this call may run without calling them directly: a
+    /// closure or function item handed to a callee whose body is not
+    /// modeled, such as `(0..n).for_each(|_| sync_threads())` (#189).
+    ///
+    /// They count toward the call's summary bits and their parameters
+    /// receive the call's arguments, but nothing says how often — or
+    /// whether — the callee runs them, so they are never a concrete path:
+    /// the inliner does not splice them, and a finding reached through
+    /// one stays at `warning`.
+    pub may_call: Vec<FnId>,
 }
 
 impl FnModel {

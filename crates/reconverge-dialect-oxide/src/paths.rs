@@ -127,6 +127,20 @@ pub fn launch_domain(type_path: &str) -> Option<LaunchDomain> {
     }
 }
 
+/// Whether a crate is the dialect's own device surface.
+///
+/// A call into it that the dialect does not classify is ordinary plumbing
+/// (`DisjointSlice::get_mut`, `ThreadIndex::get`), and its result joins its
+/// arguments. A call into a crate that is neither this one, the standard
+/// library nor the crate being analyzed is a body the analysis never sees,
+/// and the driver counts it as opaque instead (#189). `cuda_device` is the
+/// only crate of upstream's that device code calls: `cuda-macros` is a
+/// proc-macro crate and leaves nothing callable behind.
+#[must_use]
+pub fn is_device_crate(crate_name: &str) -> bool {
+    crate_name == "cuda_device"
+}
+
 /// Whether an ADT path is `cuda_device`'s block-scoped shared-memory array.
 #[must_use]
 pub fn is_shared_array(type_path: &str) -> bool {

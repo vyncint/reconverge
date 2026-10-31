@@ -52,6 +52,33 @@ pub fn kernel_base_name(item_path: &str) -> Option<&str> {
     (!base.is_empty()).then_some(base)
 }
 
+/// Item-name prefix the `#[device]` macro gives the function it wraps
+/// (current naming contract), so `#[device] fn helper` is defined as
+/// `cuda_oxide_codegen_v1_cuda_oxide_device_246e25db_helper`.
+pub const DEVICE_SYMBOL_PREFIX: &str = "cuda_oxide_codegen_v1_cuda_oxide_device_246e25db_";
+
+/// Device-function item-name prefix used by earlier cuda-oxide versions.
+pub const LEGACY_DEVICE_SYMBOL_PREFIX: &str = "cuda_oxide_device_246e25db_";
+
+/// A function name as its author wrote it: the `#[device]` and `#[kernel]`
+/// renames undone wherever they appear, so a finding inside `#[device] fn
+/// leader_sync` says `leader_sync`, and one inside a kernel's closure says
+/// `my_kernel::{closure#0}` (#188). Names without a prefix come back
+/// unchanged.
+#[must_use]
+pub fn user_facing_name(name: &str) -> String {
+    // Each legacy prefix is a suffix of the current one, so the current
+    // ones go first.
+    [
+        DEVICE_SYMBOL_PREFIX,
+        KERNEL_SYMBOL_PREFIX,
+        LEGACY_DEVICE_SYMBOL_PREFIX,
+        LEGACY_KERNEL_SYMBOL_PREFIX,
+    ]
+    .iter()
+    .fold(name.to_string(), |name, prefix| name.replace(prefix, ""))
+}
+
 #[cfg(test)]
 mod tests {
     use reconverge_core::Uniformity;
@@ -65,6 +92,24 @@ mod tests {
             Uniformity::Uniform.join(Uniformity::Divergent),
             Uniformity::Divergent
         );
+    }
+
+    #[test]
+    fn device_functions_read_as_their_author_named_them() {
+        use super::user_facing_name;
+        assert_eq!(
+            user_facing_name("cuda_oxide_codegen_v1_cuda_oxide_device_246e25db_leader_sync"),
+            "leader_sync"
+        );
+        assert_eq!(
+            user_facing_name("cuda_oxide_device_246e25db_reduce_step::<u32>"),
+            "reduce_step::<u32>"
+        );
+        assert_eq!(
+            user_facing_name("cuda_oxide_codegen_v1_cuda_oxide_kernel_246e25db_scale::{closure#0}"),
+            "scale::{closure#0}"
+        );
+        assert_eq!(user_facing_name("Tile::sync"), "Tile::sync");
     }
 
     #[test]
