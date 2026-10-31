@@ -117,6 +117,7 @@ impl CheckOptions {
                 // Below the value-taking flags, so `--baseline --help` is
                 // still the missing value it was.
                 flag if ArgError::help(flag) => return Err(ArgError::Help),
+                flag if ArgError::version(flag) => return Err(ArgError::Version),
                 other => return Err(ArgError::unknown(other)),
             }
         }
@@ -286,14 +287,14 @@ pub fn run(options: &CheckOptions) -> Result<Review, String> {
     })?;
     for entry in review.stale_entries() {
         eprintln!(
-            "reconverge: baseline entry `{}` no longer matches any finding; \
+            "reconverge: baseline entry {} no longer matches any finding; \
              delete it from {} or rerun `cargo reconverge triage`",
             entry.label(),
             review.baseline_path.display()
         );
     }
     if let Some(path) = &options.sarif_path {
-        sarif::write_report(path, &review)
+        sarif::write_report(path, &review, &metadata.workspace_root)
             .map_err(|e| format!("cannot write SARIF to {}: {e}", path.display()))?;
     }
     // After the report, so the run still says what it compiled; the exit

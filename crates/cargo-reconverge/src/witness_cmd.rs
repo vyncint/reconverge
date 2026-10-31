@@ -43,6 +43,7 @@ impl WitnessOptions {
                 // Below the value-taking flags, so `--baseline --help` is
                 // still the missing value it was.
                 flag if ArgError::help(flag) => return Err(ArgError::Help),
+                flag if ArgError::version(flag) => return Err(ArgError::Version),
                 other => return Err(ArgError::unknown(other)),
             }
         }

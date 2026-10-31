@@ -212,9 +212,13 @@ fn the_review_loop_gates_accepts_and_reports() {
     let output = check(&project, &driver, &[]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(0), "stale entries never gate");
+    // Quoted once: the label already backticks the kernel, and wrapping
+    // the whole label in another pair nested them.
     assert!(
-        stderr.contains("lint_samples RC001 in `kernel_that_no_longer_exists`")
-            && stderr.contains("no longer matches any finding"),
+        stderr.contains(
+            "reconverge: baseline entry lint_samples RC001 in \
+             `kernel_that_no_longer_exists` no longer matches any finding"
+        ),
         "{stderr}"
     );
     baseline.write_to(&baseline_path).unwrap();

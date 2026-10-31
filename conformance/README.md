@@ -47,6 +47,10 @@ by default in the tool and never gate the exit code.
 fails when one is neither named in the dialect (`simt.rs`) nor listed in
 [`SURFACE_ALLOW`](SURFACE_ALLOW) with a reason. It runs in the conformance
 job against the pinned checkout, and in `pins.yml` against upstream `HEAD`.
+`scripts/upstream-layout.sh` finds the device crate in either upstream
+layout — `crates/cuda-device` at the pin, `cuda-oxide/crates/cuda-device`
+since upstream became a monorepo — and any exit other than 0 or 1 means
+the surface was not enumerated, never that it is clean.
 
 Why: an unrecognized `cuda_device::` call classifies as `Other`, which is
 counted as coverage and is never a finding. That is right for a helper and

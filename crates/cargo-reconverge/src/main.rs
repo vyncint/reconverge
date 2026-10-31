@@ -52,28 +52,33 @@ Usage:
                                        (--ascii, --baseline <path>)
   cargo reconverge watch [OPTIONS]     re-run the check on every save;
                                        takes every check option plus
-                                       --max-runs <N>
+                                       --max-runs <N>, and exits with the
+                                       last run's code
   cargo reconverge --explain <RCxxx>   print the explain page for a
-                                       diagnostic code
+                                       diagnostic code (also `explain`)
+  cargo reconverge --version           print the version (also -V, at any
+                                       level)
+  cargo reconverge --help              print this text (also -h, `help`)
 
 check options:
   --strict                    also display warning-confidence findings
                               (they never affect the exit code)
   --cc <X.Y>                  target compute capability for shared-memory
-                              capacity context (e.g. 8.6)
+                              capacity context (e.g. 8.6; sm_86, compute_86,
+                              86 and the sm_90a/sm_100f suffixes work too)
   --message-format <FORMAT>   text (default) or json; json prints one
                               findings.v1 document per analyzed *target*,
                               one per line. A package with a lib and a bin
                               compiles twice under one crate name, so
                               `crate` is not a key — read `target` too
   --sarif <PATH>              also write a SARIF 2.1.0 report to PATH.
-                              A path that begins with `--` is passed with
-                              `=`: `--sarif=--weird`
+                              A path that begins with `-` is passed with
+                              `=`: `--sarif=-weird`
   --baseline <PATH>           reviewed suppressions to apply. The default,
                               reconverge-baseline.json at the workspace
                               root, is treated as empty when absent; a path
                               named here must exist. Same `=` form for a
-                              path that begins with `--`
+                              path that begins with `-`
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
   -p, --package <NAME>        check only this workspace member
@@ -90,6 +95,10 @@ Exit codes: 0 = no findings at deny/confirmed confidence, 1 = findings,
 code, and their count is always reported.
 
 Environment:
+  RECONVERGE_DRIVER           the reconverge-driver binary to run (default:
+                              the one installed beside cargo-reconverge)
+  RECONVERGE_TUI              the reconverge-tui binary that inspect,
+                              witness, learn and triage open (same default)
   RECONVERGE_TOOLCHAIN        the toolchain `check` builds under (default:
                               the pinned nightly, whatever rustup chose
                               for the project); only for a driver built
@@ -114,8 +123,10 @@ fn report_arg_error(err: &ArgError) -> u8 {
     // it is an error is a poor greeting. The usage text is one block
     // covering every subcommand, so printing it whole is the answer.
     if err.is_help() {
-        print!("{USAGE}");
-        return 0;
+        return out::print_or_exit(USAGE);
+    }
+    if *err == ArgError::Version {
+        return out::print_or_exit(&version());
     }
     if err.wants_usage() {
         eprintln!("error: {err}\n\n{USAGE}");
@@ -123,6 +134,10 @@ fn report_arg_error(err: &ArgError) -> u8 {
         eprintln!("error: {err}");
     }
     2
+}
+
+fn version() -> String {
+    format!("cargo-reconverge {}\n", env!("CARGO_PKG_VERSION"))
 }
 
 /// Exit codes follow the CLI contract of README.md: 0 = clean,
@@ -135,14 +150,10 @@ fn run(args: &[String]) -> u8 {
         _ => args,
     };
     match rest.first().map(String::as_str) {
-        Some("--version" | "-V") => {
-            println!("cargo-reconverge {}", env!("CARGO_PKG_VERSION"));
-            0
-        }
-        None | Some("--help" | "-h") => {
-            print!("{USAGE}");
-            0
-        }
+        Some("--version" | "-V") => out::print_or_exit(&version()),
+        // `help` as well: `cargo help`, `git help` and `rustup help` all
+        // answer it, so it is what a reader of any of them types next.
+        None | Some("--help" | "-h" | "help") => out::print_or_exit(USAGE),
         Some("check") => match check::CheckOptions::parse(&rest[1..]) {
             Ok(options) => match check::run(&options) {
                 Ok(outcome) => outcome.exit_code(),
@@ -237,6 +248,50 @@ mod tests {
         assert_eq!(run(&argv(&["reconverge", "--version"])), 0);
         assert_eq!(run(&argv(&["--version"])), 0);
         assert_eq!(run(&argv(&["reconverge", "-V"])), 0);
+    }
+
+    #[test]
+    fn help_and_version_are_answered_at_every_level() {
+        assert_eq!(run(&argv(&["reconverge", "help"])), 0);
+        assert_eq!(run(&argv(&["help"])), 0);
+        for subcommand in [
+            "check", "setup", "learn", "triage", "inspect", "witness", "watch", "explain",
+        ] {
+            for flag in ["--version", "-V"] {
+                assert_eq!(
+                    run(&argv(&["reconverge", subcommand, flag])),
+                    0,
+                    "`{subcommand} {flag}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_or_flag_shaped_value_is_refused_before_anything_runs() {
+        // `--sarif=` used to run the whole analysis and then fail to write
+        // a file named ``. Asked of the parsers rather than of `run`: a
+        // regression here must fail, not start a real check — or, for
+        // `watch`, a loop that never ends.
+        use crate::{check, triage_cmd, watch_cmd, witness_cmd};
+        for args in [
+            &["--sarif="][..],
+            &["--baseline="],
+            &["--baseline", "-h"],
+            &["--sarif", "-x"],
+            &["--baseline", "-V"],
+            &["--cc", ""],
+        ] {
+            let args = argv(args);
+            assert!(check::CheckOptions::parse(&args).is_err(), "check {args:?}");
+            assert!(
+                watch_cmd::WatchOptions::parse(&args).is_err(),
+                "watch {args:?}"
+            );
+        }
+        assert!(triage_cmd::TriageOptions::parse(&argv(&["--baseline="])).is_err());
+        assert!(witness_cmd::WitnessOptions::parse(&argv(&["--kernel="])).is_err());
+        assert!(witness_cmd::WitnessOptions::parse(&argv(&["--kernel", "-k"])).is_err());
     }
 
     #[test]
