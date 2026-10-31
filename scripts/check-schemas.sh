@@ -31,6 +31,18 @@ cp -r "$ROOT/crates/cargo-reconverge/tests/lint-samples/." "$WORK/run/"
      "$ROOT/target/debug/cargo-reconverge" reconverge check --strict \
        --message-format json > "$WORK/findings.jsonl" ) || true
 
+# The verdict samples too: they are where a witness replayed in a declared
+# 2-D block comes from — `launch.block` (16, 2, 1) with 32 lanes — and the
+# lint samples have no such kernel. Their artifacts join the same emitted
+# directory; the file names carry the crate, so nothing collides.
+mkdir -p "$WORK/verdicts"
+cp -r "$ROOT/crates/cargo-reconverge/tests/verdict-samples/." "$WORK/verdicts/"
+( cd "$WORK/verdicts" \
+  && RECONVERGE_DRIVER="$ROOT/target/debug/reconverge-driver" \
+     "$ROOT/target/debug/cargo-reconverge" reconverge check --strict \
+       --message-format json >> "$WORK/findings.jsonl" ) || true
+cp "$WORK/verdicts/target/reconverge/"*.json "$WORK/run/target/reconverge/"
+
 python3 "$ROOT/scripts/validate-schema.py" \
   --schema-dir "$ROOT/schemas" \
   --fixtures "$ROOT/fixtures" \

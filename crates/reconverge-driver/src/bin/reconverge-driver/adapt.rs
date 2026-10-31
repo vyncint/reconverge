@@ -21,7 +21,7 @@ use reconverge_artifacts::findings::SourceSpan;
 use reconverge_core::LaunchScope;
 use reconverge_core::dialect::{CallKind, SimtDialect};
 use reconverge_core::model::{
-    self, Block, Callee, Eval, FnId, FnModel, Local, SpanRef, Stmt, Term, TermKind,
+    self, Block, Callee, Eval, FnId, FnModel, IntType, Local, SpanRef, Stmt, Term, TermKind,
 };
 use reconverge_dialect_oxide::kernel_base_name;
 use rustc_public::mir::{
@@ -612,11 +612,20 @@ fn rvalue_eval(
         {
             Some(Eval::Use(model::Operand::Local(place.local)))
         }
-        Rvalue::BinaryOp(op, a, b) => Some(Eval::Binary(
-            model_binop(op)?,
-            model_operand(a)?,
-            model_operand(b)?,
-        )),
+        // Typed by the left operand, which is also the result type of every
+        // arithmetic operator (a shift's amount may differ). Without the
+        // type, order, division and right shift were all unsigned, and a
+        // negative `i32` read as a 32-bit pattern compared above every
+        // positive one (#192).
+        Rvalue::BinaryOp(op, a, b) => {
+            let (bits, signed) = scalar_width(&a.ty(body.locals()).ok()?)?;
+            Some(Eval::Binary(
+                model_binop(op)?,
+                model_operand(a)?,
+                model_operand(b)?,
+                IntType { bits, signed },
+            ))
+        }
         // Debug builds lower `+`/`-`/`*` to the overflow-checked form; the
         // interpreter evaluates it exactly within the type's width and
         // yields unknown past it (the real program panics there — a

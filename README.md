@@ -346,7 +346,12 @@ one that does less.
   spliced result. Anything outside those bounds — recursion, a deeper
   chain, a callee whose body was not modeled — keeps the summary tier and
   stays at `warning`. Nothing is promoted on a summary bit; the bit raises
-  the finding, a trace confirms it.
+  the finding, a trace confirms it. A call the inliner left in place is
+  never stepped over either: when a lane's path meets one whose summary
+  says it may synchronize, the replay stops and the finding carries a
+  `replay:` note naming the call — until 0.8.0 such a call read as a
+  statement with no barrier, and a recursion every thread completed was
+  "confirmed" with one lane waiting.
 - **RC001 covers the all-threads barriers** — `thread::sync_threads`,
   `cluster::cluster_sync` and the blocking half of the raw pair behind it
   (`barrier_cluster_wait*`; the arrival half signals and returns, so it
@@ -414,8 +419,11 @@ one that does less.
   The arithmetic a 32-bit mask flows through is width-typed: integer `!`
   is the complement at the operand's own width, casts truncate to their
   target width, and overflow-checked arithmetic was already width-typed.
-  Where a width is unavailable the interpreter yields unknown rather than
-  assuming one.
+  Every binary operator carries its operand's type too, signedness
+  included, so `x < 0`, `x / 2` and `x >> 1` on an `i32` are the signed
+  operations — they were unsigned until 0.8.0, which made
+  `-(lane as i32) < 1` false on 31 lanes. Where a type is unavailable the
+  interpreter yields unknown rather than assuming one.
 
 - **Every site is attempted, but an unknown branch over a barrier stops the
   ones below it.** Promotion is per site, so a function with several
@@ -439,13 +447,19 @@ one that does less.
 
   In both, the finding stays at `warning` and the upstream barrier is
   itself reported — which is where the reader should be looking anyway.
-- **Whole-warp divergence is witnessed at the declared block.** When the
-  one-warp replay finds nothing and the kernel's `#[launch_contract]`
-  declares a one-dimensional block of several whole warps (64, 96, or
-  128), barrier findings are replayed again at that size — so a
-  `warp_id()`-guarded barrier that is safe at one warp and undefined at
-  two gates exactly when the contract says two. Blocks that are 2D, not
-  whole warps, or wider than 128 threads stay at the one-warp replay.
+- **The replay runs the declared block, and only that.** A kernel whose
+  `#[launch_contract]` declares `block = (x, y, z)` is replayed in that
+  shape — 2-D and 3-D included, lane *n* being the thread at linear index
+  *n* with x fastest, which is how warps are formed — so `threadIdx_y()`
+  under `(16, 2, 1)` is 1 on lanes 16..31, and a `warp_id()`-guarded
+  barrier that is safe at one warp and undefined at two gates exactly when
+  the contract says two. A kernel with no contract is replayed as one warp,
+  `(32, 1, 1)`. A declared block the replay cannot run — not a whole
+  number of warps, or wider than 128 threads — is not replayed at all: the
+  finding stays at `warning` with a `replay:` note naming the shape. Until
+  0.8.0 such a block was replayed as `(32, 1, 1)`, a launch the contract
+  excludes, and a `(16, 16, 1)` kernel whose every thread passed a
+  `threadIdx_x() < 16` guard was "confirmed" as a hang.
   A collective on a lane's path does not stop the replay: collectives
   are modeled per warp, so a warp whose still-running lanes are all at the
   same collective passes it whatever the other warps are doing, while the
@@ -454,7 +468,21 @@ one that does less.
   warp-scoped collective and a block-scoped barrier — is declined rather
   than approximated. The *site* itself must still be a barrier beyond one
   warp: a mask comparison is a per-warp question, and an error there would
-  produce a witness that looks exactly like a correct one.
+  produce a witness that looks exactly like a correct one. A collective
+  site under a declared multi-warp block therefore stays at `warning`, with
+  a `replay:` note saying so.
+- **A warp-uniform guard is not a divergent one for a collective.** A
+  warp collective's participants are one warp, so a guard that every lane
+  of a warp reads the same — `warp_id() == 0`, `threadIdx_x() / 32 == k`,
+  `threadIdx_x() >> 5` — lets each warp take the branch whole, and a
+  full-mask collective under it is not RC002. A barrier under the same
+  guard still is RC001: whole warps skipping `sync_threads()` is the hang.
+  Whether `threadIdx_x() / 32` is a warp number depends on the block —
+  under `(48, 2, 1)` one warp holds x 32..47 of one row and 0..15 of the
+  next — so it counts only when the declared block is 1-D, has rows of
+  whole warps, or has rows no wider than the divisor. A kernel with no
+  contract keeps the warning, with a note that declaring the block settles
+  it.
 - **Opaque regions are reported, not guessed at.** `asm!` and unmodeled
   intrinsics are counted, and the tally is a property of the *run*, not of
   a finding: it rides in `findings.v1` as `coverage`, is printed as a note

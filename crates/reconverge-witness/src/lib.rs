@@ -2,8 +2,9 @@
 //! kernel runtime.
 //!
 //! Given a function model (the same one the uniformity engine analyzes), a
-//! finding site, and a launch shape, the interpreter runs each of the 32
-//! lanes through the kernel-subset semantics the adapter captured
+//! finding site, and a launch shape, the interpreter runs each thread of the
+//! block — one warp, or the block a launch contract declares — through the
+//! kernel-subset semantics the adapter captured
 //! (integer arithmetic, copies, branches with known guard values, dialect
 //! calls). Interpretation is **witness-directed**: a lane stops the moment
 //! it either arrives at the site or enters a block from which the site is
@@ -28,9 +29,12 @@
 
 use reconverge_artifacts::plural;
 use reconverge_artifacts::witness::{LaneState, VerdictKind};
+use reconverge_core::analysis::Summaries;
 use reconverge_core::dialect::CallKind;
 use reconverge_core::graph::{Cfg, post_dominators};
-use reconverge_core::model::{BinOp, BlockId, Eval, FnModel, Operand, SpanRef, TermKind, UnOp};
+use reconverge_core::model::{
+    BinOp, BlockId, Callee, Eval, FnModel, IntType, Operand, SpanRef, TermKind, UnOp,
+};
 
 /// Lanes per warp on every supported target.
 pub const LANES: u32 = 32;
@@ -94,6 +98,51 @@ pub struct Replay {
     pub never_arrives: u128,
 }
 
+impl Replay {
+    /// Threads replayed: the product of the block's dimensions. Lane `n`
+    /// of the bitmasks is the thread at linear index `n`, x fastest — so a
+    /// `(16, 2, 1)` block is one warp of 32 lanes, not 16.
+    #[must_use]
+    pub fn threads(&self) -> u32 {
+        self.block.iter().product()
+    }
+}
+
+/// What a replay may assume beyond the function model: the launch it runs
+/// under, and what the crate's other functions may do.
+#[derive(Debug, Clone, Copy)]
+pub struct ReplayEnv<'a> {
+    /// The block to replay, `(x, y, z)`. Its thread count must be a whole
+    /// number of warps, at most 128; lane `n` is the thread at linear index
+    /// `n`, x fastest, which is how the hardware forms warps.
+    pub block: [u32; 3],
+    /// The crate's interprocedural summaries, indexed like the model set
+    /// the function's [`Callee::local_fn`] ids point into. A lane that
+    /// reaches a call into a local function the summaries say may execute a
+    /// barrier or a collective ends the replay — the callee was not inlined,
+    /// so the interpreter cannot follow it. Without summaries every local
+    /// callee is assumed to.
+    pub summaries: Option<&'a Summaries>,
+}
+
+impl ReplayEnv<'_> {
+    /// One warp, `(32, 1, 1)`: the launch an undeclared kernel is replayed
+    /// under.
+    pub const ONE_WARP: ReplayEnv<'static> = ReplayEnv {
+        block: [LANES, 1, 1],
+        summaries: None,
+    };
+
+    /// A replay under `block`, with no summaries.
+    #[must_use]
+    pub fn block(block: [u32; 3]) -> ReplayEnv<'static> {
+        ReplayEnv {
+            block,
+            summaries: None,
+        }
+    }
+}
+
 /// Why a replay produced no witness.
 ///
 /// The distinction matters to a reader and to anything consuming
@@ -120,6 +169,18 @@ pub enum NoWitness {
     /// The replay could not determine what happens. An absence of
     /// knowledge, not a result.
     Indeterminate,
+    /// The block is not one the replay models: not a whole number of warps,
+    /// wider than 128 threads, or a collective site beyond one warp. Nothing
+    /// was run, so nothing is known.
+    UnsupportedLaunch,
+    /// A lane reached a call into a local function that may execute a
+    /// barrier or a collective, and the call was not inlined (recursion, or
+    /// deeper than the inliner goes). Stepping over it would be stepping
+    /// over a synchronization point.
+    UnfollowedCall {
+        /// The block whose terminator is that call.
+        block: BlockId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +194,8 @@ enum LaneStop {
     /// the two are the same thing, and beyond one warp they are not.
     AtCollective(BlockId),
     Bailed,
+    /// Reached a local call that may synchronize and cannot be followed.
+    Unfollowed(BlockId),
 }
 
 struct Lane {
@@ -147,7 +210,8 @@ struct Lane {
 }
 
 /// Try to replay a hang for the finding at `site_block` under a
-/// single-warp launch (block `[32,1,1]`, grid `[1,1,1]`).
+/// single-warp launch (block `[32,1,1]`, grid `[1,1,1]`), with no
+/// interprocedural summaries ([`ReplayEnv::ONE_WARP`]).
 ///
 /// Returns `None` — no witness — whenever any lane's path to a conclusion
 /// depends on something the interpreter cannot know.
@@ -171,17 +235,23 @@ pub fn replay_outcome(
     site: SiteKind,
     cause_span: SpanRef,
 ) -> Result<Replay, NoWitness> {
-    replay_outcome_at(f, site_block, site, cause_span, LANES)
+    replay_outcome_at(f, site_block, site, cause_span, &ReplayEnv::ONE_WARP)
 }
 
-/// Like [`replay_hang`], under a block of `lanes` threads (`[lanes,1,1]`,
-/// grid `[1,1,1]`) — the shape a kernel's launch contract declares.
+/// Like [`replay_hang`], under the block `env` names (grid `[1,1,1]`) —
+/// the shape a kernel's launch contract declares.
 ///
-/// `lanes` must be a multiple of 32 between 32 and 128. A collective on a
-/// lane's path is modeled per warp: a warp whose still-running lanes are
-/// all at the same collective passes it whatever the other warps are
-/// doing, and a configuration that would need warps to interact is
-/// declined rather than approximated.
+/// The block's thread count must be a whole number of warps, at most 128.
+/// Any shape of that size replays: lane `n` is the thread at linear index
+/// `n`, x fastest, so `threadIdx_y()` under `(16, 2, 1)` is 1 on lanes
+/// 16..31. Replaying a declared kernel at `(32, 1, 1)` instead put
+/// `threadIdx.x` at 16..31 on a block whose contract says it stops at 15,
+/// and reported the hang that shape has (#190).
+///
+/// A collective on a lane's path is modeled per warp: a warp whose
+/// still-running lanes are all at the same collective passes it whatever
+/// the other warps are doing, and a configuration that would need warps to
+/// interact is declined rather than approximated.
 ///
 /// The *site* itself must still be a barrier beyond one warp. A mask
 /// comparison is a per-warp question and the witness artifact records a
@@ -196,9 +266,22 @@ pub fn replay_hang_at(
     site_block: BlockId,
     site: SiteKind,
     cause_span: SpanRef,
-    lanes: u32,
+    env: &ReplayEnv<'_>,
 ) -> Option<Replay> {
-    replay_outcome_at(f, site_block, site, cause_span, lanes).ok()
+    replay_outcome_at(f, site_block, site, cause_span, env).ok()
+}
+
+/// Whether `block` is a launch the replay can run, for a site of this kind:
+/// a whole number of warps, at most 128 threads, and — for a collective
+/// site — exactly one warp.
+#[must_use]
+pub fn replayable(block: [u32; 3], site: SiteKind) -> bool {
+    let Some(threads) = block.iter().try_fold(1u32, |acc, &d| acc.checked_mul(d)) else {
+        return false;
+    };
+    (LANES..=128).contains(&threads)
+        && threads.is_multiple_of(LANES)
+        && (threads == LANES || matches!(site, SiteKind::Barrier))
 }
 
 /// As [`replay_hang_at`], reporting *why* when there is no witness.
@@ -210,16 +293,14 @@ pub fn replay_outcome_at(
     site_block: BlockId,
     site: SiteKind,
     cause_span: SpanRef,
-    lanes: u32,
+    env: &ReplayEnv<'_>,
 ) -> Result<Replay, NoWitness> {
-    if !(LANES..=128).contains(&lanes) || !lanes.is_multiple_of(LANES) {
-        return Err(NoWitness::Indeterminate);
-    }
     // A collective on the *path* is modeled per warp below; a collective
     // as the *site* is not replayed beyond one warp — see the note above.
-    if lanes > LANES && !matches!(site, SiteKind::Barrier) {
-        return Err(NoWitness::Indeterminate);
+    if !replayable(env.block, site) {
+        return Err(NoWitness::UnsupportedLaunch);
     }
+    let lanes: u32 = env.block.iter().product();
     let cfg = Cfg::build(f);
     let can_reach = reaches(&cfg, site_block);
     if !can_reach[0] {
@@ -246,15 +327,18 @@ pub fn replay_outcome_at(
         })
         .collect();
     let ipdom = post_dominators(&cfg, &is_exit);
+    let unfollowable = unfollowable_reach(f, &cfg, env.summaries);
     let n_lanes = lanes;
     let ctx = ReplayCtx {
         f,
         cfg: &cfg,
         can_reach: &can_reach,
+        unfollowable: &unfollowable,
         ipdom: &ipdom,
         site_block,
         site,
-        lanes: n_lanes,
+        block: env.block,
+        summaries: env.summaries,
     };
 
     let mut lanes: Vec<Lane> = (0..n_lanes)
@@ -276,6 +360,12 @@ pub fn replay_outcome_at(
             if lane.stop.is_none() || lane.stop == Some(LaneStop::AtBarrier(usize::MAX)) {
                 lane.stop = Some(run_lane(&ctx, lane, lane_id as u32));
             }
+        }
+        if let Some(block) = lanes.iter().find_map(|l| match l.stop {
+            Some(LaneStop::Unfollowed(b)) => Some(b),
+            _ => None,
+        }) {
+            return Err(NoWitness::UnfollowedCall { block });
         }
         if lanes.iter().any(|l| l.stop == Some(LaneStop::Bailed)) {
             return Err(NoWitness::Indeterminate);
@@ -373,7 +463,7 @@ pub fn replay_outcome_at(
         return Err(NoWitness::Uniform);
     }
 
-    build_replay(f, site_block, site, cause_span, arrived, never, n_lanes)
+    build_replay(f, site_block, site, cause_span, arrived, never, env.block)
 }
 
 /// What one round of warp-scoped release achieved.
@@ -515,34 +605,84 @@ fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
         Eval::CheckedBinary(op, a, b, bits) => {
             // The checked form panics the thread on overflow: a value past
             // the width never exists in the real program, so the result is
-            // the exact in-range value or nothing. (Underflow wraps to the
-            // top of the 128-bit range and fails the same width test.)
-            let value = eval(store, Eval::Binary(op, a, b))?;
+            // the exact in-range value or nothing. Evaluated at 128 bits on
+            // purpose — wrapping at `bits` would hide exactly the overflow
+            // this form exists to catch. (Underflow wraps to the top of the
+            // 128-bit range and fails the same width test.)
+            let value = binary(
+                op,
+                operand_value(store, a)?,
+                operand_value(store, b)?,
+                IntType::unsigned(u128::BITS),
+            )?;
             (value >> bits == 0).then_some(value)
         }
-        Eval::Binary(op, a, b) => {
-            let a = operand_value(store, a)?;
-            let b = operand_value(store, b)?;
-            Some(match op {
-                BinOp::Add => a.wrapping_add(b),
-                BinOp::Sub => a.wrapping_sub(b),
-                BinOp::Mul => a.wrapping_mul(b),
-                BinOp::Div => a.checked_div(b)?,
-                BinOp::Rem => a.checked_rem(b)?,
-                BinOp::BitAnd => a & b,
-                BinOp::BitOr => a | b,
-                BinOp::BitXor => a ^ b,
-                BinOp::Shl => a.checked_shl(u32::try_from(b).ok()?)?,
-                BinOp::Shr => a.checked_shr(u32::try_from(b).ok()?)?,
-                BinOp::Eq => u128::from(a == b),
-                BinOp::Ne => u128::from(a != b),
-                BinOp::Lt => u128::from(a < b),
-                BinOp::Le => u128::from(a <= b),
-                BinOp::Gt => u128::from(a > b),
-                BinOp::Ge => u128::from(a >= b),
-            })
+        Eval::Binary(op, a, b, ty) => {
+            binary(op, operand_value(store, a)?, operand_value(store, b)?, ty)
         }
     }
+}
+
+/// `a op b` on `ty`, as the program computes it.
+///
+/// Both operands must already be values of `ty` — zero-extended from its
+/// width, as the store holds everything. One that is not was lost upstream
+/// (some arithmetic wrapped at the store's width rather than the program's),
+/// and the answer is unknown rather than a guess built on it. The shift
+/// amount is the exception: Rust lets it have its own type.
+fn binary(op: BinOp, a: u128, b: u128, ty: IntType) -> Option<u128> {
+    let bits = ty.bits;
+    if !(1..=u128::BITS).contains(&bits) {
+        return None;
+    }
+    let mask = width_mask(bits);
+    let shifting = matches!(op, BinOp::Shl | BinOp::Shr);
+    if a & !mask != 0 || (!shifting && b & !mask != 0) {
+        return None;
+    }
+    // Two's complement read of a `bits`-wide pattern.
+    let signed = |v: u128| -> i128 {
+        let shift = u128::BITS - bits;
+        ((v << shift) as i128) >> shift
+    };
+    let shift_amount = || u32::try_from(b).ok().filter(|&s| s < bits);
+    let value = match op {
+        BinOp::Add => a.wrapping_add(b),
+        BinOp::Sub => a.wrapping_sub(b),
+        BinOp::Mul => a.wrapping_mul(b),
+        BinOp::BitAnd => a & b,
+        BinOp::BitOr => a | b,
+        BinOp::BitXor => a ^ b,
+        BinOp::Eq => return Some(u128::from(a == b)),
+        BinOp::Ne => return Some(u128::from(a != b)),
+        // Past the width the program has panicked (debug) or masked the
+        // amount (release); neither is a value to carry on with.
+        BinOp::Shl => a << shift_amount()?,
+        BinOp::Shr if ty.signed => (signed(a) >> shift_amount()?) as u128,
+        BinOp::Shr => a >> shift_amount()?,
+        BinOp::Div | BinOp::Rem | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge if ty.signed => {
+            let (a, b) = (signed(a), signed(b));
+            // `MIN / -1` overflows the type, and the program panics there.
+            if matches!(op, BinOp::Div | BinOp::Rem) && b == -1 && a == signed(1 << (bits - 1)) {
+                return None;
+            }
+            match op {
+                BinOp::Div => a.checked_div(b)? as u128,
+                BinOp::Rem => a.checked_rem(b)? as u128,
+                BinOp::Lt => return Some(u128::from(a < b)),
+                BinOp::Le => return Some(u128::from(a <= b)),
+                BinOp::Gt => return Some(u128::from(a > b)),
+                _ => return Some(u128::from(a >= b)),
+            }
+        }
+        BinOp::Div => a.checked_div(b)?,
+        BinOp::Rem => a.checked_rem(b)?,
+        BinOp::Lt => return Some(u128::from(a < b)),
+        BinOp::Le => return Some(u128::from(a <= b)),
+        BinOp::Gt => return Some(u128::from(a > b)),
+        BinOp::Ge => return Some(u128::from(a >= b)),
+    };
+    Some(value & mask)
 }
 
 /// Handle a branch whose condition the interpreter cannot know.
@@ -557,16 +697,19 @@ fn eval(store: &[Option<u128>], e: Eval) -> Option<u128> {
 /// every possible effect is erased — each destination it could assign
 /// becomes unknown, fabricating nothing — and the lane lands at the join.
 ///
-/// Returns the join block, or `None`: no witness, the static result stands.
+/// A call into a local function counts as a synchronization point when it
+/// may reach one (see [`call_may_sync`]): stepping over it whole
+/// is exactly what this function must not do to a barrier.
+///
+/// Returns the join block, or the stop that ends the lane: no witness, the
+/// static result stands.
 fn skip_unknowable_diamond(
-    f: &FnModel,
-    cfg: &Cfg,
-    ipdom: &[Option<BlockId>],
+    ctx: &ReplayCtx<'_>,
     branch: BlockId,
-    site_block: BlockId,
     store: &mut [Option<u128>],
-) -> Option<BlockId> {
-    let join = ipdom[branch]?;
+) -> Result<BlockId, LaneStop> {
+    let (f, cfg, ipdom, site_block) = (ctx.f, ctx.cfg, ctx.ipdom, ctx.site_block);
+    let join = ipdom[branch].ok_or(LaneStop::Bailed)?;
 
     // The region strictly between the branch and the join.
     let mut in_region = vec![false; cfg.len()];
@@ -583,12 +726,12 @@ fn skip_unknowable_diamond(
 
     for &b in &region {
         if b == site_block {
-            return None; // arrival genuinely depends on the unknown
+            return Err(LaneStop::Bailed); // arrival genuinely depends on the unknown
         }
         // A region block whose post-dominator chain is the virtual exit
         // either escapes without the join (contradiction) or cannot reach
         // any exit at all (an infinite loop): bail either way.
-        ipdom[b]?;
+        ipdom[b].ok_or(LaneStop::Bailed)?;
         match &f.blocks[b].term.kind {
             TermKind::Call { callee, .. }
                 if matches!(
@@ -596,9 +739,14 @@ fn skip_unknowable_diamond(
                     CallKind::Barrier | CallKind::WarpCollective { .. }
                 ) =>
             {
-                return None;
+                return Err(LaneStop::Bailed);
             }
-            TermKind::Return | TermKind::Halt | TermKind::Jump { .. } => return None,
+            TermKind::Call { callee, .. } if ctx.call_may_sync(callee) => {
+                return Err(LaneStop::Unfollowed(b));
+            }
+            TermKind::Return | TermKind::Halt | TermKind::Jump { .. } => {
+                return Err(LaneStop::Bailed);
+            }
             _ => {}
         }
     }
@@ -630,7 +778,7 @@ fn skip_unknowable_diamond(
         }
     }
     if removed != region.len() {
-        return None; // a cycle: some world may never leave it
+        return Err(LaneStop::Bailed); // a cycle: some world may never leave it
     }
 
     // Erase every effect the region could have had.
@@ -648,7 +796,7 @@ fn skip_unknowable_diamond(
             _ => {}
         }
     }
-    Some(join)
+    Ok(join)
 }
 
 /// Immutable per-replay context shared by every lane.
@@ -656,11 +804,102 @@ struct ReplayCtx<'a> {
     f: &'a FnModel,
     cfg: &'a Cfg,
     can_reach: &'a [bool],
+    /// Per block, an unfollowable call reachable from it.
+    unfollowable: &'a [Option<BlockId>],
     ipdom: &'a [Option<BlockId>],
     site_block: BlockId,
     site: SiteKind,
-    /// Threads in the replayed block (a multiple of 32, at most 128).
-    lanes: u32,
+    /// The replayed block, `(x, y, z)`; its thread count is a multiple of
+    /// 32, at most 128.
+    block: [u32; 3],
+    summaries: Option<&'a Summaries>,
+}
+
+/// Can this call reach a barrier or a collective that the replay would not
+/// see? A call into a local function the inliner did not splice in —
+/// recursion, or past its depth — is stepped over as one statement, and if
+/// the callee synchronizes, stepping over it is wrong: lanes that wait there
+/// were reported as passing (#191). The summary bits answer; with none,
+/// every local callee is assumed to.
+fn call_may_sync(callee: &Callee, summaries: Option<&Summaries>) -> bool {
+    let Some(id) = callee.local_fn else {
+        return false;
+    };
+    // A barrier or collective is the construct itself, modeled where it is
+    // met; only an ordinary call hides one.
+    if matches!(
+        callee.kind,
+        CallKind::Barrier | CallKind::WarpCollective { .. }
+    ) {
+        return false;
+    }
+    summaries.is_none_or(|s| {
+        s.may_contain_barrier.get(id).copied().unwrap_or(true)
+            || s.may_contain_warp_op.get(id).copied().unwrap_or(true)
+    })
+}
+
+/// Per block: a call the replay cannot follow (see [`call_may_sync`]) that
+/// is reachable from it, if any.
+///
+/// A lane is "never arrives" when it enters code from which the site is
+/// unreachable — but a lane whose remaining path runs into such a call may
+/// wait at a barrier inside it, and that barrier can be the very one the
+/// site names: `countdown(n)` recursing to the `sync_threads()` its first
+/// frame holds. Calling that lane absent is the guess the witness exists
+/// not to make.
+fn unfollowable_reach(
+    f: &FnModel,
+    cfg: &Cfg,
+    summaries: Option<&Summaries>,
+) -> Vec<Option<BlockId>> {
+    let mut reach = vec![None; cfg.len()];
+    for (b, block) in f.blocks.iter().enumerate() {
+        let TermKind::Call { callee, .. } = &block.term.kind else {
+            continue;
+        };
+        if !call_may_sync(callee, summaries) || reach[b].is_some() {
+            continue;
+        }
+        let mut stack = vec![b];
+        reach[b] = Some(b);
+        while let Some(x) = stack.pop() {
+            for &p in &cfg.preds[x] {
+                if reach[p].is_none() {
+                    reach[p] = Some(b);
+                    stack.push(p);
+                }
+            }
+        }
+    }
+    reach
+}
+
+impl ReplayCtx<'_> {
+    fn call_may_sync(&self, callee: &Callee) -> bool {
+        call_may_sync(callee, self.summaries)
+    }
+
+    /// Where the thread at linear index `lane` sits in the block: x
+    /// fastest, then y, then z — the order warps are formed in.
+    fn thread(&self, lane: u32) -> Thread {
+        let [x, y, _] = self.block;
+        Thread {
+            linear: lane,
+            x: lane % x,
+            y: (lane / x) % y,
+            z: lane / (x * y),
+        }
+    }
+}
+
+/// One replayed thread's coordinates.
+#[derive(Debug, Clone, Copy)]
+struct Thread {
+    linear: u32,
+    x: u32,
+    y: u32,
+    z: u32,
 }
 
 fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
@@ -670,7 +909,10 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
             return LaneStop::Bailed;
         }
         if !ctx.can_reach[lane.block] {
-            return LaneStop::NeverArrives;
+            return match ctx.unfollowable[lane.block] {
+                Some(call) => LaneStop::Unfollowed(call),
+                None => LaneStop::NeverArrives,
+            };
         }
 
         let block = &ctx.f.blocks[lane.block];
@@ -719,14 +961,10 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                     // everything it could assign (no value is ever
                     // fabricated), and land at the join. Anything else
                     // stays a bail: no witness, the static result stands.
-                    None => skip_unknowable_diamond(
-                        ctx.f,
-                        ctx.cfg,
-                        ctx.ipdom,
-                        lane.block,
-                        ctx.site_block,
-                        &mut lane.store,
-                    ),
+                    None => match skip_unknowable_diamond(ctx, lane.block, &mut lane.store) {
+                        Ok(join) => Some(join),
+                        Err(stop) => return stop,
+                    },
                 };
                 match chosen {
                     Some(target) => lane.block = target,
@@ -752,8 +990,11 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                 if lane.block == ctx.site_block && !resuming {
                     return LaneStop::Arrived;
                 }
+                let thread = ctx.thread(lane_id);
                 let result: Option<u128> = if resuming {
                     None // the released barrier's unit result
+                } else if ctx.call_may_sync(callee) {
+                    return LaneStop::Unfollowed(lane.block);
                 } else {
                     match callee.kind {
                         CallKind::Barrier => return LaneStop::AtBarrier(lane.block),
@@ -766,11 +1007,14 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
                             return LaneStop::AtCollective(lane.block);
                         }
                         CallKind::ThreadIndexWitness => {
-                            thread_index_value(&callee.display, lane_id)
+                            thread_index_value(&callee.display, thread, ctx.block)
                         }
-                        CallKind::BlockUniform => block_uniform_value(&callee.display, ctx.lanes),
+                        CallKind::ThreadIndexX { divisor } => {
+                            thread.x.checked_div(divisor).map(u128::from)
+                        }
+                        CallKind::BlockUniform => block_uniform_value(&callee.display, ctx.block),
                         CallKind::DivergentEnvRead => {
-                            lane_env_value(&callee.display, lane_id, ctx.lanes)
+                            lane_env_value(&callee.display, thread, ctx.block)
                         }
                         CallKind::WitnessRead => arg_operands
                             .first()
@@ -799,24 +1043,28 @@ fn run_lane(ctx: &ReplayCtx<'_>, lane: &mut Lane, lane_id: u32) -> LaneStop {
 }
 
 /// Values of the thread-index witnesses under the replay's launch shape
-/// (block `[lanes,1,1]`, grid `[1,1,1]`), by name — verified against
-/// cuda-device's formulas at the pinned rev. Every formula below reduces to
-/// a function of the in-block thread index when the grid is 1 and the block
-/// is one-dimensional; a name not listed evaluates to unknown, never to a
-/// guess (an unlisted witness with the wrong value could fabricate a
-/// confirmation — `threadIdx_y` is 0 under this launch, not the lane id).
-fn thread_index_value(display: &str, idx: u32) -> Option<u128> {
+/// (the replayed block, grid `[1,1,1]`), by name — verified against
+/// cuda-device's formulas at the pinned rev. With one block every
+/// `blockIdx` is 0, so each formula reduces to the thread's own
+/// coordinates; a name not listed evaluates to unknown, never to a guess
+/// (an unlisted witness with the wrong value could fabricate a
+/// confirmation).
+fn thread_index_value(display: &str, t: Thread, block: [u32; 3]) -> Option<u128> {
     let last = display.rsplit("::").next().unwrap_or(display);
+    let one_dimensional = block[1] == 1 && block[2] == 1;
     match last {
-        // blockIdx.x * blockDim.x + threadIdx.x = idx; 2D columns and the
-        // flattened 2D indices reduce the same way with row 0.
-        "threadIdx_x" | "index_1d" | "index_1d_u32" | "index_2d" | "index_2d_runtime"
-        | "index_2d_col" => Some(u128::from(idx)),
-        // The y/z axes of a one-dimensional block are 0 — as is the 2D row.
-        "threadIdx_y" | "threadIdx_z" | "index_2d_row" => Some(0),
-        "lane_id" => Some(u128::from(idx % LANES)),
-        // blockIdx.x * warps_per_block + threadIdx.x / 32 = idx / 32.
-        "warp_index" => Some(u128::from(idx / LANES)),
+        // blockIdx.x * blockDim.x + threadIdx.x = x.
+        "threadIdx_x" | "index_1d" | "index_1d_u32" | "index_2d_col" => Some(u128::from(t.x)),
+        "threadIdx_y" | "index_2d_row" => Some(u128::from(t.y)),
+        "threadIdx_z" => Some(u128::from(t.z)),
+        // `row * stride + col`, and the packed `(row, col)` of the runtime
+        // form: the stride is a const generic or a slice's width, neither
+        // of which the call names, so only row 0 is known — it is `col`.
+        "index_2d" | "index_2d_runtime" => (t.y == 0).then_some(u128::from(t.x)),
+        "lane_id" => Some(u128::from(t.linear % LANES)),
+        // blockIdx.x * warps_per_block + threadIdx.x / 32, and only in a
+        // 1-D launch; upstream returns `None` in any other.
+        "warp_index" => one_dimensional.then_some(u128::from(t.x / LANES)),
         _ => None,
     }
 }
@@ -838,17 +1086,20 @@ fn thread_index_value(display: &str, idx: u32) -> Option<u128> {
 /// the set of lanes still live at that point, which the replay tracks but
 /// which changes as lanes diverge. That is a path-dependent question, not
 /// a positional one.
-fn lane_env_value(display: &str, idx: u32, lanes: u32) -> Option<u128> {
+fn lane_env_value(display: &str, t: Thread, block: [u32; 3]) -> Option<u128> {
     // The lane's ordinal within its own warp, which is what every
     // positional register is expressed in.
-    let lane = idx % LANES;
+    let lane = t.linear % LANES;
     let below = (1u128 << lane) - 1;
     let up_to = (1u128 << (lane + 1)) - 1;
     let warp_wide = u128::from(u32::MAX);
+    // Both are written over `threadIdx_x()` upstream, not over the linear
+    // index: `warp_id()` is `threadIdx_x() / 32`, whatever the block's
+    // other axes are.
     if display.contains("warp_id") {
-        Some(u128::from(idx / LANES))
+        Some(u128::from(t.x / LANES))
     } else if display.contains("live_lanes_1d") {
-        Some(u128::from((lanes - (idx / LANES) * LANES).min(LANES)))
+        Some(u128::from((block[0] - (t.x / LANES) * LANES).min(LANES)))
     } else if display.contains("lanemask_lt") {
         Some(below)
     } else if display.contains("lanemask_le") {
@@ -865,10 +1116,14 @@ fn lane_env_value(display: &str, idx: u32, lanes: u32) -> Option<u128> {
 }
 
 /// Values of the block-uniform built-ins under the replay's launch shape
-/// (block `[lanes,1,1]`, grid `[1,1,1]`).
-fn block_uniform_value(display: &str, lanes: u32) -> Option<u128> {
+/// (the replayed block, grid `[1,1,1]`).
+fn block_uniform_value(display: &str, block: [u32; 3]) -> Option<u128> {
     if display.contains("blockDim_x") {
-        Some(u128::from(lanes))
+        Some(u128::from(block[0]))
+    } else if display.contains("blockDim_y") {
+        Some(u128::from(block[1]))
+    } else if display.contains("blockDim_z") {
+        Some(u128::from(block[2]))
     } else if display.contains("blockDim") || display.contains("gridDim") {
         Some(1)
     } else if display.contains("blockIdx") {
@@ -889,8 +1144,9 @@ fn build_replay(
     cause_span: SpanRef,
     arrived: u128,
     never: u128,
-    lanes: u32,
+    block: [u32; 3],
 ) -> Result<Replay, NoWitness> {
+    let lanes: u32 = block.iter().product();
     let site_span = f.blocks[site_block].term.span;
     let site_display = match &f.blocks[site_block].term.kind {
         TermKind::Call { callee, .. } => callee.display.clone(),
@@ -1014,7 +1270,7 @@ fn build_replay(
 
     let verdict_step = steps.len() - 1;
     Ok(Replay {
-        block: [lanes, 1, 1],
+        block,
         grid: [1, 1, 1],
         steps,
         verdict_kind,
