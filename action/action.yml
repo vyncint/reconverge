@@ -14,7 +14,8 @@
 # The analyzed project is compiled with reconverge's pinned nightly
 # (exported as RUSTUP_TOOLCHAIN, overriding any toolchain file in the
 # target repo): a rustc-driver tool and the rustc it wraps must be the
-# same build. cuda-oxide projects already require this exact pin.
+# same build. It is the toolchain upstream cuda-oxide used at the commit in
+# conformance/PIN, which upstream has since moved past (#207).
 name: reconverge
 description: >-
   Static reconvergence analysis for Rust GPU kernels — catches divergent

@@ -43,7 +43,44 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The tag and the manifest have to name the same version before anything
+  # is built. Nothing downstream compared them: `publish` reads the version
+  # out of the manifest and the archives, the GitHub Release and `v0` are
+  # named after the tag, so a tag on the wrong commit would skip every
+  # publish as "already published" and still ship a release under the
+  # wrong name (#210). Checked on the dry run too, which is where a wrong
+  # tag should be found.
+  verify-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+      - name: The tag names the version every published crate declares
+        env:
+          TAG: ${{ inputs.tag }}
+          # The runner's stable cargo, not the pinned nightly: reading the
+          # manifests needs no rustc-dev, and materializing it costs minutes
+          # before the first thing that can fail.
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          set -euo pipefail
+          cargo metadata --no-deps --format-version 1 | python3 -c '
+          import json, os, sys
+          tag = os.environ["TAG"]
+          bad = [p["name"] + " " + p["version"]
+                 for p in json.load(sys.stdin)["packages"]
+                 if p.get("publish") != [] and "v" + p["version"] != tag]
+          if bad:
+              print(f"::error::tag {tag} does not match the manifest at that tag: " + ", ".join(bad))
+              sys.exit(1)
+          print(f"every published crate at {tag} declares {tag[1:]}")
+          '
+
   build:
+    needs: verify-tag
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -91,6 +128,7 @@ jobs:
             dist/*.tar.gz.sha256
 
   publish:
+    needs: verify-tag
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -117,6 +155,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
           DRY_RUN: ${{ inputs.dry_run }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [ "$DRY_RUN" = "true" ]; then
@@ -127,6 +166,12 @@ jobs:
           fi
           version="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          # verify-tag already held every crate to the tag; this is the
+          # number the loop below actually publishes, held to it again.
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::about to publish $version, but the tag is $TAG"
+            exit 1
+          fi
           echo "publishing version $version"
 
           for crate in \
@@ -283,6 +328,19 @@ jobs:
             v[0-9]*) ;;
             *) echo "::error::cannot derive a major tag from '$TAG'"; exit 1 ;;
           esac
+          # Forward only. A patch on an older line (v0.6.2 cut after v0.7.0)
+          # would otherwise drag `v0` back to it, and every consumer pinned
+          # to `@v0` would silently downgrade (#210). Where vN stands now is
+          # the highest release tag on the commit it points at.
+          if current_sha="$(git rev-parse -q --verify "refs/tags/${major}^{commit}")"; then
+            current="$(git tag --points-at "$current_sha" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+            if [ -z "$current" ]; then
+              echo "::warning::$major points at ${current_sha:0:8}, which carries no release tag; moving it to $TAG"
+            elif [ "$(printf '%s\n' "$current" "$TAG" | sort -V | tail -n 1)" != "$TAG" ]; then
+              echo "::notice::$major stays at $current — $TAG is older, and $major only moves forward"
+              exit 0
+            fi
+          fi
           if gh api "repos/$REPO/git/ref/tags/$major" >/dev/null 2>&1; then
             gh api -X PATCH "repos/$REPO/git/refs/tags/$major" \
               -f "sha=$sha" -F force=true >/dev/null
@@ -334,13 +392,17 @@ jobs:
           # `continue-on-error`, so a broken notification still cannot fail
           # a release, but "it worked" and "it never ran" stop looking the
           # same from the outside.
-          out=$(gh api repos/vyncint/simt-diff/dispatches \
+          #
+          # The call is the `if` condition, not a bare assignment: the step
+          # runs under `bash -e`, so a failing `out=$(...)` exited before
+          # `status=$?` was read, and neither warning nor gh's own message
+          # was ever printed (#210).
+          if out=$(gh api repos/vyncint/simt-diff/dispatches \
             -f event_type=tool-published \
-            -F "client_payload[version]=${TAG#v}" 2>&1)
-          status=$?
-          if [ "$status" -eq 0 ]; then
+            -F "client_payload[version]=${TAG#v}" 2>&1); then
             echo "dispatched tool-published to simt-diff for ${TAG#v}"
           else
+            status=$?
             echo "::warning::could not dispatch to simt-diff (gh exit $status): $out"
             echo "::warning::simt-diff will pick ${TAG#v} up on its own schedule instead"
             exit 1

@@ -13,17 +13,26 @@
 # decision someone wrote down, not the state a new name lands in.
 #
 # Usage: scripts/check-surface.sh <upstream-checkout>
+#   The device crate is found by scripts/upstream-layout.sh, in either
+#   upstream layout: `crates/cuda-device` (the pinned one) or
+#   `cuda-oxide/crates/cuda-device` (the monorepo, since 2026-10-30).
 #   exit 0  every surface function is classified or allowlisted
 #   exit 1  unknown names (printed one per line) — classify them in
 #           crates/reconverge-dialect-oxide/src/simt.rs or add them to
 #           conformance/SURFACE_ALLOW with a reason
-#   exit 2  usage, missing checkout, or an `include!`d source that is not on
-#           disk — unreadable input is never reported as a clean surface
+#   exit 2  usage, missing checkout, no device crate in a known layout, or
+#           an `include!`d source that is not on disk — unreadable input is
+#           never reported as a clean surface. Callers must treat 2 as a
+#           failure of the gate, not as an empty list (#207).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 UPSTREAM=${1:?usage: check-surface.sh <upstream-checkout>}
-DEVICE="$UPSTREAM/crates/cuda-device/src"
-[ -d "$DEVICE" ] || { echo "check-surface: $DEVICE is not a cuda-oxide checkout" >&2; exit 2; }
+crate=$("$ROOT/scripts/upstream-layout.sh" "$UPSTREAM" device) || {
+  echo "check-surface: cannot locate the device crate in $UPSTREAM" >&2
+  exit 2
+}
+DEVICE="$crate/src"
+echo "check-surface: scanning $DEVICE" >&2
 SIMT="$ROOT/crates/reconverge-dialect-oxide/src/simt.rs"
 ALLOW="$ROOT/conformance/SURFACE_ALLOW"
 
@@ -62,7 +71,7 @@ for m in "${MODULES[@]}"; do
   while read -r name; do
     [ -n "$name" ] || continue
     if grep -q "\"$name\"" "$SIMT"; then continue; fi
-    if grep -qE "^$name[[:space:]]" "$ALLOW"; then continue; fi
+    if grep -qE "^${name}[[:space:]]" "$ALLOW"; then continue; fi
     echo "unknown: cuda_device::$m::$name"
     unknown=$((unknown + 1))
   done < <(cat "${sources[@]}" | grep -oE '^pub (unsafe )?fn [A-Za-z_0-9]+' | awk '{print $NF}' | sort -u)

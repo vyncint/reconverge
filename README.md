@@ -51,25 +51,26 @@ pub fn rc001_divergent_barrier(mut out: DisjointSlice<u32>) {
 }
 ```
 
+<!-- Verbatim from `cargo reconverge check` over
+     crates/cargo-reconverge/tests/lint-samples. Regenerate it; do not edit
+     it by hand — the hand-edited copy drifted to a line number, a path and
+     a note no release printed. -->
 ```console
 $ cargo reconverge check
 error[RC001]: kernel `rc001_divergent_barrier` may execute `sync_threads()` under thread-divergent control
-  --> src/lib.rs:129:9
+   --> src/lib.rs:184:9
     |
-129 |         thread::sync_threads();
+184 |         thread::sync_threads();
     |         ^^^^^^^^^^^^^^^^^^^^^^
-   = note: lanes that skip the barrier never arrive, and the lanes that reach it wait for them
-           forever — on hardware this is undefined behavior, usually a permanent hang with no error
-   = note: witness: replayed with grid (1,1,1) x block (32,1,1), warp 0 — 16 of 32 lanes wait at
-           `sync_threads()` while 16 never arrive; the barrier cannot be satisfied
-   = note: lanes 0..31 at the failure point: W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.
-   = note: (W = reaches the call, . = never arrives)
-   = provenance: thread-divergent branch (src/lib.rs:128)
-   = provenance: _7: result of `ThreadIndex::get` on divergent _8 (src/lib.rs:128)
-   = provenance: _8: derived from divergent `i` (src/lib.rs:128)
-   = provenance: `i`: thread-index witness `index_1d()` (src/lib.rs:125)
-   = help: make every thread of the block reach the barrier: hoist it out of the divergent
-           branch, or make the branch condition uniform
+    = note: lanes that skip the barrier never arrive, and the lanes that reach it wait for them forever — on hardware this is undefined behavior, usually a permanent hang with no error
+    = note: witness: replayed with grid (1,1,1) x block (32,1,1), warp 0 — 16 of 32 lanes wait at `sync_threads()` while 16 never arrive; the barrier cannot be satisfied — undefined behavior on hardware, usually a permanent hang
+    = note: lanes 0..31 at the failure point: W.W.W.W. W.W.W.W. W.W.W.W. W.W.W.W.
+    = note: (W = reaches the call, . = never arrives)
+    = provenance: thread-divergent branch (src/lib.rs:183)
+    = provenance: _7: result of `ThreadIndex::<'kernel, IndexSpace>::get` on divergent _8 (src/lib.rs:183)
+    = provenance: _8: derived from divergent `i` (src/lib.rs:183)
+    = provenance: `i`: thread-index witness `index_1d()` (src/lib.rs:182)
+    = help: make every thread of the block reach the barrier: hoist it out of the divergent branch, or make the branch condition uniform
 ```
 
 Three things in that output are worth pointing at:
@@ -234,6 +235,11 @@ $ cargo reconverge witness            # step one warp through a recorded replay
 | **learn** | `cargo reconverge learn` | four lessons — divergence, barriers, masks, reconvergence — driving the same replay engine over shipped recordings, fully offline |
 | **triage** | `cargo reconverge triage` | review findings and record the accepted ones, with reasons, in the baseline |
 
+Every view takes `--ascii` for a terminal or font without the box-drawing
+glyphs: borders become `+`, `-` and `|`, and the other marks (`—`, `…`, the
+`▸` cursor) get ASCII stand-ins. The lane letters (`o`, `W`, `.`) are ASCII
+already, so the diagram reads the same in both.
+
 An [asciinema recording](docs/demo/witness-debugger.cast) of the debugger
 walking the canonical hang and the mask mismatch is in `docs/demo/`.
 
@@ -266,6 +272,31 @@ rather than the one missing argument. A git checkout inherits the
 components from this repository's `rust-toolchain.toml`; a crates.io
 install carries no toolchain file, so it has to be asked for. The
 driver's build script checks for it and says so directly.
+
+### Prebuilt binaries
+
+Each [GitHub release](https://github.com/vyncint/reconverge/releases)
+carries one archive per target, built by `release.yml`, for exactly two:
+`x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`. Anywhere else —
+Intel macOS, Linux on ARM, Windows — install from crates.io as above.
+
+```console
+$ shasum -a 256 -c reconverge-vX.Y.Z-<triple>.tar.gz.sha256
+$ tar -xzf reconverge-vX.Y.Z-<triple>.tar.gz
+$ rustup toolchain install nightly-2026-08-28 --profile minimal --no-self-update
+$ cp reconverge-vX.Y.Z-<triple>/{cargo-reconverge,reconverge-driver,reconverge-tui} ~/.cargo/bin/
+```
+
+Two things make or break it:
+
+- **Keep the three binaries in one directory on your `PATH`.**
+  `cargo-reconverge` looks for the driver and the views beside its own
+  executable first.
+- **The pinned nightly must be installed.** The driver links that
+  toolchain's `librustc_driver` dynamically and does not ship it;
+  `cargo-reconverge` puts the toolchain's library directory on the
+  driver's search path when it runs it. `rustc-dev` is needed to *build*
+  the driver, not to run it, so the minimal profile is enough here.
 
 ## Using it
 
@@ -325,7 +356,7 @@ one that does less.
   value loaded from global memory is treated as constant wherever its
   address is, so a per-block value written by another kernel and read back
   can guard a cluster barrier without a word from this rule. That is the
-  same recall gap the interprocedural note above describes, in a new
+  same recall gap the interprocedural note below describes, in a new
   place.
 - **Split barriers are checked at the wait.** The mbarrier family and the
   raw `barrier.cluster.arrive`/`.wait` pair are phase-counted: partial
@@ -476,9 +507,14 @@ one that does less.
   ("expected int of size 8, but got size 4") — after resolving the value,
   so what is missing is an API that returns it at its own width.
 - **The pinned nightly is not optional.** A rustc-driver tool and the rustc
-  it wraps must be the same build; the pin matches upstream cuda-oxide's own,
-  and `pins.yml` opens an issue each week upstream moves — its commit, its
-  toolchain, or a device-surface function this dialect has not decided.
+  it wraps must be the same build. The pin is the toolchain upstream
+  cuda-oxide used at the commit this release is verified against
+  ([`conformance/PIN`](conformance/PIN)), not necessarily the one upstream
+  pins today: upstream has since split into a monorepo whose device crate
+  is on `1.99.1`. Until the pin moves, analyze kernels written against
+  that commit. `pins.yml` checks every week and keeps one issue current
+  with what moved — the commit, the toolchain governing upstream's device
+  crate, or a device-surface function this dialect has not decided.
 - **Platforms: Linux, macOS and Windows, all gated in CI.** Nothing here
   needs a GPU or a vendor SDK on any of them, and the analysis, `check`, the
   artifact round-trip, the schemas and the CLI contract are tested on all
@@ -489,6 +525,9 @@ one that does less.
   delivers what an application wrote rather than in what these views render.
   Root-causing it needs a Windows machine (#162). A Windows clone also needs
   the lesson prose checked out with LF, which `.gitattributes` handles here.
+  Prebuilt archives exist for two targets only (see
+  [Prebuilt binaries](#prebuilt-binaries)); every platform installs from
+  crates.io.
 
 ## Status
 

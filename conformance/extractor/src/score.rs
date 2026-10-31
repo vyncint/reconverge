@@ -253,10 +253,12 @@ pub fn score(
          - **wrapcol** — same mechanics as wrapbar, over the collectives the\n\
            dialect classifies: the masked `*_sync` surface of cuda-device's warp\n\
            module (`shuffle_*_sync` in every width, `ballot/any/all_sync`,\n\
-           `match_*_sync`, `redux_sync_*`, `elect_sync`) plus `sync_mask`. Sites\n\
-           hidden behind the unmasked convenience wrappers (`warp::shuffle`,\n\
-           `warp::ballot`, the `reduce_*` helpers) are outside the v1 surface\n\
-           and counted under site accounting below.\n\
+           `match_*_sync`, `redux_sync_*`, `elect_sync`), `sync_mask`, and the\n\
+           unmasked convenience wrappers (`warp::shuffle`, `warp::ballot`, `all`,\n\
+           `any`, `popc`, the `reduce_*` helpers), which the dialect reads as\n\
+           their `*_sync` counterpart with a full mask, so they are wrapped like\n\
+           any other site. `skipped_unclassified_collectives` under site\n\
+           accounting is the drift check on that agreement and reads zero.\n\
            Promotion additionally needs a mask the analysis can evaluate; upstream\n\
            writes masks as named consts, which `rustc_public` cannot evaluate at\n\
            the pin, and an unevaluable mask is never witness-promoted — it could\n\
