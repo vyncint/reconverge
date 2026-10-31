@@ -162,7 +162,9 @@ fn a_bin_target_gates_and_a_deleted_one_stops_gating() {
         out.contains("error[RC001]: kernel `bench_divergent`"),
         "{out}"
     );
-    assert!(out.contains("src/bin/bench.rs"), "{out}");
+    // The report prints paths the platform's way: `src\bin\bench.rs` on Windows.
+    let bench = ["src", "bin", "bench.rs"].join(std::path::MAIN_SEPARATOR_STR);
+    assert!(out.contains(&bench), "{out}");
     let json = check(&dir, &["--message-format", "json"]);
     let documents: Vec<serde_json::Value> = stdout(&json)
         .lines()

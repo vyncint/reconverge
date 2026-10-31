@@ -505,6 +505,10 @@ pub(crate) fn cargo_metadata() -> Result<Metadata, String> {
 fn metadata_with(cargo: &Path) -> Result<Metadata, String> {
     let output = Command::new(cargo)
         .args(["metadata", "--format-version", "1", "--no-deps"])
+        // Plain text: the message is re-printed under our own prefix, and
+        // with `CARGO_TERM_COLOR=always` (CI sets it) cargo's `error: ` comes
+        // wrapped in escapes that no prefix match would see.
+        .env("CARGO_TERM_COLOR", "never")
         .output()
         .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
     if !output.status.success() {
