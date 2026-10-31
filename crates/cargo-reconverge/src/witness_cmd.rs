@@ -6,7 +6,7 @@
 //! artifacts exist only for findings the interpreter replayed (confirmed),
 //! so "none found" gets a hint, not an empty screen.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use reconverge_artifacts::findings::FindingsArtifact;
@@ -53,7 +53,17 @@ impl WitnessOptions {
 /// Locate this project's witness artifacts and launch the debugger on
 /// them. Returns the TUI's exit code.
 pub fn run(options: &WitnessOptions) -> Result<u8, String> {
-    let artifacts = discover_witnesses(options.kernel.as_deref())?;
+    let Some(artifacts) = discover_witnesses(options.kernel.as_deref())? else {
+        // A check ran and replayed nothing to a confirmation. That is an
+        // answer, not a failure: it used to be told to run `check` first,
+        // exit 2, right after a `check` that had just passed.
+        eprintln!(
+            "reconverge: the last check confirmed no finding by replay, so \
+             there is no witness to step through (one is written for every \
+             finding the 32-lane interpreter confirms)"
+        );
+        return Ok(0);
+    };
     let tui = locate_tui()?;
 
     let mut command = Command::new(tui);
@@ -70,24 +80,13 @@ pub fn run(options: &WitnessOptions) -> Result<u8, String> {
 
 /// The `(kernel, code)` pairs this run's findings artifacts still carry.
 ///
-/// Empty when nothing can be read — an unreadable artifacts directory is
-/// not evidence that a witness is stale, so the filter stands down rather
-/// than hiding everything.
-fn live_findings(dir: &Path) -> Vec<(String, String)> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut live = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let is_findings = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with("findings-") && n.ends_with(".json"));
-        if !is_findings {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+/// `None` when none of them can be read — an unreadable artifact is not
+/// evidence that a witness is stale, so the filter stands down rather than
+/// hiding everything.
+fn live_findings(findings: &[PathBuf]) -> Option<Vec<(String, String)>> {
+    let mut live = None;
+    for path in findings {
+        let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
         let Ok(artifact) =
@@ -95,6 +94,7 @@ fn live_findings(dir: &Path) -> Vec<(String, String)> {
         else {
             continue;
         };
+        let live = live.get_or_insert_with(Vec::new);
         for finding in artifact.findings {
             if let Some(kernel) = finding.kernel {
                 live.push((kernel, finding.code));
@@ -104,41 +104,33 @@ fn live_findings(dir: &Path) -> Vec<(String, String)> {
     live
 }
 
-/// The witness artifacts of the current workspace members, from
-/// `<target>/reconverge/`.
-fn discover_witnesses(kernel: Option<&str>) -> Result<Vec<PathBuf>, String> {
+/// The witness artifacts of the current workspace members' targets, from
+/// `<target>/reconverge/`; `None` when the last check left nothing to
+/// replay.
+fn discover_witnesses(kernel: Option<&str>) -> Result<Option<Vec<PathBuf>>, String> {
     let metadata = check::cargo_metadata()?;
     let dir = metadata.target_directory.join("reconverge");
-    let mut artifacts = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|_| {
+    let never_checked = || {
         format!(
-            "no artifacts at {}; run `cargo reconverge check` first",
+            "no findings artifacts at {}; run `cargo reconverge check` first",
             dir.display()
         )
-    })?;
-    for entry in entries {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let recognized = name.ends_with(".json")
-            && name.starts_with("witness-")
-            && metadata
-                .member_crates
-                .iter()
-                .any(|krate| name.contains(&format!("-{krate}-")))
-            && kernel.is_none_or(|k| name.contains(&format!("-{k}-")));
-        if recognized {
-            artifacts.push(path);
-        }
+    };
+    let findings = metadata
+        .artifacts_in(&dir, &["findings"])
+        .map_err(|_| never_checked())?;
+    if findings.is_empty() {
+        return Err(never_checked());
     }
+    let mut artifacts = metadata
+        .artifacts_in(&dir, &["witness"])
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
     // Second filter, on the findings this run actually has. The driver
     // prunes its own witnesses now, which is the fix that also serves a
     // consumer reading the directory — but a file left by an older
     // reconverge is not the driver's to remove, and the reader should not
     // replay a finding that no longer exists whoever wrote it.
-    let live = live_findings(&dir);
-    if !live.is_empty() {
+    if let Some(live) = live_findings(&findings) {
         artifacts.retain(|path| {
             path.file_name()
                 .and_then(|n| n.to_str())
@@ -148,18 +140,24 @@ fn discover_witnesses(kernel: Option<&str>) -> Result<Vec<PathBuf>, String> {
                 })
         });
     }
-    artifacts.sort();
     if artifacts.is_empty() {
-        return Err(format!(
-            "no witness artifacts at {}; they are written when a finding is \
-             confirmed by replay — run `cargo reconverge check` first{}",
-            dir.display(),
-            kernel.map_or_else(String::new, |k| format!(
-                " (or drop `--kernel {k}` to see every witness)"
-            ))
-        ));
+        return Ok(None);
     }
-    Ok(artifacts)
+    if let Some(k) = kernel {
+        artifacts.retain(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| name.contains(&format!("-{k}-")))
+        });
+        if artifacts.is_empty() {
+            return Err(format!(
+                "no witness artifacts of kernel `{k}` at {}; drop `--kernel {k}` to see \
+                 every witness",
+                dir.display()
+            ));
+        }
+    }
+    Ok(Some(artifacts))
 }
 
 #[cfg(test)]

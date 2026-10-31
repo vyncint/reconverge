@@ -76,6 +76,15 @@ check options:
                               path that begins with `--`
   --show-suppressed           display findings the baseline accepts,
                               with their recorded reasons
+  -p, --package <NAME>        check only this workspace member
+                              (repeatable)
+  --exclude <NAME>            check every member but this one
+                              (repeatable; not with --package)
+  --require-kernels           exit 2 when no #[kernel] was analyzed,
+                              instead of passing with a note
+  The build uses the pinned toolchain whatever rustup resolved for the
+  project; RECONVERGE_TOOLCHAIN=<name> overrides it, for a driver built
+  by another toolchain (RECONVERGE_DRIVER)
   Note: --strict and --show-suppressed affect text output only;
         JSON is always the unfiltered record
 
