@@ -14,7 +14,8 @@
 # The analyzed project is compiled with reconverge's pinned nightly
 # (exported as RUSTUP_TOOLCHAIN, overriding any toolchain file in the
 # target repo): a rustc-driver tool and the rustc it wraps must be the
-# same build. cuda-oxide projects already require this exact pin.
+# same build. It is the toolchain upstream cuda-oxide used at the commit in
+# conformance/PIN, which upstream has since moved past (#207).
 name: reconverge
 description: >-
   Static reconvergence analysis for Rust GPU kernels — catches divergent
@@ -32,8 +33,9 @@ inputs:
   cc:
     description: >-
       Target compute capability (X.Y, e.g. 8.6) for shared-memory capacity
-      context (RC004). The CUDA spellings are accepted too: `sm_86` and `86`
-      both mean 8.6.
+      context (RC004). The CUDA spellings are accepted too: `sm_86`,
+      `compute_86` and `86` all mean 8.6, and an `a`/`f` suffix (`sm_90a`,
+      `sm_100f`) means the base capability.
     required: false
     default: ""
   strict:
@@ -45,7 +47,10 @@ inputs:
   sarif:
     description: >-
       Path to also write a SARIF 2.1.0 report to (upload it with
-      github/codeql-action/upload-sarif in a follow-up step).
+      github/codeql-action/upload-sarif in a follow-up step). A relative
+      path is resolved against the repository root ($GITHUB_WORKSPACE), not
+      against working-directory, so the upload step finds it at the same
+      path.
     required: false
     default: ""
 
@@ -109,5 +114,15 @@ runs:
         args=()
         if [ -n "${INPUT_CC}" ]; then args+=(--cc "${INPUT_CC}"); fi
         if [ "${INPUT_STRICT}" = "true" ]; then args+=(--strict); fi
-        if [ -n "${INPUT_SARIF}" ]; then args+=(--sarif "${INPUT_SARIF}"); fi
+        if [ -n "${INPUT_SARIF}" ]; then
+          # This step runs in working-directory, but upload-sarif reads
+          # `sarif_file` from the repository root, so a relative path written
+          # here was a file the next step could not find.
+          case "${INPUT_SARIF}" in
+            /* | [A-Za-z]:[/\\]*) sarif="${INPUT_SARIF}" ;;
+            *) sarif="${GITHUB_WORKSPACE}/${INPUT_SARIF}" ;;
+          esac
+          # Inline, so a path that begins with `-` is still a path.
+          args+=("--sarif=${sarif}")
+        fi
         cargo-reconverge reconverge check "${args[@]}"

@@ -25,19 +25,30 @@ path to also write a SARIF 2.1.0 report, for upload with
 ```yaml
       - uses: vyncint/reconverge/action@v0
         with:
+          working-directory: kernels # optional
           sarif: reconverge.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: reconverge.sarif
 ```
 
+A relative `sarif` path is resolved against the repository root
+(`$GITHUB_WORKSPACE`), not against `working-directory`: the report above
+lands at `reconverge.sarif` in the repository root whichever directory was
+analyzed, which is where `upload-sarif` looks for it. The locations inside it
+are relative to the repository root too (`kernels/src/lib.rs`), so alerts
+land on the file that has the finding.
+
 Notes:
 
 - The project is compiled with reconverge's pinned nightly (the action
   exports `RUSTUP_TOOLCHAIN`, overriding any toolchain file in your repo) —
-  a rustc-driver tool must match the rustc it wraps, and cuda-oxide already
-  requires the same pin.
+  a rustc-driver tool must match the rustc it wraps. That pin is the
+  toolchain upstream cuda-oxide used at the commit this release is verified
+  against ([`conformance/PIN`](../conformance/PIN)), not necessarily the one
+  upstream pins today, so a kernel crate that tracks upstream's latest
+  commit may need a toolchain this release cannot drive.
 - The analyzer is installed from crates.io with `cargo install`, at the
   version the pinned ref declares. Nothing is cached: every run installs the
   toolchain and that version from scratch, so a run cannot inherit a stale
