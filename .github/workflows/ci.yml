@@ -4,9 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # workflow_dispatch exists for the macOS job (see below); the Linux gates
-  # simply run again on that event. The weekly schedule that also drove it is
-  # disabled below, so dispatch is now the only way to reach the macOS job.
+  # Every gate again, on demand. The macOS job runs on every pull request
+  # and push like the rest; it no longer needs a dispatch to be reached.
   workflow_dispatch:
   # Scheduled runs are disabled. Uncomment the block below to restore them.
   # schedule:
@@ -15,10 +14,10 @@ on:
 permissions:
   contents: read
 
-# Thirteen jobs, and a push to an open pull request supersedes the run before
-# it. `install` and `stress` deliberately do not cancel -- a release
-# verification and a flake hunt are worth finishing -- but a superseded gate
-# result is one nobody will read.
+# A push to an open pull request supersedes the run before it. `install`
+# and `stress` deliberately do not cancel -- a release verification and a
+# flake hunt are worth finishing -- but a superseded gate result is one
+# nobody will read.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -455,7 +454,25 @@ jobs:
           advanced-security: false
           annotations: true
 
-  # The single required status check: green iff every Linux gate is green.
+  # DCO and no AI attribution, the two rules AGENTS.md says "will fail CI".
+  # They did not: commit-policy.yml was a workflow of its own, never a
+  # required context, and PR #84 merged with it red (#209). Called here, it
+  # is a need of `required-green` like every other gate. Its standalone
+  # triggers stay, and that run is the one that posts the PR comment.
+  commit-policy:
+    uses: ./.github/workflows/commit-policy.yml
+    # A called workflow cannot hold more than its caller grants, and
+    # commit-policy.yml declares `pull-requests: write` for its comment.
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      from-ci: true
+
+  # The single required status check: green iff every gate, on every
+  # platform, is green. `macos` was missing from this list, so a red macOS
+  # PTY run never blocked a merge while the README called the views gated
+  # on macOS (#209). A job that is not listed here is not a gate.
   required-green:
     name: required-green
     if: always()
@@ -469,11 +486,13 @@ jobs:
         isolation,
         conformance,
         schemas,
+        macos,
+        windows,
         skill-version,
         semver,
         msrv,
         zizmor,
-        windows,
+        commit-policy,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
