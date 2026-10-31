@@ -26,15 +26,6 @@ the corpus; found-in-the-wild is the true north.
 
 ### Changed
 
-- **`check` builds under the pinned nightly whatever `RUSTUP_TOOLCHAIN`
-  says.** rustup's `cargo` proxy exports that variable to every subcommand,
-  set to the toolchain it resolved for the project, so honouring it as "an
-  explicit choice" made a bare `cargo reconverge check` — the command the
-  README shows — load the driver against `stable` and exit 2 in any project
-  without the pin, with advice to run a `setup` that could not help. The
-  wrapped build now runs the pinned toolchain's own `cargo` as well. A driver
-  built against another toolchain is selected with the new
-  `RECONVERGE_TOOLCHAIN`, which nothing sets on the user's behalf. (#186)
 - **A run that analyzed no `#[kernel]` says so**:
   `reconverge: no #[kernel] functions found in 1 crate — nothing was
   analyzed`, still exit 0, and the Action raises a `::warning::` for it. A
@@ -51,6 +42,17 @@ the corpus; found-in-the-wild is the true north.
   is nothing to replay, instead of exit 2 and "run `cargo reconverge check`
   first" right after one had run. A project where `check` has never run is
   still exit 2. (#201)
+
+### Breaking
+
+- **The wrapped build always uses the pin; to run a driver built against
+  another toolchain, set `RECONVERGE_TOOLCHAIN`.** `RUSTUP_TOOLCHAIN` is no
+  longer consulted. rustup's `cargo` proxy exports it to every subcommand,
+  set to the toolchain it resolved for the project, so honouring it as "an
+  explicit choice" made a bare `cargo reconverge check` — the command the
+  README shows — load the driver against `stable` and exit 2 in any project
+  without the pin, with advice to run a `setup` that could not help. The
+  wrapped build now runs the pinned toolchain's own `cargo` as well. (#186)
 
 ### Fixed
 
