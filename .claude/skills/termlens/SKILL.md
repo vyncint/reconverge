@@ -5,7 +5,7 @@ description: Write, fix or review headless terminal tests for a Rust CLI or TUI 
 
 # Testing terminal programs with termlens
 
-Written against **termlens 0.11.8**. 0.11.0 is the stability candidate:
+Written against **termlens 0.11.9**. 0.11.0 is the stability candidate:
 from it no promised public item changes incompatibly before 1.0, so the API below
 is one to build on, not one to expect to move. Every `rust` block below is
 a complete integration test that is compiled against the crate in CI, so
@@ -117,7 +117,9 @@ your test ── send(Key) · click · paste · resize ──▶ PTY     └─�
    assert on the `ExitStatus` (`success()`, `code()`, `signal()`), then
    assert `!t.screen().alternate_screen()` so an application that leaves
    the user's terminal in the alternate screen fails the test. `Drop` kills
-   and reaps whatever is left, so a failing test never leaks a process.
+   and reaps whatever is left, so a failing test never leaks a process: on
+   Unix the program's whole process group, unless `wait_exit` reaped the
+   program first. A helper that must outlive the terminal uses `setsid`.
 
 8. **`wait_frame` only works for applications that emit DEC 2026
    synchronized updates.** Stock ratatui 0.30 with crossterm does **not**
@@ -422,7 +424,7 @@ included in `X`, and `terminal closed (EOF) while waiting for X` is
 | ``failed to send … to `…` (the application is not reading its input, and the PTY buffer is full — a write into it was still blocked after 5s; …)`` | the child is alive but has stopped draining terminal input; the unwritten bytes stay queued, so do not retry the send | wait for the application to draw the state that is ready for input before typing |
 | `the application never emitted a DEC 2026 synchronized update` | `wait_frame` or `record().stop()` against an app without synchronized output | use `snapshot_after` / `wait_until` (rule 8) |
 | `--- last returned frame → live screen ---` under a `wait_frame` timeout | the app repainted, but never into the predicate | the diff shows what did change; the predicate is looking at the wrong thing |
-| `input not receivable: the application has not enabled mouse tracking` | `click`/`drag`/`scroll` before the app enabled the mouse | `wait_until(|s| s.mouse_mode() != MouseMode::None)` first |
+| `input not receivable: the application has not enabled mouse tracking` | `click`/`drag`/`scroll` before the app enabled the mouse, or after it reset a tracking mode: `CSI ? 1000 l` ends reporting whichever of `?9`, `?1000`, `?1002`, `?1003` was set, as in xterm | `wait_until(|s| s.mouse_mode() != MouseMode::None)` first; an app that resets one mode to keep another must set that one again |
 | `input not receivable: mouse at (50, 2) is outside the 20x5 grid` | coordinates swapped or out of range | rule 6 |
 | `failed to spawn \`sh\`: \`sh\` is a bare program name and env_clear() removed PATH` | bare program name under `env_clear` | absolute path, `bin!`, or `.env("PATH", …)` |
 | ``failed to spawn `./x`: cannot execute …: its #! interpreter "…" does not exist`` | the script's `#!` line names a file that is not there, or with `is not an executable file` one that cannot be run; a `\r` at the end of the quoted name means CRLF line endings | install the interpreter, point the `#!` line at one that exists, or save the script with LF endings |
@@ -570,14 +572,17 @@ directory (see §9b).
   relative program path such as `./demo` is then found inside `DIR`.
 - In CI, set `TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens` and
   `INSTA_UPDATE: new` on the test step, and add
-  `uses: vyncint/termlens/.github/actions/report@v0.11.8` with
+  `uses: vyncint/termlens/.github/actions/report@v0.11.9` with
   `if: failure()` after it: every screen a failing wait embedded, and every
   `.snap.new` with its diff, lands in the pull request's step summary.
   `INSTA_UPDATE: new` is not optional: insta's default writes no `.snap.new`
   when `CI` is set, and GitHub sets it on every runner. Inline snapshots are
   not rendered; insta keeps their new values in `.pending-snap` files.
   Give the action `with: artifact-dir:` set to the same directory, because
-  a step's `env:` does not reach the next step, and in a matrix a
+  a step's `env:` does not reach the next step. Keep the directory
+  absolute: `cargo test` runs each test binary in its own package's
+  directory, so a relative one scatters the screens across the crates and
+  the action finds none (it warns). In a matrix, give it a
   `name: termlens-report-${{ matrix.os }}` of its own per leg, because
   upload-artifact refuses a second artifact of one name in a run:
 
@@ -586,7 +591,7 @@ directory (see §9b).
     env:
       TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
       INSTA_UPDATE: new
-  - uses: vyncint/termlens/.github/actions/report@v0.11.8
+  - uses: vyncint/termlens/.github/actions/report@v0.11.9
     if: failure()
     with:
       artifact-dir: ${{ runner.temp }}/termlens
