@@ -28,7 +28,7 @@ unicode-width = "0.2"
 # Already in the graph through crossterm; named here for the handler that
 # restores the terminal on SIGTERM, SIGHUP and SIGQUIT.
 [target.'cfg(unix)'.dependencies]
-signal-hook = "0.3"
+signal-hook = "0.4"
 
 [dev-dependencies]
 # Headless PTY harness (docs/ARCHITECTURE.md), from crates.io since 0.3.0
