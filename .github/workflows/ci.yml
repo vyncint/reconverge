@@ -123,7 +123,7 @@ jobs:
       # Renders every screen the suite left behind into the job summary, with
       # SVG and HTML uploaded. It installs termlens-cli itself, so nothing
       # else here has to.
-      - uses: vyncint/termlens/.github/actions/report@484c02b2a124643c22412b6eb6bcd7016c1bfb90 # v0.11.9
+      - uses: vyncint/termlens/.github/actions/report@c5c05edf32a9ff807bea0e2f1d0991d7b95ece26 # v0.11.10
         if: failure()
         with:
           name: termlens-report-linux
@@ -266,7 +266,7 @@ jobs:
       - run: cargo test -p reconverge-tui --test cli -- --ignored
         env:
           TERMLENS_ARTIFACT_DIR: ${{ runner.temp }}/termlens
-      - uses: vyncint/termlens/.github/actions/report@484c02b2a124643c22412b6eb6bcd7016c1bfb90 # v0.11.9
+      - uses: vyncint/termlens/.github/actions/report@c5c05edf32a9ff807bea0e2f1d0991d7b95ece26 # v0.11.10
         if: failure()
         with:
           name: termlens-report-macos
